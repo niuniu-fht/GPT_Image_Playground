@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { applyImageEditToInput, closeImageEditor, useStore } from '../store'
+import {
+  applyImageEditToInput,
+  closeImageEditor,
+  ensureImageCached,
+  getCachedImage,
+  useStore,
+} from '../store'
 import type { ImageEditSelection } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import Select from './Select'
@@ -54,6 +60,8 @@ export default function ImageEditModal() {
   const selectionRef = useRef<ImageEditSelection | null>(null)
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [currentImageIndex, setCurrentImageIndex] = useState(0)
+  const [currentImageSrc, setCurrentImageSrc] = useState('')
   const panelRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
@@ -71,18 +79,101 @@ export default function ImageEditModal() {
 
   useCloseOnEscape(Boolean(imageEditSession), closeImageEditor)
 
+  const availableImageIds = useMemo(() => {
+    const mergedIds = [
+      imageEditSession?.sourceImageId ?? '',
+      ...(imageEditSession?.sourceImageIds ?? []),
+    ]
+    return Array.from(
+      new Set(
+        mergedIds.filter((imageId): imageId is string => typeof imageId === 'string' && Boolean(imageId.trim())),
+      ),
+    )
+  }, [imageEditSession])
+  const totalImageCount = availableImageIds.length
+  const displayImageCount = Math.max(totalImageCount, 1)
+  const currentImageNumber = totalImageCount ? currentImageIndex + 1 : 1
+  const hasMultipleImages = totalImageCount > 1
+  const currentImageId = availableImageIds[currentImageIndex] ?? imageEditSession?.sourceImageId ?? ''
+  const displayImageSrc =
+    currentImageSrc ||
+    (imageEditSession && currentImageId === imageEditSession.sourceImageId
+      ? imageEditSession.sourceImageDataUrl
+      : '')
+
   useEffect(() => {
     selectionRef.current = selection
   }, [selection])
 
   useEffect(() => {
     if (!imageEditSession) return
+
+    const initialImageIds = [
+      imageEditSession.sourceImageId,
+      ...(imageEditSession.sourceImageIds ?? []),
+    ].filter((imageId): imageId is string => Boolean(imageId))
+    const dedupedImageIds = Array.from(new Set(initialImageIds))
+    const preferredIndex = Math.max(0, dedupedImageIds.indexOf(imageEditSession.sourceImageId))
+
     setPromptDraft(imageEditSession.prompt)
     setProviderDraft(imageEditSession.providerId ?? activeProviderId)
     setSelection(imageEditSession.initialSelection ?? null)
     setNaturalSize(null)
     setIsSubmitting(false)
-  }, [imageEditSession])
+    setCurrentImageIndex(preferredIndex)
+    setCurrentImageSrc(imageEditSession.sourceImageDataUrl)
+    setDisplayRect({ left: 0, top: 0, width: 0, height: 0 })
+  }, [activeProviderId, imageEditSession])
+
+  useEffect(() => {
+    if (!imageEditSession || !currentImageId) {
+      setCurrentImageSrc('')
+      setNaturalSize(null)
+      setDisplayRect({ left: 0, top: 0, width: 0, height: 0 })
+      return
+    }
+
+    let cancelled = false
+    setNaturalSize(null)
+    setDisplayRect({ left: 0, top: 0, width: 0, height: 0 })
+    setSelection(
+      currentImageId === imageEditSession.sourceImageId
+        ? imageEditSession.initialSelection ?? null
+        : null,
+    )
+
+    if (currentImageId === imageEditSession.sourceImageId) {
+      setCurrentImageSrc(imageEditSession.sourceImageDataUrl)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const cachedImage = getCachedImage(currentImageId)
+    if (cachedImage) {
+      setCurrentImageSrc(cachedImage)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    setCurrentImageSrc('')
+    void ensureImageCached(currentImageId)
+      .then((imageUrl) => {
+        if (!cancelled) {
+          setCurrentImageSrc(imageUrl ?? '')
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCurrentImageSrc('')
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentImageId, imageEditSession])
 
   useEffect(() => {
     if (!imageEditSession) return
@@ -137,6 +228,14 @@ export default function ImageEditModal() {
   const modeLabel = selection ? '局部编辑' : '整图编辑'
 
   if (!imageEditSession) return null
+
+  const switchImage = (direction: -1 | 1) => {
+    if (!totalImageCount) return
+    setCurrentImageSrc('')
+    setNaturalSize(null)
+    setDisplayRect({ left: 0, top: 0, width: 0, height: 0 })
+    setCurrentImageIndex((index) => (index + direction + totalImageCount) % totalImageCount)
+  }
 
   const readNormalizedPoint = (clientX: number, clientY: number) => {
     if (!overlayRef.current) return null
@@ -233,13 +332,18 @@ export default function ImageEditModal() {
   }
 
   const handleApply = async (submit: boolean) => {
-    if (!naturalSize || isSubmitting) return
+    if (!naturalSize || isSubmitting || !currentImageId || !displayImageSrc) return
 
     setIsSubmitting(true)
     try {
       const maskDataUrl = createMaskFromSelection(naturalSize.width, naturalSize.height, selection)
       await applyImageEditToInput({
-        session: imageEditSession,
+        session: {
+          ...imageEditSession,
+          sourceImageId: currentImageId,
+          sourceImageDataUrl: displayImageSrc,
+          sourceImageIds: availableImageIds,
+        },
         prompt: promptDraft,
         providerId: selectedProviderId,
         maskDataUrl,
@@ -268,32 +372,69 @@ export default function ImageEditModal() {
           ref={panelRef}
           className="relative flex min-h-[22rem] flex-1 items-center justify-center overflow-hidden bg-[#0d0d10] p-4"
         >
-          <img
-            ref={imageRef}
-            src={imageEditSession.sourceImageDataUrl}
-            alt=""
-            draggable={false}
-            className="max-h-[72vh] max-w-full select-none rounded-2xl object-contain shadow-[0_20px_60px_rgba(0,0,0,0.35)]"
-            onLoad={(event) => {
-              setNaturalSize({
-                width: event.currentTarget.naturalWidth,
-                height: event.currentTarget.naturalHeight,
-              })
-              const panel = panelRef.current
-              const image = imageRef.current
-              if (!panel || !image) return
-              const panelRect = panel.getBoundingClientRect()
-              const imageRect = image.getBoundingClientRect()
-              setDisplayRect({
-                left: imageRect.left - panelRect.left,
-                top: imageRect.top - panelRect.top,
-                width: imageRect.width,
-                height: imageRect.height,
-              })
-            }}
-          />
+          {displayImageSrc ? (
+            <img
+              ref={imageRef}
+              src={displayImageSrc}
+              alt=""
+              draggable={false}
+              className="max-h-[72vh] max-w-full select-none rounded-2xl object-contain shadow-[0_20px_60px_rgba(0,0,0,0.35)]"
+              onLoad={(event) => {
+                setNaturalSize({
+                  width: event.currentTarget.naturalWidth,
+                  height: event.currentTarget.naturalHeight,
+                })
+                const panel = panelRef.current
+                const image = imageRef.current
+                if (!panel || !image) return
+                const panelRect = panel.getBoundingClientRect()
+                const imageRect = image.getBoundingClientRect()
+                setDisplayRect({
+                  left: imageRect.left - panelRect.left,
+                  top: imageRect.top - panelRect.top,
+                  width: imageRect.width,
+                  height: imageRect.height,
+                })
+              }}
+            />
+          ) : (
+            <div className="flex flex-col items-center gap-3 text-center text-sm text-white/45">
+              <div className="h-9 w-9 animate-spin rounded-full border-2 border-white/20 border-t-emerald-300" />
+              <p>正在加载这张输出图…</p>
+            </div>
+          )}
 
-          {displayRect.width > 0 && displayRect.height > 0 && (
+          {hasMultipleImages && (
+            <>
+              <button
+                type="button"
+                onClick={() => switchImage(-1)}
+                className="absolute left-4 top-1/2 z-10 -translate-y-1/2 rounded-full border border-white/12 bg-black/45 p-3 text-white/80 backdrop-blur transition hover:bg-black/65 hover:text-white"
+                aria-label="上一张输出图"
+                title="上一张输出图"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => switchImage(1)}
+                className="absolute right-4 top-1/2 z-10 -translate-y-1/2 rounded-full border border-white/12 bg-black/45 p-3 text-white/80 backdrop-blur transition hover:bg-black/65 hover:text-white"
+                aria-label="下一张输出图"
+                title="下一张输出图"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+              <div className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full border border-white/10 bg-black/50 px-3 py-1 text-xs font-medium text-white/85 backdrop-blur">
+                当前输出图 {currentImageNumber} / {displayImageCount}
+              </div>
+            </>
+          )}
+
+          {displayImageSrc && displayRect.width > 0 && displayRect.height > 0 && (
             <div
               ref={overlayRef}
               className="absolute cursor-crosshair rounded-2xl touch-none select-none"
@@ -376,6 +517,12 @@ export default function ImageEditModal() {
               <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
                 <div className="text-white/35">来源任务</div>
                 <div className="mt-1 break-all font-mono text-white/80">{imageEditSession.taskId}</div>
+              </div>
+              <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
+                <div className="text-white/35">当前图片</div>
+                <div className="mt-1 text-white/80">
+                  {currentImageNumber} / {displayImageCount}
+                </div>
               </div>
               <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
                 <div className="text-white/35">选区状态</div>

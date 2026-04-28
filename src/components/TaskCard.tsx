@@ -1,7 +1,12 @@
 import { memo, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
+  canEditTaskOutputs,
+  resolveTaskImageProgress,
   resolveTaskAppliedImageParam,
   resolveTaskDisplayImageParam,
+  resolveTaskStatusLabel,
+  resolveTaskTransportLabel,
+  resolveTaskTransportMeta,
   type TaskRecord,
 } from '../types'
 import { getCachedImage, ensureImageCached } from '../store'
@@ -17,9 +22,11 @@ interface Props {
   onReuse: () => void
   onEditOutputs: () => void
   onRetry: () => void
+  onAbort: () => void
   onToggleFavorite: () => void
   onMoveCategory: () => void
   onDelete: () => void
+  onPurge: () => void
   onRestore: () => void
   onClick: () => void
   onToggleSelect: () => void
@@ -38,9 +45,11 @@ function TaskCard({
   onReuse,
   onEditOutputs,
   onRetry,
+  onAbort,
   onToggleFavorite,
   onMoveCategory,
   onDelete,
+  onPurge,
   onRestore,
   onClick,
   onToggleSelect,
@@ -50,7 +59,17 @@ function TaskCard({
   const [coverRatio, setCoverRatio] = useState<string>('')
   const [coverSize, setCoverSize] = useState<string>('')
   const [now, setNow] = useState(Date.now())
-  const coverImageId = task.outputImages?.[0] || ''
+  const progress = resolveTaskImageProgress(task)
+  const statusLabel = resolveTaskStatusLabel(task)
+  const transportLabel = resolveTaskTransportLabel(task)
+  const transportMeta = resolveTaskTransportMeta(task)
+  const canEditOutputs = canEditTaskOutputs(task)
+  const isRunning = task.status === 'running'
+  const hasGeneratedOutputs = Array.isArray(task.outputImages) && task.outputImages.length > 0
+  const coverImageId =
+    isRunning
+      ? task.outputImages?.[task.outputImages.length - 1] || ''
+      : task.outputImages?.[0] || ''
 
   // 定时更新运行中任务的计时
   useEffect(() => {
@@ -146,6 +165,41 @@ function TaskCard({
     sizeTitleParts.push(`API 返回: ${appliedSize}`)
   }
   const sizeTitle = sizeTitleParts.length > 0 ? sizeTitleParts.join(' / ') : undefined
+  const statusChipClass =
+    task.status === 'done'
+      ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300'
+      : task.status === 'error'
+        ? task.isAborted
+          ? 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-300'
+          : 'bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-300'
+        : 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300'
+  const transportChipClass =
+    transportMeta?.actual === 'stream'
+      ? 'bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-300'
+      : transportMeta?.fallbackFromStream
+        ? 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-300'
+        : 'bg-gray-100 text-gray-500 dark:bg-white/[0.04] dark:text-gray-400'
+
+  const runningStatusContentClass =
+    'transition duration-150 group-hover/task-preview:opacity-0 group-hover/task-preview:scale-95'
+
+  const runningAbortButton = (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation()
+        onAbort()
+      }}
+      className="pointer-events-none absolute left-1/2 top-1/2 z-20 inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full border border-red-300/45 bg-red-500/92 px-3 py-2 text-xs font-medium text-white opacity-0 shadow-[0_16px_40px_rgba(239,68,68,0.32)] backdrop-blur transition duration-150 hover:bg-red-500 group-hover/task-preview:pointer-events-auto group-hover/task-preview:opacity-100"
+      title="中止生成"
+      aria-label="中止生成"
+    >
+      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M7 7h10v10H7z" />
+      </svg>
+      <span>中止生成</span>
+    </button>
+  )
 
   return (
     <div
@@ -163,7 +217,7 @@ function TaskCard({
     >
       <div className="flex h-40">
         {/* 左侧图片区域 */}
-        <div className="w-40 min-w-[10rem] h-full bg-gray-100 dark:bg-black/20 relative flex items-center justify-center overflow-hidden flex-shrink-0">
+        <div className={`group/task-preview w-40 min-w-[10rem] h-full bg-gray-100 dark:bg-black/20 relative flex items-center justify-center overflow-hidden flex-shrink-0 ${isRunning ? 'select-none' : ''}`}>
           {!isInRecycleBin && (
             <button
               type="button"
@@ -202,49 +256,161 @@ function TaskCard({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
             </svg>
           </button>
-          {task.status === 'running' && (
-            <div className="flex flex-col items-center gap-2">
-              <svg
-                className="w-8 h-8 text-blue-400 animate-spin"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
+          {isRunning && (
+            thumbSrc ? (
+              <>
+                <img
+                  src={thumbSrc}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                  alt=""
                 />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                />
-              </svg>
-              <span className="text-xs text-gray-400 dark:text-gray-500">生成中...</span>
-            </div>
+                <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-black/35" />
+                <div className="absolute inset-0 bg-black/30 opacity-0 transition duration-150 group-hover/task-preview:opacity-100" />
+                <div className={`absolute inset-x-0 bottom-2 flex flex-col items-center gap-1 px-2 text-white ${runningStatusContentClass}`}>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-black/45 px-2 py-0.5 text-xs font-medium backdrop-blur-sm">
+                    <svg
+                      className="h-3.5 w-3.5 animate-spin"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                      />
+                    </svg>
+                    {statusLabel}
+                  </span>
+                  {progress.countLabel && (
+                    <span className="rounded-full bg-white/18 px-2 py-0.5 text-[11px] font-medium backdrop-blur-sm">
+                      {progress.countLabel}
+                    </span>
+                  )}
+                </div>
+                {runningAbortButton}
+              </>
+            ) : (
+              <>
+                <div className={`flex flex-col items-center gap-2 ${runningStatusContentClass}`}>
+                  <svg
+                    className="w-8 h-8 text-blue-400 animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  <span className="text-xs text-gray-400 dark:text-gray-500">
+                    {statusLabel}
+                  </span>
+                  {progress.countLabel && (
+                    <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
+                      {progress.countLabel}
+                    </span>
+                  )}
+                </div>
+                {runningAbortButton}
+              </>
+            )
           )}
           {task.status === 'error' && (
-            <div className="flex flex-col items-center gap-1 px-2">
-              <svg
-                className="w-7 h-7 text-red-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            hasGeneratedOutputs && thumbSrc ? (
+              <>
+                <img
+                  src={thumbSrc}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                  alt=""
                 />
-              </svg>
-              <span className="text-xs text-red-400 text-center leading-tight">
-                失败
-              </span>
-            </div>
+                <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-black/35" />
+                <div className="absolute inset-x-0 bottom-2 flex flex-col items-center gap-1 px-2 text-white">
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium backdrop-blur-sm ${
+                      task.isAborted ? 'bg-amber-500/75' : 'bg-red-500/75'
+                    }`}
+                  >
+                    <svg
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      {task.isAborted ? (
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 9h6v6H9zM21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      ) : (
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      )}
+                    </svg>
+                    {statusLabel}
+                  </span>
+                  {progress.countLabel && (
+                    <span className="rounded-full bg-white/18 px-2 py-0.5 text-[11px] font-medium backdrop-blur-sm">
+                      {progress.countLabel}
+                    </span>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center gap-1 px-2">
+                <svg
+                  className={`w-7 h-7 ${task.isAborted ? 'text-amber-400' : 'text-red-400'}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  {task.isAborted ? (
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 9h6v6H9zM21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  ) : (
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  )}
+                </svg>
+                <span
+                  className={`text-xs text-center leading-tight ${task.isAborted ? 'text-amber-400' : 'text-red-400'}`}
+                >
+                  {statusLabel}
+                </span>
+              </div>
+            )
           )}
           {task.status === 'done' && thumbSrc && (
             <>
@@ -330,6 +496,19 @@ function TaskCard({
               >
                 {providerName}
               </span>
+              <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${statusChipClass}`}>
+                {statusLabel}
+              </span>
+              {progress.countLabel && (
+                <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-gray-500 dark:text-gray-400 flex-shrink-0">
+                  {progress.countLabel}
+                </span>
+              )}
+              {transportLabel && (
+                <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${transportChipClass}`}>
+                  {transportLabel}
+                </span>
+              )}
               <span
                 className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/[0.04] text-gray-500 dark:text-gray-400 flex-shrink-0"
                 title={appliedQuality && appliedQuality !== task.params.quality ? `请求: ${task.params.quality} / 实际: ${displayQuality}` : undefined}
@@ -355,25 +534,46 @@ function TaskCard({
               onClick={(e) => e.stopPropagation()}
             >
               {isInRecycleBin ? (
-                <button
-                  onClick={onRestore}
-                  className="p-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-gray-400 hover:text-blue-500 transition"
-                  title="恢复记录"
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+                <>
+                  <button
+                    onClick={onRestore}
+                    className="p-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-gray-400 hover:text-blue-500 transition"
+                    title="恢复记录"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 12a8 8 0 018-8h5m0 0v5m0-5l-6 6m-7 2a8 8 0 008 8h5"
-                    />
-                  </svg>
-                </button>
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 12a8 8 0 018-8h5m0 0v5m0-5l-6 6m-7 2a8 8 0 008 8h5"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={onPurge}
+                    className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 text-gray-400 hover:text-red-500 transition"
+                    title="彻底删除"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                </>
               ) : (
                 <>
                   <button
@@ -403,7 +603,7 @@ function TaskCard({
                         : 'text-gray-400 hover:bg-green-50 hover:text-green-500 dark:hover:bg-green-950/30 disabled:opacity-30'
                     }`}
                     title={task.status === 'error' ? '重试' : '编辑输出'}
-                    disabled={task.status !== 'error' && !task.outputImages?.length}
+                    disabled={task.status !== 'error' && !canEditOutputs}
                   >
                     <svg
                       className="w-4 h-4"

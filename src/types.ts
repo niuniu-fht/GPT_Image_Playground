@@ -32,6 +32,7 @@ export interface ImageEditSession {
   providerId: string | null
   sourceImageId: string
   sourceImageDataUrl: string
+  sourceImageIds?: string[] | null
   prompt: string
   params: TaskParams
   initialSelection?: ImageEditSelection | null
@@ -98,9 +99,16 @@ export interface AppliedImageParams {
   action?: string | null
 }
 
+export interface AppliedTransportMeta {
+  requested?: ResponsesTransportMode | null
+  actual?: 'stream' | 'json' | null
+  fallbackFromStream?: boolean | null
+}
+
 export interface TaskResponseMeta {
   appliedImageParams?: AppliedImageParams | null
   revisedPrompt?: string | null
+  transport?: AppliedTransportMeta | null
 }
 
 export interface TaskErrorDebugImageSummary {
@@ -213,12 +221,20 @@ export interface TaskRecord {
   responseMeta?: TaskResponseMeta | null
   /** 失败时记录的请求与响应调试上下文 */
   errorDebug?: TaskErrorDebugInfo | null
+  /** 用户主动中止的任务会标记为 true */
+  isAborted?: boolean
   status: TaskStatus
   error: string | null
   createdAt: number
   finishedAt: number | null
   /** 总耗时毫秒 */
   elapsed: number | null
+}
+
+export interface TaskImageProgress {
+  completed: number
+  total: number
+  countLabel: string | null
 }
 
 // ===== IndexedDB 存储的图片 =====
@@ -275,6 +291,43 @@ export function resolveTaskDisplayImageParam(
   key: DisplayTaskImageParamKey,
 ): string {
   return resolveTaskAppliedImageParam(task, key) ?? task.params[key]
+}
+
+export function resolveTaskTransportMeta(
+  task: Pick<TaskRecord, 'responseMeta'>,
+): AppliedTransportMeta | null {
+  const transport = task.responseMeta?.transport
+  if (!transport) return null
+
+  const requested =
+    transport.requested === 'stream' || transport.requested === 'json' || transport.requested === 'auto'
+      ? transport.requested
+      : null
+  const actual = transport.actual === 'stream' || transport.actual === 'json' ? transport.actual : null
+  const fallbackFromStream = typeof transport.fallbackFromStream === 'boolean' ? transport.fallbackFromStream : null
+
+  if (!requested && !actual && fallbackFromStream == null) {
+    return null
+  }
+
+  return {
+    requested,
+    actual,
+    fallbackFromStream,
+  }
+}
+
+export function resolveTaskTransportLabel(
+  task: Pick<TaskRecord, 'responseMeta'>,
+): string | null {
+  const transport = resolveTaskTransportMeta(task)
+  if (!transport?.actual) return null
+
+  if (transport.actual === 'stream') {
+    return '流式'
+  }
+
+  return transport.fallbackFromStream ? 'JSON（降级）' : 'JSON'
 }
 
 // ===== 导出数据 =====
@@ -346,4 +399,36 @@ export function resolveCategoryFilterName(
 
 export function isTaskInRecycleBin(task: Pick<TaskRecord, 'deletedAt'>): boolean {
   return typeof task.deletedAt === 'number' && Number.isFinite(task.deletedAt)
+}
+
+export function resolveTaskStatusLabel(
+  task: Pick<TaskRecord, 'status' | 'isAborted'>,
+): '生成中' | '已完成' | '失败' | '已中止' {
+  if (task.status === 'done') return '已完成'
+  if (task.status === 'error' && task.isAborted) return '已中止'
+  if (task.status === 'error') return '失败'
+  return '生成中'
+}
+
+export function resolveTaskImageProgress(
+  task: Pick<TaskRecord, 'params' | 'outputImages'>,
+): TaskImageProgress {
+  const requestedTotal =
+    typeof task.params?.n === 'number' && Number.isFinite(task.params.n)
+      ? Math.max(1, Math.floor(task.params.n))
+      : 1
+  const completed = Array.isArray(task.outputImages) ? task.outputImages.length : 0
+  const total = Math.max(requestedTotal, completed, 1)
+
+  return {
+    completed,
+    total,
+    countLabel: total > 1 ? `${completed}/${total}` : null,
+  }
+}
+
+export function canEditTaskOutputs(
+  task: Pick<TaskRecord, 'status' | 'outputImages'>,
+): boolean {
+  return task.status === 'done' && Array.isArray(task.outputImages) && task.outputImages.length > 0
 }

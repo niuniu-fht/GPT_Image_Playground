@@ -1,4 +1,5 @@
 import type {
+  AppliedTransportMeta,
   ApiProtocol,
   AppSettings,
   ResponsesImageInputMode,
@@ -309,6 +310,10 @@ export interface CallApiOptions {
   editMaskDataUrl?: string
   /** 局部编辑时，蒙版对应源图在输入数组中的索引 */
   editSourceImageIndex?: number
+  /** 每当拿到新的最终输出图时回调一次，可用于更新任务进度 */
+  onFinalImages?: (images: string[]) => void | Promise<void>
+  /** 暴露取消当前请求的函数，供外层任务状态管理使用 */
+  registerAbort?: (abort: () => void) => void
 }
 
 export interface CallApiResult {
@@ -316,6 +321,17 @@ export interface CallApiResult {
   images: string[]
   /** API 实际返回的图片生成元信息 */
   responseMeta?: TaskResponseMeta
+}
+
+async function emitFinalImages(
+  opts: CallApiOptions,
+  images: string[],
+): Promise<void> {
+  if (!images.length || typeof opts.onFinalImages !== 'function') {
+    return
+  }
+
+  await opts.onFinalImages(images)
 }
 
 type ApiError = Error & {
@@ -673,6 +689,102 @@ function parseSseEvents(text: string): ParsedSseEvent[] {
   return events
 }
 
+interface IncrementalSseParserState {
+  buffer: string
+  currentEvent: string
+  dataLines: string[]
+}
+
+function createIncrementalSseParserState(): IncrementalSseParserState {
+  return {
+    buffer: '',
+    currentEvent: '',
+    dataLines: [],
+  }
+}
+
+function flushIncrementalSseEvent(state: IncrementalSseParserState): ParsedSseEvent | null {
+  if (!state.currentEvent && state.dataLines.length === 0) return null
+
+  const dataText = state.dataLines.join('\n')
+  const event: ParsedSseEvent = {
+    event: state.currentEvent,
+    dataText,
+    json: tryParseJson(dataText),
+  }
+
+  state.currentEvent = ''
+  state.dataLines = []
+  return event
+}
+
+function processIncrementalSseLine(
+  state: IncrementalSseParserState,
+  line: string,
+  events: ParsedSseEvent[],
+) {
+  if (!line) {
+    const event = flushIncrementalSseEvent(state)
+    if (event) {
+      events.push(event)
+    }
+    return
+  }
+
+  if (line.startsWith(':')) {
+    return
+  }
+
+  if (line.startsWith('event:')) {
+    state.currentEvent = line.slice('event:'.length).trim()
+    return
+  }
+
+  if (line.startsWith('data:')) {
+    state.dataLines.push(line.slice('data:'.length).trimStart())
+  }
+}
+
+function feedIncrementalSseParser(
+  state: IncrementalSseParserState,
+  chunk: string,
+  flushFinal = false,
+): ParsedSseEvent[] {
+  const events: ParsedSseEvent[] = []
+  state.buffer += chunk
+
+  while (true) {
+    const newlineIndex = state.buffer.indexOf('\n')
+    if (newlineIndex < 0) break
+
+    let line = state.buffer.slice(0, newlineIndex)
+    state.buffer = state.buffer.slice(newlineIndex + 1)
+    if (line.endsWith('\r')) {
+      line = line.slice(0, -1)
+    }
+
+    processIncrementalSseLine(state, line, events)
+  }
+
+  if (flushFinal) {
+    if (state.buffer.length > 0) {
+      let line = state.buffer
+      state.buffer = ''
+      if (line.endsWith('\r')) {
+        line = line.slice(0, -1)
+      }
+      processIncrementalSseLine(state, line, events)
+    }
+
+    const finalEvent = flushIncrementalSseEvent(state)
+    if (finalEvent) {
+      events.push(finalEvent)
+    }
+  }
+
+  return events
+}
+
 function extractErrorMessage(payload: unknown): string | null {
   if (!isRecord(payload)) return null
 
@@ -773,7 +885,7 @@ async function appendImageFromItem(
 ) {
   if (!isRecord(item)) return
 
-  if (item.type === 'image_generation.partial_image') {
+  if (typeof item.type === 'string' && item.type.includes('partial_image')) {
     return
   }
 
@@ -810,6 +922,75 @@ async function appendImageFromItem(
       return
     }
   }
+}
+
+function collectImageSignaturesFromItem(item: unknown): string[] {
+  if (
+    !isRecord(item) ||
+    (typeof item.type === 'string' && item.type.includes('partial_image'))
+  ) {
+    return []
+  }
+
+  if (typeof item.b64_json === 'string' && item.b64_json) {
+    return [`b64_json:${item.b64_json}`]
+  }
+
+  if (typeof item.result === 'string' && item.result) {
+    return [`result:${item.result}`]
+  }
+
+  if (typeof item.url === 'string' && item.url) {
+    return [`url:${item.url}`]
+  }
+
+  if (typeof item.image_url === 'string' && item.image_url) {
+    return [`image_url:${item.image_url}`]
+  }
+
+  return []
+}
+
+async function emitNewImagesFromPayload(
+  payload: unknown,
+  fallbackMime: string,
+  signal: AbortSignal,
+  emittedImageSignatures: Set<string>,
+  onImages?: (images: string[]) => void | Promise<void>,
+): Promise<number> {
+  if (typeof onImages !== 'function') {
+    return 0
+  }
+
+  const itemsToEmit: Record<string, unknown>[] = []
+  forEachPayloadRecord(payload, (item) => {
+    const signatures = collectImageSignaturesFromItem(item)
+    if (!signatures.length) return
+
+    const hasNewImage = signatures.some((signature) => !emittedImageSignatures.has(signature))
+    if (!hasNewImage) return
+
+    for (const signature of signatures) {
+      emittedImageSignatures.add(signature)
+    }
+    itemsToEmit.push(item)
+  })
+
+  if (!itemsToEmit.length) {
+    return 0
+  }
+
+  const images: string[] = []
+  for (const item of itemsToEmit) {
+    await appendImageFromItem(images, item, fallbackMime, signal)
+  }
+
+  if (!images.length) {
+    return 0
+  }
+
+  await onImages(images)
+  return images.length
 }
 
 function forEachPayloadRecord(
@@ -992,6 +1173,30 @@ function buildTaskResponseMetaFromCalls(
   }
 
   return Object.keys(responseMeta).length > 0 ? responseMeta : undefined
+}
+
+type ActualTransportKind = NonNullable<AppliedTransportMeta['actual']>
+
+function buildAppliedTransportMeta(
+  requested: ResponsesTransportMode,
+  actual: ActualTransportKind,
+  fallbackFromStream: boolean,
+): AppliedTransportMeta {
+  return {
+    requested,
+    actual,
+    fallbackFromStream,
+  }
+}
+
+function mergeTaskResponseMeta(
+  baseMeta: TaskResponseMeta | undefined,
+  transportMeta: AppliedTransportMeta,
+): TaskResponseMeta {
+  return {
+    ...(baseMeta ?? {}),
+    transport: transportMeta,
+  }
 }
 
 async function parseImagesFromPayload(
@@ -1194,12 +1399,12 @@ function shouldRetryResponsesWithFileId(
   return opts.inputImageDataUrls.some((value) => isDataUrl(value)) || Boolean(opts.editMaskDataUrl)
 }
 
-async function readResponsesPayload(
-  response: Response,
+function parseResponsesPayloadText(
+  text: string,
+  responseStatus: number,
+  requestId: string | undefined,
   logEntry?: ApiDebugRequestLogEntry,
-): Promise<unknown> {
-  const text = await response.text()
-  const requestId = attachDebugResponseMeta(logEntry, response)
+): unknown {
   const directJson = tryParseJson(text)
   if (directJson !== undefined) {
     const normalizedPayload = compactResponsesPayloadIfNeeded(directJson)
@@ -1214,7 +1419,7 @@ async function readResponsesPayload(
     if (logEntry && text.trim()) {
       logEntry.responseText = summarizeDebugString(text)
     }
-    throw createApiError('Responses API 返回了非 JSON 响应，且不是可解析的 SSE 数据', response.status, {
+    throw createApiError('Responses API 返回了非 JSON 响应，且不是可解析的 SSE 数据', responseStatus, {
       requestId,
       details: text.trim() ? { responseText: text } : undefined,
     })
@@ -1242,7 +1447,7 @@ async function readResponsesPayload(
     if (logEntry) {
       logEntry.responseBody = sanitizeDebugValue(failedPayload)
     }
-    throw createApiError(message, response.status, {
+    throw createApiError(message, responseStatus, {
       requestId,
       details: {
         responseBody: failedPayload,
@@ -1281,10 +1486,19 @@ async function readResponsesPayload(
   if (logEntry && text.trim()) {
     logEntry.responseText = summarizeDebugString(text)
   }
-  throw createApiError('Responses API 返回了 SSE，但未包含可解析的 JSON 事件', response.status, {
+  throw createApiError('Responses API 返回了 SSE，但未包含可解析的 JSON 事件', responseStatus, {
     requestId,
     details: text.trim() ? { responseText: text } : undefined,
   })
+}
+
+async function readResponsesPayload(
+  response: Response,
+  logEntry?: ApiDebugRequestLogEntry,
+): Promise<unknown> {
+  const text = await response.text()
+  const requestId = attachDebugResponseMeta(logEntry, response)
+  return parseResponsesPayloadText(text, response.status, requestId, logEntry)
 }
 
 function isImagesFailurePayload(payload: Record<string, unknown>): boolean {
@@ -1317,12 +1531,12 @@ function hasDirectImagePayload(payload: Record<string, unknown>): boolean {
   return false
 }
 
-async function readImagesPayload(
-  response: Response,
+function parseImagesPayloadText(
+  text: string,
+  responseStatus: number,
+  requestId: string | undefined,
   logEntry?: ApiDebugRequestLogEntry,
-): Promise<unknown> {
-  const text = await response.text()
-  const requestId = attachDebugResponseMeta(logEntry, response)
+): unknown {
   const directJson = tryParseJson(text)
   if (directJson !== undefined) {
     if (logEntry) {
@@ -1336,7 +1550,7 @@ async function readImagesPayload(
     if (logEntry && text.trim()) {
       logEntry.responseText = summarizeDebugString(text)
     }
-    throw createApiError('Images API 返回了非 JSON 响应，且不是可解析的 SSE 数据', response.status, {
+    throw createApiError('Images API 返回了非 JSON 响应，且不是可解析的 SSE 数据', responseStatus, {
       requestId,
       details: text.trim() ? { responseText: text } : undefined,
     })
@@ -1352,7 +1566,7 @@ async function readImagesPayload(
     if (logEntry) {
       logEntry.responseBody = sanitizeDebugValue(failedPayload)
     }
-    throw createApiError(message, response.status, {
+    throw createApiError(message, responseStatus, {
       requestId,
       details: {
         responseBody: failedPayload,
@@ -1391,10 +1605,132 @@ async function readImagesPayload(
   if (logEntry && text.trim()) {
     logEntry.responseText = summarizeDebugString(text)
   }
-  throw createApiError('Images API 返回了 SSE，但未包含可解析的 JSON 事件', response.status, {
+  throw createApiError('Images API 返回了 SSE，但未包含可解析的 JSON 事件', responseStatus, {
     requestId,
     details: text.trim() ? { responseText: text } : undefined,
   })
+}
+
+async function readImagesPayload(
+  response: Response,
+  logEntry?: ApiDebugRequestLogEntry,
+): Promise<unknown> {
+  const text = await response.text()
+  const requestId = attachDebugResponseMeta(logEntry, response)
+  return parseImagesPayloadText(text, response.status, requestId, logEntry)
+}
+
+interface StreamedPayloadResult {
+  payload: unknown
+  streamedFinalImageCount: number
+  actualTransport: ActualTransportKind
+}
+
+async function consumeSseResponseText(
+  response: Response,
+  onEvent?: (event: ParsedSseEvent) => void | Promise<void>,
+): Promise<{ text: string; sawAnyEvents: boolean }> {
+  if (!response.body) {
+    return {
+      text: await response.text(),
+      sawAnyEvents: false,
+    }
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const parserState = createIncrementalSseParserState()
+  let text = ''
+  let sawAnyEvents = false
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    const chunk = decoder.decode(value, { stream: true })
+    text += chunk
+    const events = feedIncrementalSseParser(parserState, chunk)
+    if (events.length > 0) {
+      sawAnyEvents = true
+    }
+    if (typeof onEvent === 'function') {
+      for (const event of events) {
+        await onEvent(event)
+      }
+    }
+  }
+
+  const finalChunk = decoder.decode()
+  text += finalChunk
+  const finalEvents = feedIncrementalSseParser(parserState, finalChunk, true)
+  if (finalEvents.length > 0) {
+    sawAnyEvents = true
+  }
+  if (typeof onEvent === 'function') {
+    for (const event of finalEvents) {
+      await onEvent(event)
+    }
+  }
+
+  return { text, sawAnyEvents }
+}
+
+async function readResponsesPayloadStream(
+  response: Response,
+  fallbackMime: string,
+  signal: AbortSignal,
+  onImages: CallApiOptions['onFinalImages'],
+  logEntry?: ApiDebugRequestLogEntry,
+): Promise<StreamedPayloadResult> {
+  const requestId = attachDebugResponseMeta(logEntry, response)
+  const emittedImageSignatures = new Set<string>()
+  let streamedFinalImageCount = 0
+
+  const { text, sawAnyEvents } = await consumeSseResponseText(response, async (event) => {
+    if (!event.json || !isRecord(event.json)) return
+    streamedFinalImageCount += await emitNewImagesFromPayload(
+      event.json,
+      fallbackMime,
+      signal,
+      emittedImageSignatures,
+      onImages,
+    )
+  })
+
+  return {
+    payload: parseResponsesPayloadText(text, response.status, requestId, logEntry),
+    streamedFinalImageCount,
+    actualTransport: sawAnyEvents ? 'stream' : 'json',
+  }
+}
+
+async function readImagesPayloadStream(
+  response: Response,
+  fallbackMime: string,
+  signal: AbortSignal,
+  onImages: CallApiOptions['onFinalImages'],
+  logEntry?: ApiDebugRequestLogEntry,
+): Promise<StreamedPayloadResult> {
+  const requestId = attachDebugResponseMeta(logEntry, response)
+  const emittedImageSignatures = new Set<string>()
+  let streamedFinalImageCount = 0
+
+  const { text, sawAnyEvents } = await consumeSseResponseText(response, async (event) => {
+    if (!event.json || !isRecord(event.json)) return
+    streamedFinalImageCount += await emitNewImagesFromPayload(
+      event.json,
+      fallbackMime,
+      signal,
+      emittedImageSignatures,
+      onImages,
+    )
+  })
+
+  return {
+    payload: parseImagesPayloadText(text, response.status, requestId, logEntry),
+    streamedFinalImageCount,
+    actualTransport: sawAnyEvents ? 'stream' : 'json',
+  }
 }
 
 function buildImagesRequestPlans(settings: AppSettings): ImagesRequestPlan[] {
@@ -1420,6 +1756,7 @@ async function callImagesApi(
 
     try {
       let response: Response
+      let actualTransport: ActualTransportKind = 'json'
 
       if (isEdit) {
         const formData = new FormData()
@@ -1429,6 +1766,9 @@ async function callImagesApi(
         formData.append('quality', params.quality)
         formData.append('output_format', params.output_format)
         formData.append('moderation', params.moderation)
+        if (params.n > 1) {
+          formData.append('n', String(params.n))
+        }
 
         if (params.output_format !== 'png' && params.output_compression != null) {
           formData.append('output_compression', String(params.output_compression))
@@ -1457,6 +1797,7 @@ async function callImagesApi(
           quality: params.quality,
           output_format: params.output_format,
           moderation: params.moderation,
+          n: params.n > 1 ? params.n : undefined,
           output_compression: params.output_format !== 'png' ? params.output_compression : undefined,
           imageCount: inputImageDataUrls.length,
           hasMask: Boolean(editMaskDataUrl),
@@ -1511,8 +1852,20 @@ async function callImagesApi(
         throw await buildApiErrorFromResponse(response, debugLogEntry)
       }
 
-      const requestId = attachDebugResponseMeta(debugLogEntry, response)
-      const payload = await readImagesPayload(response, debugLogEntry)
+      const requestId = readDevProxyRequestId(response.headers)
+      const streamResult =
+        plan.transport === 'stream'
+          ? await readImagesPayloadStream(
+              response,
+              ctx.mime,
+              ctx.controller.signal,
+              opts.onFinalImages,
+              debugLogEntry,
+            )
+          : null
+      const payload = streamResult?.payload ?? (await readImagesPayload(response, debugLogEntry))
+      const streamedFinalImageCount = streamResult?.streamedFinalImageCount ?? 0
+      actualTransport = streamResult?.actualTransport ?? 'json'
       const images = await parseImagesFromPayload(payload, ctx.mime, ctx.controller.signal)
       if (!images.length) {
         if (debugLogEntry) {
@@ -1526,7 +1879,23 @@ async function callImagesApi(
         })
       }
 
-      return { images }
+      if (streamedFinalImageCount < images.length) {
+        await emitFinalImages(opts, images.slice(streamedFinalImageCount))
+      }
+      const fallbackFromStream =
+        actualTransport === 'json' &&
+        requestPlans.slice(0, planIndex).some((item) => item.transport === 'stream')
+      return {
+        images,
+        responseMeta: mergeTaskResponseMeta(
+          undefined,
+          buildAppliedTransportMeta(
+            getResponsesTransportMode(settings),
+            actualTransport,
+            fallbackFromStream,
+          ),
+        ),
+      }
     } catch (error) {
       lastError = error
       const isLastPlan = planIndex === requestPlans.length - 1
@@ -1970,6 +2339,7 @@ async function callResponsesApiWithInputMode(
   const requestCount = Math.max(1, opts.params.n || 1)
   const images: string[] = []
   const responseImageGenerationCalls: ResponseImageGenerationCallMeta[] = []
+  let finalTransportMeta: AppliedTransportMeta | undefined
   const preparedEditAssets = await prepareResponsesInlineEditAssets(opts, responsesImageInputMode)
   const { inputImages, uploadedFileIds } = await prepareResponsesInputImages(
     opts.settings.baseUrl,
@@ -1996,6 +2366,7 @@ async function callResponsesApiWithInputMode(
         const nextPlan = requestPlans[planIndex + 1]
 
         try {
+          let actualTransport: ActualTransportKind = 'json'
           const requestUrl = buildRequestUrl(opts.settings.baseUrl, 'responses', ctx)
           const requestBody = buildResponsesBody(opts, inputImages, editMask, plan)
           const debugLogEntry = createDebugRequestLogEntry(
@@ -2020,8 +2391,20 @@ async function callResponsesApiWithInputMode(
             throw await buildApiErrorFromResponse(response, debugLogEntry)
           }
 
-          const requestId = attachDebugResponseMeta(debugLogEntry, response)
-          const payload = await readResponsesPayload(response, debugLogEntry)
+          const requestId = readDevProxyRequestId(response.headers)
+          const streamResult =
+            plan.transport === 'stream'
+              ? await readResponsesPayloadStream(
+                  response,
+                  ctx.mime,
+                  ctx.controller.signal,
+                  opts.onFinalImages,
+                  debugLogEntry,
+                )
+              : null
+          const payload = streamResult?.payload ?? (await readResponsesPayload(response, debugLogEntry))
+          const streamedFinalImageCount = streamResult?.streamedFinalImageCount ?? 0
+          actualTransport = streamResult?.actualTransport ?? 'json'
           responseImageGenerationCalls.push(...collectImageGenerationCallsFromPayload(payload))
           const parsedImages = await parseImagesFromPayload(payload, ctx.mime, ctx.controller.signal)
           if (!parsedImages.length) {
@@ -2034,6 +2417,17 @@ async function callResponsesApiWithInputMode(
             })
           }
 
+          if (streamedFinalImageCount < parsedImages.length) {
+            await emitFinalImages(opts, parsedImages.slice(streamedFinalImageCount))
+          }
+          const fallbackFromStream =
+            actualTransport === 'json' &&
+            requestPlans.slice(0, planIndex).some((item) => item.transport === 'stream')
+          finalTransportMeta = buildAppliedTransportMeta(
+            getResponsesTransportMode(opts.settings),
+            actualTransport,
+            fallbackFromStream,
+          )
           images.push(...parsedImages)
           lastError = null
           break
@@ -2062,7 +2456,11 @@ async function callResponsesApiWithInputMode(
     throw createApiError('Responses API 未返回可用图片数据')
   }
 
-  const responseMeta = buildTaskResponseMetaFromCalls(responseImageGenerationCalls)
+  const responseMetaFromCalls = buildTaskResponseMetaFromCalls(responseImageGenerationCalls)
+  const responseMeta =
+    finalTransportMeta != null
+      ? mergeTaskResponseMeta(responseMetaFromCalls, finalTransportMeta)
+      : responseMetaFromCalls
   return responseMeta ? { images, responseMeta } : { images }
 }
 
@@ -2081,6 +2479,7 @@ export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult>
 
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), settings.timeout * 1000)
+  opts.registerAbort?.(() => controller.abort())
   let normalizedOpts = opts
 
   try {

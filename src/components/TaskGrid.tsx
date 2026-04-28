@@ -14,12 +14,15 @@ import {
   reuseConfig,
   editOutputs,
   retryTask,
+  abortTask,
   moveTaskToCategory,
   moveTasksToCategory,
   setTasksFavorite,
   toggleTaskFavorite,
   removeTask,
   removeTasks,
+  purgeTask,
+  purgeTasks,
   restoreTask,
   restoreTasks,
 } from '../store'
@@ -248,6 +251,26 @@ export default function TaskGrid() {
     })
   }
 
+  const handlePurge = (task: TaskRecord) => {
+    setConfirmDialog({
+      title: '彻底删除记录',
+      message: '确定要彻底删除这条记录吗？删除后将无法恢复，并会清理未被其他任务引用的图片。',
+      confirmText: '彻底删除',
+      action: () => purgeTask(task),
+    })
+  }
+
+  const handleAbort = (task: TaskRecord) => {
+    setConfirmDialog({
+      title: '确认中止生成',
+      message: '确定要中止这个正在生成的任务吗？已生成的图片会保留，任务会标记为已中止。',
+      confirmText: '确认中止',
+      action: () => {
+        void abortTask(task)
+      },
+    })
+  }
+
   const handleToggleAllVisible = () => {
     if (!hasVisibleTasks) return
     if (allVisibleSelected) {
@@ -274,6 +297,16 @@ export default function TaskGrid() {
       message: `确定要恢复选中的 ${selectedTasks.length} 条记录吗？`,
       confirmText: '恢复',
       action: () => restoreTasks(selectedTasks),
+    })
+  }
+
+  const handleBatchPurge = () => {
+    if (!selectedTasks.length) return
+    setConfirmDialog({
+      title: '批量彻底删除',
+      message: `确定要彻底删除选中的 ${selectedTasks.length} 条记录吗？删除后将无法恢复，并会清理未被其他任务引用的图片。`,
+      confirmText: '彻底删除',
+      action: () => purgeTasks(selectedTasks),
     })
   }
 
@@ -465,18 +498,35 @@ export default function TaskGrid() {
             >
               清空选择
             </button>
-            <button
-              type="button"
-              onClick={taskView === 'trash' ? handleBatchRestore : handleBatchDelete}
-              disabled={!selectedCount}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                taskView === 'trash'
-                  ? 'bg-blue-500 hover:bg-blue-600'
-                  : 'bg-red-500 hover:bg-red-600'
-              }`}
-            >
-              {taskView === 'trash' ? '批量恢复' : '批量移入回收站'}
-            </button>
+            {taskView === 'trash' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleBatchRestore}
+                  disabled={!selectedCount}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-40 bg-blue-500 hover:bg-blue-600"
+                >
+                  批量恢复
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBatchPurge}
+                  disabled={!selectedCount}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-40 bg-red-500 hover:bg-red-600"
+                >
+                  批量彻底删除
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={handleBatchDelete}
+                disabled={!selectedCount}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-40 bg-red-500 hover:bg-red-600"
+              >
+                批量移入回收站
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -530,11 +580,13 @@ export default function TaskGrid() {
                 onReuse={() => reuseConfig(task)}
                 onEditOutputs={() => editOutputs(task)}
                 onRetry={() => retryTask(task)}
+                onAbort={() => handleAbort(task)}
                 onToggleFavorite={() => {
                   void toggleTaskFavorite(task)
                 }}
                 onMoveCategory={() => openMoveCategoryModal(task)}
                 onDelete={() => handleDelete(task)}
+                onPurge={() => handlePurge(task)}
                 onRestore={() => handleRestore(task)}
                 onContextMenu={handleTaskContextMenu(task)}
               />
@@ -618,6 +670,11 @@ export default function TaskGrid() {
         onDelete={() => {
           if (contextMenuState?.task) {
             handleDelete(contextMenuState.task)
+          }
+        }}
+        onPurge={() => {
+          if (contextMenuState?.task) {
+            handlePurge(contextMenuState.task)
           }
         }}
         onRestore={() => {

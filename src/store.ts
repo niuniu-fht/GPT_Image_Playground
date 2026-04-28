@@ -46,9 +46,11 @@ import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
 
 const imageCache = new Map<string, string>()
 const imageLoadPromiseCache = new Map<string, Promise<string | undefined>>()
-const RECYCLE_BIN_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
+const runningTaskAborters = new Map<string, () => void>()
+const userAbortedTaskIds = new Set<string>()
+const RECYCLE_BIN_RETENTION_MS = 15 * 24 * 60 * 60 * 1000
 const RECYCLE_BIN_POLL_INTERVAL_MS = 10 * 60 * 1000
-const ERROR_LOG_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
+const ERROR_LOG_RETENTION_MS = 15 * 24 * 60 * 60 * 1000
 const ERROR_LOG_POLL_INTERVAL_MS = 12 * 60 * 60 * 1000
 let recycleBinJanitorId: number | null = null
 let errorLogJanitorId: number | null = null
@@ -1072,6 +1074,7 @@ export async function submitTask() {
     outputImages: [],
     responseMeta: null,
     errorDebug: null,
+    isAborted: false,
     status: 'running',
     error: null,
     createdAt: Date.now(),
@@ -1102,6 +1105,7 @@ export async function retryTask(task: TaskRecord) {
   const nextCreatedAt = Date.now()
   updateTaskInStore(currentTask.id, {
     status: 'running',
+    isAborted: false,
     error: null,
     errorDebug: null,
     outputImages: [],
@@ -1114,6 +1118,43 @@ export async function retryTask(task: TaskRecord) {
   void executeTask(currentTask.id)
 }
 
+export async function abortTask(task: TaskRecord) {
+  if (isTaskInRecycleBin(task)) {
+    useStore.getState().showToast('回收站中的任务无法中止', 'error')
+    return
+  }
+
+  const currentTask = useStore.getState().tasks.find((item) => item.id === task.id) ?? task
+  if (currentTask.status !== 'running') {
+    useStore.getState().showToast('该任务当前不在生成中', 'info')
+    return
+  }
+
+  userAbortedTaskIds.add(currentTask.id)
+  const abort = runningTaskAborters.get(currentTask.id)
+  if (abort) {
+    abort()
+  }
+  useStore.getState().showToast('正在中止任务...', 'info')
+}
+
+function isTaskAbortRequested(taskId: string): boolean {
+  return userAbortedTaskIds.has(taskId)
+}
+
+function clearTaskAbortState(taskId: string) {
+  runningTaskAborters.delete(taskId)
+  userAbortedTaskIds.delete(taskId)
+}
+
+function throwIfTaskAbortRequested(taskId: string) {
+  if (isTaskAbortRequested(taskId)) {
+    const error = new Error('任务已中止')
+    error.name = 'TaskAbortError'
+    throw error
+  }
+}
+
 async function executeTask(taskId: string, requestSettings?: AppSettings) {
   const { settings, providers } = useStore.getState()
   const task = useStore.getState().tasks.find((t) => t.id === taskId)
@@ -1124,16 +1165,35 @@ async function executeTask(taskId: string, requestSettings?: AppSettings) {
     requestSettings ?? (taskProvider ? getProviderSettings(taskProvider) : settings)
 
   try {
+    throwIfTaskAbortRequested(taskId)
+
+    const outputIds: string[] = []
+    const appendOutputImages = async (images: string[]) => {
+      if (!images.length) return
+
+      for (const dataUrl of images) {
+        const imgId = await storeImage(dataUrl, 'generated')
+        imageCache.set(imgId, dataUrl)
+        outputIds.push(imgId)
+      }
+
+      updateTaskInStore(taskId, {
+        outputImages: [...outputIds],
+      })
+    }
+
     // 获取输入图片地址（data URL 或公网 URL）
     const inputDataUrls: string[] = []
     const loadedInputIds: string[] = []
     for (const imgId of task.inputImageIds) {
+      throwIfTaskAbortRequested(taskId)
       const dataUrl = await ensureImageCached(imgId)
       if (dataUrl) {
         inputDataUrls.push(dataUrl)
         loadedInputIds.push(imgId)
       }
     }
+    throwIfTaskAbortRequested(taskId)
     const editMaskDataUrl = task.editMaskImageId
       ? await ensureImageCached(task.editMaskImageId)
       : undefined
@@ -1150,20 +1210,21 @@ async function executeTask(taskId: string, requestSettings?: AppSettings) {
       inputImageDataUrls: inputDataUrls,
       editMaskDataUrl,
       editSourceImageIndex: editSourceImageIndex >= 0 ? editSourceImageIndex : undefined,
+      onFinalImages: appendOutputImages,
+      registerAbort: (abort) => {
+        runningTaskAborters.set(taskId, abort)
+      },
     })
 
-    // 存储输出图片
-    const outputIds: string[] = []
-    for (const dataUrl of result.images) {
-      const imgId = await storeImage(dataUrl, 'generated')
-      imageCache.set(imgId, dataUrl)
-      outputIds.push(imgId)
+    if (outputIds.length < result.images.length) {
+      await appendOutputImages(result.images.slice(outputIds.length))
     }
 
     // 更新任务
     updateTaskInStore(taskId, {
-      outputImages: outputIds,
+      outputImages: [...outputIds],
       responseMeta: result.responseMeta ?? null,
+      isAborted: false,
       error: null,
       errorDebug: null,
       status: 'done',
@@ -1173,19 +1234,36 @@ async function executeTask(taskId: string, requestSettings?: AppSettings) {
 
     useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
   } catch (err) {
+    const wasUserAborted =
+      isTaskAbortRequested(taskId) ||
+      (err instanceof Error && (err.name === 'TaskAbortError' || err.message === '任务已中止'))
+
+    if (wasUserAborted) {
+      updateTaskInStore(taskId, {
+        status: 'error',
+        isAborted: true,
+        error: '任务已中止',
+        errorDebug: null,
+        finishedAt: Date.now(),
+        elapsed: Date.now() - task.createdAt,
+      })
+      return
+    }
+
     updateTaskInStore(taskId, {
       status: 'error',
+      isAborted: false,
       error: err instanceof Error ? err.message : String(err),
       errorDebug: buildTaskErrorDebugInfo(providerSettings, err),
       finishedAt: Date.now(),
       elapsed: Date.now() - task.createdAt,
     })
     useStore.getState().setDetailTaskId(taskId)
-  }
-
-  // 释放输入图片的内存缓存（已持久化到 IndexedDB，后续按需从 DB 加载）
-  for (const imgId of task.inputImageIds) {
-    imageCache.delete(imgId)
+  } finally {
+    clearTaskAbortState(taskId)
+    for (const imgId of task.inputImageIds) {
+      imageCache.delete(imgId)
+    }
   }
 }
 
@@ -1623,6 +1701,7 @@ export async function editOutputs(task: TaskRecord, preferredImageId?: string) {
     providerId: task.providerId ?? null,
     sourceImageId,
     sourceImageDataUrl,
+    sourceImageIds: [...task.outputImages],
     prompt: task.prompt,
     params: task.params,
     initialSelection: task.editSelection ?? null,
@@ -1647,6 +1726,7 @@ export function reopenImageEditorFromInputImage(inputImage: InputImage) {
     providerId: sourceTask?.providerId ?? activeProviderId ?? null,
     sourceImageId: inputImage.sourceImageId ?? inputImage.id,
     sourceImageDataUrl: inputImage.dataUrl,
+    sourceImageIds: sourceTask?.outputImages ? [...sourceTask.outputImages] : [inputImage.sourceImageId ?? inputImage.id],
     prompt: sourceTask?.prompt ?? prompt.trim(),
     params: sourceTask?.params ?? params,
     initialSelection: inputImage.editSelection ?? null,
@@ -1778,6 +1858,18 @@ export async function removeTasks(tasksToRemove: TaskRecord[]) {
 /** 删除单条任务 */
 export async function removeTask(task: TaskRecord) {
   await removeTasks([task])
+}
+
+/** 批量彻底删除任务 */
+export async function purgeTasks(tasksToPurge: TaskRecord[]) {
+  const recycleBinTasks = tasksToPurge.filter((task) => isTaskInRecycleBin(task))
+  if (!recycleBinTasks.length) return 0
+  return purgeTasksPermanently(recycleBinTasks)
+}
+
+/** 彻底删除单条任务 */
+export async function purgeTask(task: TaskRecord) {
+  return purgeTasks([task])
 }
 
 /** 批量恢复任务 */

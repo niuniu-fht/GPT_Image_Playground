@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react'
-import type { TaskRecord } from '../types'
+import { canEditTaskOutputs, type TaskRecord } from '../types'
 
 interface Props {
   task: TaskRecord | null
@@ -14,6 +14,7 @@ interface Props {
   onToggleFavorite: () => void
   onMoveCategory: () => void
   onDelete: () => void
+  onPurge: () => void
   onRestore: () => void
 }
 
@@ -65,6 +66,7 @@ export default function TaskContextMenu({
   onToggleFavorite,
   onMoveCategory,
   onDelete,
+  onPurge,
   onRestore,
 }: Props) {
   const menuRef = useRef<HTMLDivElement>(null)
@@ -95,7 +97,7 @@ export default function TaskContextMenu({
 
   const position = useMemo(() => {
     const menuWidth = 188
-    const menuHeight = isInRecycleBin ? 108 : 248
+    const menuHeight = isInRecycleBin ? 148 : 248
     let left = x
     let top = y
 
@@ -110,6 +112,8 @@ export default function TaskContextMenu({
   }, [isInRecycleBin, x, y])
 
   if (!task) return null
+
+  const canEditOutputs = canEditTaskOutputs(task)
 
   return (
     <div
@@ -131,17 +135,31 @@ export default function TaskContextMenu({
         </svg>
       </MenuItem>
       {isInRecycleBin ? (
-        <MenuItem
-          label="恢复记录"
-          onClick={() => {
-            onClose()
-            onRestore()
-          }}
-        >
-          <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12a8 8 0 018-8h5m0 0v5m0-5l-6 6m-7 2a8 8 0 008 8h5" />
-          </svg>
-        </MenuItem>
+        <>
+          <MenuItem
+            label="恢复记录"
+            onClick={() => {
+              onClose()
+              onRestore()
+            }}
+          >
+            <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12a8 8 0 018-8h5m0 0v5m0-5l-6 6m-7 2a8 8 0 008 8h5" />
+            </svg>
+          </MenuItem>
+          <MenuItem
+            label="彻底删除"
+            tone="danger"
+            onClick={() => {
+              onClose()
+              onPurge()
+            }}
+          >
+            <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </MenuItem>
+        </>
       ) : (
         <>
           <MenuItem
@@ -169,7 +187,7 @@ export default function TaskContextMenu({
           </MenuItem>
           <MenuItem
             label={task.status === 'error' ? '重试' : '编辑输出'}
-            disabled={task.status !== 'error' && !task.outputImages?.length}
+            disabled={task.status !== 'error' && !canEditOutputs}
             onClick={() => {
               onClose()
               if (task.status === 'error') {

@@ -187,7 +187,7 @@ export default function SearchBar() {
 
         {taskView === 'trash' && (
           <span className="text-xs text-gray-400 dark:text-gray-500">
-            回收站项目会每 10 分钟轮询一次，自动清理 7 天前的记录
+            回收站项目会每 10 分钟轮询一次，自动清理 15 天前的记录
           </span>
         )}
       </div>
