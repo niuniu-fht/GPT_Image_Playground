@@ -5,7 +5,7 @@ import {
   useState,
   type CSSProperties,
   type MouseEventHandler,
-  type WheelEventHandler,
+  type PointerEventHandler,
 } from 'react'
 import { clamp, MAX_SCALE, MIN_SCALE } from './shared'
 
@@ -14,9 +14,14 @@ interface UseLightboxTransformOptions {
   onClose: () => void
 }
 
+function isStageTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest('[data-lightbox-stage]'))
+}
+
 export function useLightboxTransform(options: UseLightboxTransformOptions) {
   const { src, onClose } = options
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const stageRef = useRef<HTMLDivElement | null>(null)
   const scaleRef = useRef(1)
   const txRef = useRef(0)
   const tyRef = useRef(0)
@@ -25,6 +30,7 @@ export function useLightboxTransform(options: UseLightboxTransformOptions) {
   const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dragRef = useRef({
     active: false,
+    pointerId: null as number | null,
     startX: 0,
     startY: 0,
     baseTx: 0,
@@ -134,38 +140,59 @@ export function useLightboxTransform(options: UseLightboxTransformOptions) {
     [apply],
   )
 
-  const handleWheel: WheelEventHandler<HTMLDivElement> = useCallback(
-    (event) => {
-      event.stopPropagation()
+  const handleWheel = useCallback(
+    (event: WheelEvent) => {
+      // 只在 lightbox 打开时处理
+      if (!containerRef.current) return
       event.preventDefault()
+      event.stopPropagation()
       zoomAtPoint(event.clientX, event.clientY, event.deltaY)
     },
     [zoomAtPoint],
   )
 
   useEffect(() => {
-    const element = containerRef.current
-    if (!element) return
+    // 绑定在 window 上，确保无论鼠标在哪都能捕获 wheel 事件
+    window.addEventListener('wheel', handleWheel, { passive: false })
+    return () => {
+      window.removeEventListener('wheel', handleWheel)
+    }
+  }, [handleWheel])
 
-    const handleMouseDown = (event: MouseEvent) => {
-      if (event.button !== 0) return
-
-      didDragRef.current = false
-      if (scaleRef.current <= 1) return
-
-      event.preventDefault()
-      dragRef.current = {
-        active: true,
-        startX: event.clientX,
-        startY: event.clientY,
-        baseTx: txRef.current,
-        baseTy: tyRef.current,
-      }
+  const finishPointerDrag = useCallback((element: HTMLDivElement, pointerId: number) => {
+    if (element.hasPointerCapture(pointerId)) {
+      element.releasePointerCapture(pointerId)
     }
 
-    const handleMouseMove = (event: MouseEvent) => {
+    dragRef.current.active = false
+    dragRef.current.pointerId = null
+  }, [])
+
+  const handlePointerDown: PointerEventHandler<HTMLDivElement> = useCallback((event) => {
+    if (event.pointerType !== 'mouse' && event.pointerType !== 'pen') return
+    if (event.button !== 0) return
+    // 放宽条件：只要在容器内且不是点击导航按钮等，就可以拖拽
+    // 不再要求必须点击到 stage 内的元素（因为图片有 pointer-events-none 会穿透）
+
+    didDragRef.current = false
+    if (scaleRef.current <= 1) return
+
+    event.preventDefault()
+    dragRef.current = {
+      active: true,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      baseTx: txRef.current,
+      baseTy: tyRef.current,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }, [])
+
+  const handlePointerMove: PointerEventHandler<HTMLDivElement> = useCallback(
+    (event) => {
       const dragState = dragRef.current
-      if (!dragState.active) return
+      if (!dragState.active || dragState.pointerId !== event.pointerId) return
 
       const dx = event.clientX - dragState.startX
       const dy = event.clientY - dragState.startY
@@ -173,39 +200,41 @@ export function useLightboxTransform(options: UseLightboxTransformOptions) {
         didDragRef.current = true
       }
       apply(scaleRef.current, dragState.baseTx + dx, dragState.baseTy + dy)
-    }
+    },
+    [apply],
+  )
 
-    const handleMouseUp = () => {
-      dragRef.current.active = false
-    }
+  const handlePointerUp: PointerEventHandler<HTMLDivElement> = useCallback(
+    (event) => {
+      if (dragRef.current.pointerId !== event.pointerId) return
+      finishPointerDrag(event.currentTarget, event.pointerId)
+    },
+    [finishPointerDrag],
+  )
 
-    element.addEventListener('mousedown', handleMouseDown)
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    return () => {
-      element.removeEventListener('mousedown', handleMouseDown)
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-    }
-  }, [apply])
+  const handlePointerCancel: PointerEventHandler<HTMLDivElement> = useCallback(
+    (event) => {
+      if (dragRef.current.pointerId !== event.pointerId) return
+      finishPointerDrag(event.currentTarget, event.pointerId)
+    },
+    [finishPointerDrag],
+  )
 
-  const handleClick: MouseEventHandler<HTMLDivElement> = useCallback(
+  const handleBackdropClick: MouseEventHandler<HTMLDivElement> = useCallback(
     (event) => {
       if (suppressNextClickRef.current) {
         suppressNextClickRef.current = false
         event.stopPropagation()
         return
       }
-
-      if (didDragRef.current) return
-      if (scaleRef.current > 1 && event.target instanceof HTMLImageElement) return
       onClose()
     },
     [onClose],
   )
 
-  const handleDoubleClick: MouseEventHandler<HTMLDivElement> = useCallback(
+  const handleStageDoubleClick: MouseEventHandler<HTMLDivElement> = useCallback(
     (event) => {
+      if (!isStageTarget(event.target)) return
       event.stopPropagation()
       if (scaleRef.current > 1) {
         apply(1, 0, 0)
@@ -243,6 +272,7 @@ export function useLightboxTransform(options: UseLightboxTransformOptions) {
           midY: (pointA.clientY + pointB.clientY) / 2 - cy,
         }
         dragRef.current.active = false
+        dragRef.current.pointerId = null
         return
       }
 
@@ -251,7 +281,7 @@ export function useLightboxTransform(options: UseLightboxTransformOptions) {
       const touch = event.touches[0]
       const now = Date.now()
       const previousTap = tapRef.current
-      touchStartedOnImageRef.current = event.target instanceof HTMLImageElement
+      touchStartedOnImageRef.current = isStageTarget(event.target)
 
       if (
         now - previousTap.time < 300 &&
@@ -276,6 +306,7 @@ export function useLightboxTransform(options: UseLightboxTransformOptions) {
         event.preventDefault()
         dragRef.current = {
           active: true,
+          pointerId: null,
           startX: touch.clientX,
           startY: touch.clientY,
           baseTx: txRef.current,
@@ -326,6 +357,7 @@ export function useLightboxTransform(options: UseLightboxTransformOptions) {
       if (event.touches.length !== 0) return
 
       dragRef.current.active = false
+      dragRef.current.pointerId = null
       if (hadMultiTouchRef.current) {
         hadMultiTouchRef.current = false
         tapRef.current = { time: 0, x: 0, y: 0 }
@@ -368,13 +400,17 @@ export function useLightboxTransform(options: UseLightboxTransformOptions) {
 
   return {
     containerRef,
+    stageRef,
     imageStyle,
     isZoomed,
     isDragging,
     showZoomBadge,
     zoomPercent,
-    handleWheel,
-    handleClick,
-    handleDoubleClick,
+    handleBackdropClick,
+    handleStageDoubleClick,
+    handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+    handlePointerCancel,
   }
 }

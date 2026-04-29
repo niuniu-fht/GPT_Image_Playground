@@ -1,4 +1,4 @@
-import type { CSSProperties, MouseEventHandler, RefObject, WheelEventHandler } from 'react'
+import type { CSSProperties, MouseEventHandler, PointerEventHandler, RefObject } from 'react'
 
 interface LightboxViewportProps {
   src: string
@@ -10,10 +10,14 @@ interface LightboxViewportProps {
   showZoomBadge: boolean
   zoomPercent: number
   containerRef: RefObject<HTMLDivElement | null>
+  stageRef: RefObject<HTMLDivElement | null>
   imageStyle: CSSProperties
-  onWheel: WheelEventHandler<HTMLDivElement>
-  onClick: MouseEventHandler<HTMLDivElement>
-  onDoubleClick: MouseEventHandler<HTMLDivElement>
+  onBackdropClick: MouseEventHandler<HTMLDivElement>
+  onStageDoubleClick: MouseEventHandler<HTMLDivElement>
+  onPointerDown: PointerEventHandler<HTMLDivElement>
+  onPointerMove: PointerEventHandler<HTMLDivElement>
+  onPointerUp: PointerEventHandler<HTMLDivElement>
+  onPointerCancel: PointerEventHandler<HTMLDivElement>
   onPrev: () => void
   onNext: () => void
 }
@@ -29,10 +33,14 @@ export default function LightboxViewport(props: LightboxViewportProps) {
     showZoomBadge,
     zoomPercent,
     containerRef,
+    stageRef,
     imageStyle,
-    onWheel,
-    onClick,
-    onDoubleClick,
+    onBackdropClick,
+    onStageDoubleClick,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+    onPointerCancel,
     onPrev,
     onNext,
   } = props
@@ -50,19 +58,36 @@ export default function LightboxViewport(props: LightboxViewportProps) {
         overscrollBehavior: 'none',
         touchAction: 'none',
       }}
-      onWheel={onWheel}
-      onClick={onClick}
-      onDoubleClick={onDoubleClick}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
     >
-      <div className="absolute inset-0 animate-fade-in bg-black/70 backdrop-blur-md" />
-      <div className="relative animate-zoom-in">
-        <img
-          src={src}
-          className="max-h-[85vh] max-w-[85vw] rounded-lg object-contain shadow-2xl"
-          style={imageStyle}
-          onDragStart={(event) => event.preventDefault()}
-          alt=""
-        />
+      {/* 背景遮罩 */}
+      <div
+        className="absolute inset-0 animate-fade-in bg-black/70 backdrop-blur-md"
+        onClick={onBackdropClick}
+      />
+      {/* 图片容器 */}
+      <div className="relative z-10 animate-zoom-in">
+        <div
+          ref={stageRef}
+          data-lightbox-stage
+          className="relative"
+          style={{
+            ...imageStyle,
+            touchAction: 'none',
+          }}
+          onDoubleClick={onStageDoubleClick}
+        >
+          <img
+            src={src}
+            className="max-h-[85vh] max-w-[85vw] select-none rounded-lg object-contain shadow-2xl"
+            draggable={false}
+            onDragStart={(event) => event.preventDefault()}
+            alt=""
+          />
+        </div>
       </div>
 
       {showNav && !isZoomed && (

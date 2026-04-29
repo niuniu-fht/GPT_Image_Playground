@@ -10,14 +10,18 @@ export default function Lightbox() {
 
   const {
     containerRef,
+    stageRef,
     imageStyle,
     isZoomed,
     isDragging,
     showZoomBadge,
     zoomPercent,
-    handleWheel,
-    handleClick,
-    handleDoubleClick,
+    handleBackdropClick,
+    handleStageDoubleClick,
+    handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+    handlePointerCancel,
   } = useLightboxTransform({
     src,
     onClose: close,
@@ -36,10 +40,14 @@ export default function Lightbox() {
       showZoomBadge={showZoomBadge}
       zoomPercent={zoomPercent}
       containerRef={containerRef}
+      stageRef={stageRef}
       imageStyle={imageStyle}
-      onWheel={handleWheel}
-      onClick={handleClick}
-      onDoubleClick={handleDoubleClick}
+      onBackdropClick={handleBackdropClick}
+      onStageDoubleClick={handleStageDoubleClick}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
       onPrev={goPrev}
       onNext={goNext}
     />
