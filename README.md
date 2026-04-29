@@ -49,9 +49,10 @@
 
 ```text
 React UI
-  ├─ components/            任务画廊、输入区、详情弹窗、设置弹窗、编辑弹窗
-  ├─ Zustand Store          状态管理、任务编排、分类/收藏/回收站、导入导出
-  ├─ API Adapter            Images API / Responses API / 本地代理 / SSE 解析 / 协议回退
+  ├─ features/              输入区、画廊、查看器、设置等按功能拆分的 UI 模块
+  ├─ shared/components/     通用弹窗、Toast、Select 等共享组件
+  ├─ store/                 状态管理、任务编排、分类/收藏/回收站、导入导出
+  ├─ lib/api/               Images API / Responses API / 本地代理 / SSE 解析 / 协议回退
   ├─ IndexedDB + 内存缓存   图片、任务、完整错误日志持久化、去重、按需读取
   ├─ Dev Proxy Logger       本地代理请求转发与开发机 success/error 日志落盘
   └─ PWA Shell              manifest + service worker
@@ -76,7 +77,7 @@ React UI
   每次请求失败时，会把完整错误上下文随任务一起保存到浏览器本地，便于“复制完整报错”直接拿到该次请求的完整排查信息；完整错误日志默认保留 15 天，过期后自动清理。
 
 - 协议适配层
-  `src/lib/api.ts` 负责统一封装 `images/generations`、`images/edits`、`responses` 三类请求，并处理自动回退、SSE 解析、图片内联压缩、文件上传等差异。
+  `src/lib/api.ts` 是统一入口，具体实现拆分在 `src/lib/api/` 下，负责封装 `images/generations`、`images/edits`、`responses` 三类请求，并处理自动回退、SSE 解析、图片内联压缩、文件上传等差异。
 
 - 长请求传输策略
   设置中的传输偏好会同时影响 `Images API` 与 `Responses API`。兼容时优先走流式；不兼容时自动回退到普通 JSON，并把任务最终实际走的是 `流式 / JSON / JSON（降级）` 记录到任务元信息与界面状态里。
@@ -227,8 +228,11 @@ npm run preview
 
 ```text
 .
+├─ AGENTS.md
+├─ CLAUDE.md
 ├─ docs/
-│  └─ images/                   README 截图资源
+│  ├─ code-style.md            详细代码规范
+│  └─ images/                  README 截图资源
 ├─ deploy/
 │  ├─ Dockerfile                Docker 构建文件
 │  ├─ nginx.conf                Nginx 配置
@@ -241,12 +245,15 @@ npm run preview
 │  ├─ pwa-icon.svg              PWA 图标
 │  └─ sw.js                     Service Worker
 ├─ src/
-│  ├─ components/               UI 组件与弹窗
+│  ├─ app/                      应用级骨架组件
+│  ├─ features/                 按功能拆分的业务 UI 模块
 │  ├─ hooks/                    自定义 hooks
 │  ├─ lib/                      API 适配、尺寸处理、DB、代理等基础模块
+│  ├─ shared/                   共享组件
+│  ├─ store/                    Zustand 状态与任务工作流实现
 │  ├─ App.tsx                   应用骨架
 │  ├─ main.tsx                  入口与 Service Worker 注册
-│  ├─ store.ts                  核心状态与任务工作流
+│  ├─ store.ts                  Store 统一导出入口
 │  └─ types.ts                  类型定义
 ├─ dev-proxy.config.example.json
 ├─ dev-proxy.config.json
@@ -341,11 +348,14 @@ npm run preview
 ## 文档入口
 
 - [README.md](./README.md)：项目总览、快速开始、FAQ。
+- [AGENTS.md](./AGENTS.md)：项目级协作说明。
+- [CLAUDE.md](./CLAUDE.md)：与 `AGENTS.md` 保持一致的项目级协作说明。
+- [docs/code-style.md](./docs/code-style.md)：详细代码规范。
 - [docs/images](./docs/images)：界面截图。
 - [deploy](./deploy)：Docker / Nginx 部署文件。
 - [dev-proxy.config.example.json](./dev-proxy.config.example.json)：本地代理配置模板。
-- [src/store.ts](./src/store.ts)：任务、分类、收藏、回收站、导入导出的核心实现。
-- [src/lib/api.ts](./src/lib/api.ts)：协议适配、请求组包、兼容逻辑的核心实现。
+- [src/store.ts](./src/store.ts)：Store 统一导出入口；具体实现见 [src/store](./src/store)。
+- [src/lib/api.ts](./src/lib/api.ts)：API 统一导出入口；具体实现见 [src/lib/api](./src/lib/api)。
 
 ## 贡献
 
