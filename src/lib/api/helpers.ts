@@ -19,6 +19,7 @@ import type {
   CallApiOptions,
   ImagesRequestPlan,
   ParsedSseEvent,
+  ResponsesStreamImageEvent,
   SharedRequestContext,
   StreamedPayloadResult,
 } from './types'
@@ -98,6 +99,10 @@ export function getDataUrlByteSize(dataUrl: string): number {
   const base64 = dataUrl.split(',')[1] || ''
   const paddingLength = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0
   return Math.max(0, Math.floor((base64.length * 3) / 4) - paddingLength)
+}
+
+export function shouldUseSplitResponsesStreamPath(): boolean {
+  return true
 }
 
 async function loadImageElement(src: string): Promise<HTMLImageElement> {
@@ -692,6 +697,11 @@ function parseSseEvents(text: string): ParsedSseEvent[] {
   return feedIncrementalSseParser(createIncrementalSseParserState(), text, true)
 }
 
+interface IncrementalSseParserOptions {
+  deferJsonParsing?: boolean
+  discardPartialImageData?: boolean
+}
+
 interface IncrementalSseParserState {
   buffer: string
   event: string
@@ -712,10 +722,24 @@ function isPartialImageSseEventName(event: string): boolean {
   return event.includes('partial_image')
 }
 
-function flushIncrementalSseEvent(state: IncrementalSseParserState): ParsedSseEvent | null {
+function shouldCollectSseEventData(
+  event: string,
+  options?: IncrementalSseParserOptions,
+): boolean {
+  if (isPartialImageSseEventName(event)) {
+    return !options?.discardPartialImageData
+  }
+
+  return true
+}
+
+function flushIncrementalSseEvent(
+  state: IncrementalSseParserState,
+  options?: IncrementalSseParserOptions,
+): ParsedSseEvent | null {
   const event = state.event || 'message'
   const hasData = state.hasData
-  const dataText = hasData && !isPartialImageSseEventName(event) ? state.dataLines.join('\n') : ''
+  const dataText = hasData && shouldCollectSseEventData(event, options) ? state.dataLines.join('\n') : ''
   state.event = 'message'
   state.dataLines = []
   state.hasData = false
@@ -726,16 +750,20 @@ function flushIncrementalSseEvent(state: IncrementalSseParserState): ParsedSseEv
   return {
     event,
     dataText,
-    json: isPartialImageSseEventName(event) ? undefined : tryParseJson(dataText),
+    json:
+      isPartialImageSseEventName(event) || options?.deferJsonParsing
+        ? undefined
+        : tryParseJson(dataText),
   }
 }
 
 function processIncrementalSseLine(
   state: IncrementalSseParserState,
   line: string,
+  options?: IncrementalSseParserOptions,
 ): ParsedSseEvent | null {
   if (!line) {
-    return flushIncrementalSseEvent(state)
+    return flushIncrementalSseEvent(state, options)
   }
 
   if (line.startsWith('event:')) {
@@ -745,7 +773,7 @@ function processIncrementalSseLine(
 
   if (line.startsWith('data:')) {
     state.hasData = true
-    if (!isPartialImageSseEventName(state.event)) {
+    if (shouldCollectSseEventData(state.event, options)) {
       state.dataLines.push(line.slice(5).trimStart())
     }
   }
@@ -757,6 +785,7 @@ function feedIncrementalSseParser(
   state: IncrementalSseParserState,
   chunk: string,
   flush = false,
+  options?: IncrementalSseParserOptions,
 ): ParsedSseEvent[] {
   state.buffer += chunk.replace(/\r\n/g, '\n')
   const events: ParsedSseEvent[] = []
@@ -769,7 +798,7 @@ function feedIncrementalSseParser(
 
     const line = state.buffer.slice(0, newlineIndex)
     state.buffer = state.buffer.slice(newlineIndex + 1)
-    const nextEvent = processIncrementalSseLine(state, line)
+    const nextEvent = processIncrementalSseLine(state, line, options)
     if (nextEvent) {
       events.push(nextEvent)
     }
@@ -777,14 +806,14 @@ function feedIncrementalSseParser(
 
   if (flush) {
     if (state.buffer) {
-      const finalEvent = processIncrementalSseLine(state, state.buffer)
+      const finalEvent = processIncrementalSseLine(state, state.buffer, options)
       state.buffer = ''
       if (finalEvent) {
         events.push(finalEvent)
       }
     }
 
-    const trailingEvent = flushIncrementalSseEvent(state)
+    const trailingEvent = flushIncrementalSseEvent(state, options)
     if (trailingEvent) {
       events.push(trailingEvent)
     }
@@ -805,6 +834,205 @@ function buildResponsesStreamEventPayloadForImages(
   }
 
   return null
+}
+
+function extractSseImageStringField(dataText: string, fieldName: string): string | undefined {
+  const marker = `"${fieldName}":"`
+  const markerIndex = dataText.indexOf(marker)
+  if (markerIndex < 0) {
+    return undefined
+  }
+
+  const valueStart = markerIndex + marker.length
+  let index = valueStart
+  let escaped = false
+
+  while (index < dataText.length) {
+    const char = dataText[index]
+    if (escaped) {
+      escaped = false
+      index += 1
+      continue
+    }
+
+    if (char === '\\') {
+      escaped = true
+      index += 1
+      continue
+    }
+
+    if (char === '"') {
+      return dataText.slice(valueStart, index)
+    }
+
+    index += 1
+  }
+
+  return undefined
+}
+
+function extractSseImageNumberField(dataText: string, fieldName: string): number | undefined {
+  const match = dataText.match(new RegExp(`"${fieldName}":(-?\\d+)`))
+  if (!match) {
+    return undefined
+  }
+
+  const parsed = Number(match[1])
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function parseResponsesOutputDoneImageEvent(event: ParsedSseEvent): ResponsesStreamImageEvent | null {
+  if (event.event !== 'response.output_item.done' || !event.dataText) {
+    return null
+  }
+
+  const base64 =
+    extractSseImageStringField(event.dataText, 'result') ??
+    extractSseImageStringField(event.dataText, 'b64_json')
+  if (!base64) {
+    return null
+  }
+
+  return {
+    event: event.event,
+    itemId: extractSseImageStringField(event.dataText, 'id'),
+    outputIndex: extractSseImageNumberField(event.dataText, 'output_index'),
+    outputFormat: extractSseImageStringField(event.dataText, 'output_format'),
+    background: extractSseImageStringField(event.dataText, 'background'),
+    base64,
+    isPartial: false,
+  }
+}
+
+function sanitizeResponsesOutputItemFromDataText(dataText: string): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {
+    type: 'image_generation_call',
+  }
+
+  const id = extractSseImageStringField(dataText, 'id')
+  if (id) sanitized.id = id
+
+  const status = extractSseImageStringField(dataText, 'status')
+  if (status) sanitized.status = status
+
+  const size = extractSseImageStringField(dataText, 'size')
+  if (size) sanitized.size = size
+
+  const quality = extractSseImageStringField(dataText, 'quality')
+  if (quality) sanitized.quality = quality
+
+  const outputFormat = extractSseImageStringField(dataText, 'output_format')
+  if (outputFormat) sanitized.output_format = outputFormat
+
+  const background = extractSseImageStringField(dataText, 'background')
+  if (background) sanitized.background = background
+
+  const action = extractSseImageStringField(dataText, 'action')
+  if (action) sanitized.action = action
+
+  const revisedPrompt = extractSseImageStringField(dataText, 'revised_prompt')
+  if (revisedPrompt) sanitized.revised_prompt = revisedPrompt
+
+  const outputIndex = extractSseImageNumberField(dataText, 'output_index')
+  if (typeof outputIndex === 'number') {
+    sanitized.output_index = outputIndex
+  }
+
+  return sanitized
+}
+
+function extractResponsesCompletedMetaFromDataText(dataText: string): Record<string, unknown> {
+  const compact: Record<string, unknown> = {}
+
+  const id = extractSseImageStringField(dataText, 'id')
+  if (id) compact.id = id
+
+  const status = extractSseImageStringField(dataText, 'status')
+  if (status) compact.status = status
+
+  const model = extractSseImageStringField(dataText, 'model')
+  if (model) compact.model = model
+
+  const createdAt = extractSseImageNumberField(dataText, 'created_at')
+  if (typeof createdAt === 'number') {
+    compact.created_at = createdAt
+  }
+
+  return compact
+}
+
+function buildImagePayloadFromStreamImageEvent(
+  streamEvent: ResponsesStreamImageEvent,
+): Record<string, unknown> | null {
+  if (!streamEvent.base64) {
+    return null
+  }
+
+  const item: Record<string, unknown> = {
+    type: 'image_generation_call',
+    status: streamEvent.isPartial ? 'in_progress' : 'completed',
+  }
+
+  if (streamEvent.itemId) {
+    item.id = streamEvent.itemId
+  }
+  if (streamEvent.outputFormat) {
+    item.output_format = streamEvent.outputFormat
+  }
+  if (streamEvent.background) {
+    item.background = streamEvent.background
+  }
+  if (typeof streamEvent.outputIndex === 'number') {
+    item.output_index = streamEvent.outputIndex
+  }
+
+  if (streamEvent.isPartial) {
+    item.partial_image_b64 = streamEvent.base64
+  } else {
+    item.result = streamEvent.base64
+  }
+
+  return {
+    output: [item],
+  }
+}
+
+function sanitizeResponsesOutputItem(item: Record<string, unknown>): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {}
+
+  if (typeof item.id === 'string' && item.id) sanitized.id = item.id
+  if (typeof item.type === 'string' && item.type) sanitized.type = item.type
+  if (typeof item.status === 'string' && item.status) sanitized.status = item.status
+  if (typeof item.size === 'string' && item.size) sanitized.size = item.size
+  if (typeof item.quality === 'string' && item.quality) sanitized.quality = item.quality
+  if (typeof item.output_format === 'string' && item.output_format) sanitized.output_format = item.output_format
+  if (typeof item.background === 'string' && item.background) sanitized.background = item.background
+  if (typeof item.action === 'string' && item.action) sanitized.action = item.action
+  if (typeof item.revised_prompt === 'string' && item.revised_prompt) sanitized.revised_prompt = item.revised_prompt
+
+  return Object.keys(sanitized).length > 0 ? sanitized : { type: 'image_generation_call' }
+}
+
+function sanitizeResponsesCompletedResponse(response: Record<string, unknown>): Record<string, unknown> {
+  return buildCompactResponsesPayload(response, [])
+}
+
+function buildLargeResponsesCompletedPayload(
+  completedResponse: Record<string, unknown> | null,
+  outputItems: Record<string, unknown>[],
+  lastJsonPayload: Record<string, unknown> | null,
+): unknown {
+  if (completedResponse) {
+    return buildCompactResponsesPayload(completedResponse, outputItems)
+  }
+
+  if (outputItems.length > 0) {
+    return {
+      output: outputItems,
+    }
+  }
+
+  return lastJsonPayload ?? { output: [] }
 }
 
 function extractUpstreamErrorMessageFromDetails(details: unknown): string | null {
@@ -1028,6 +1256,18 @@ function collectImageSignaturesFromItem(item: unknown): string[] {
     !hasUsableImagePayload(item)
   ) {
     return []
+  }
+
+  const id = readOptionalText(item.id)
+  const outputIndex =
+    typeof item.output_index === 'number' && Number.isFinite(item.output_index)
+      ? item.output_index
+      : null
+  if (id && outputIndex != null) {
+    return [`id:${id}:output_index:${outputIndex}`]
+  }
+  if (id) {
+    return [`id:${id}`]
   }
 
   if (typeof item.b64_json === 'string' && item.b64_json) {
@@ -1777,6 +2017,7 @@ async function consumeSseResponseText(
   response: Response,
   signal: AbortSignal,
   onEvent?: (event: ParsedSseEvent) => void | Promise<void>,
+  options?: IncrementalSseParserOptions,
 ): Promise<{ text: string; sawAnyEvents: boolean }> {
   throwIfSignalAborted(signal)
 
@@ -1824,7 +2065,7 @@ async function consumeSseResponseText(
 
     throwIfSignalAborted(signal)
     const chunk = decoder.decode(value, { stream: true })
-    const events = feedIncrementalSseParser(parserState, chunk)
+    const events = feedIncrementalSseParser(parserState, chunk, false, options)
     if (!sawAnyEvents && events.length === 0) {
       text += chunk
     }
@@ -1842,7 +2083,7 @@ async function consumeSseResponseText(
 
   throwIfSignalAborted(signal)
   const finalChunk = decoder.decode()
-  const finalEvents = feedIncrementalSseParser(parserState, finalChunk, true)
+  const finalEvents = feedIncrementalSseParser(parserState, finalChunk, true, options)
   if (!sawAnyEvents && finalEvents.length === 0) {
     text += finalChunk
   }
@@ -1864,6 +2105,7 @@ export async function readResponsesPayloadStream(
   response: Response,
   fallbackMime: string,
   signal: AbortSignal,
+  useSplitStreamPath = false,
   logEntry?: ApiDebugRequestLogEntry,
 ): Promise<StreamedPayloadResult> {
   const requestId = attachDebugResponseMeta(logEntry, response)
@@ -1875,41 +2117,95 @@ export async function readResponsesPayloadStream(
   let failedPayload: Record<string, unknown> | null = null
   let lastJsonPayload: Record<string, unknown> | null = null
 
-  const { text, sawAnyEvents } = await consumeSseResponseText(response, signal, async (event) => {
-    if (!event.json || !isRecord(event.json)) {
-      return
-    }
+  const { text, sawAnyEvents } = await consumeSseResponseText(
+    response,
+    signal,
+    async (event) => {
+      if (useSplitStreamPath) {
+        if (isPartialImageSseEventName(event.event)) {
+          return
+        }
 
-    lastJsonPayload = event.json
+        const outputDoneImageEvent = parseResponsesOutputDoneImageEvent(event)
+        if (outputDoneImageEvent?.base64) {
+          const finalPayload = buildImagePayloadFromStreamImageEvent(outputDoneImageEvent)
+          if (finalPayload) {
+            streamedFinalImageCount += await emitNewImagesFromPayload(
+              finalPayload,
+              fallbackMime,
+              signal,
+              emittedImageSignatures,
+              async (images) => {
+                streamedImages.push(...images)
+              },
+            )
+          }
+        }
+      }
 
-    if (event.json.type === 'response.output_item.done' && isRecord(event.json.item)) {
-      outputItems.push(event.json.item as Record<string, unknown>)
-    }
-    if (event.json.type === 'response.completed' && isRecord(event.json.response)) {
-      completedResponse = event.json.response as Record<string, unknown>
-    }
-    if (
-      event.json.type === 'response.failed' ||
-      (isRecord(event.json.response) && event.json.response.status === 'failed')
-    ) {
-      failedPayload = event.json
-    }
+      if (useSplitStreamPath && event.event === 'response.output_item.done' && event.dataText) {
+        outputItems.push(sanitizeResponsesOutputItemFromDataText(event.dataText))
+        return
+      }
+      if (useSplitStreamPath && event.event === 'response.completed' && event.dataText) {
+        completedResponse = extractResponsesCompletedMetaFromDataText(event.dataText)
+        if (completedResponse.status === 'failed') {
+          failedPayload = {
+            type: 'response.failed',
+            response: completedResponse,
+          }
+        }
+        return
+      }
 
-    const imagePayload = buildResponsesStreamEventPayloadForImages(event.json)
-    if (!imagePayload) {
-      return
-    }
+      const parsedJson =
+        event.json ??
+        (!isPartialImageSseEventName(event.event) && event.dataText ? tryParseJson(event.dataText) : undefined)
 
-    streamedFinalImageCount += await emitNewImagesFromPayload(
-      imagePayload,
-      fallbackMime,
-      signal,
-      emittedImageSignatures,
-      async (images) => {
-        streamedImages.push(...images)
-      },
-    )
-  })
+      if (!parsedJson || !isRecord(parsedJson)) {
+        return
+      }
+
+      lastJsonPayload = parsedJson
+
+      if (parsedJson.type === 'response.output_item.done' && isRecord(parsedJson.item)) {
+        const outputItem = parsedJson.item as Record<string, unknown>
+        outputItems.push(useSplitStreamPath ? sanitizeResponsesOutputItem(outputItem) : outputItem)
+      }
+      if (parsedJson.type === 'response.completed' && isRecord(parsedJson.response)) {
+        completedResponse = useSplitStreamPath
+          ? sanitizeResponsesCompletedResponse(parsedJson.response as Record<string, unknown>)
+          : (parsedJson.response as Record<string, unknown>)
+      }
+      if (
+        parsedJson.type === 'response.failed' ||
+        (isRecord(parsedJson.response) && parsedJson.response.status === 'failed')
+      ) {
+        failedPayload = parsedJson
+      }
+
+      const imagePayload = buildResponsesStreamEventPayloadForImages(parsedJson)
+      if (!imagePayload) {
+        return
+      }
+
+      streamedFinalImageCount += await emitNewImagesFromPayload(
+        imagePayload,
+        fallbackMime,
+        signal,
+        emittedImageSignatures,
+        async (images) => {
+          streamedImages.push(...images)
+        },
+      )
+    },
+    useSplitStreamPath
+      ? {
+          deferJsonParsing: true,
+          discardPartialImageData: true,
+        }
+      : undefined,
+  )
 
   if (sawAnyEvents) {
     if (failedPayload) {
@@ -1930,7 +2226,9 @@ export async function readResponsesPayloadStream(
     }
 
     let payload: unknown
-    if (completedResponse) {
+    if (useSplitStreamPath) {
+      payload = buildLargeResponsesCompletedPayload(completedResponse, outputItems, lastJsonPayload)
+    } else if (completedResponse) {
       const existingOutput = Array.isArray(completedResponse.output) ? completedResponse.output : []
       payload = buildCompactResponsesPayload(
         completedResponse,

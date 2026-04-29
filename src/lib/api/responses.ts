@@ -24,6 +24,7 @@ import {
   readResponsesPayload,
   readResponsesPayloadStream,
   sanitizeDebugValue,
+  shouldUseSplitResponsesStreamPath,
   shouldFallbackResponsesStreamToJson,
   shouldRetryResponsesWithCompatibility,
   shouldRetryResponsesWithFileId,
@@ -492,6 +493,7 @@ async function callResponsesApiWithInputMode(
   )
   const allUploadedFileIds = [...uploadedFileIds, ...uploadedMaskFileIds]
   const requestPlans = buildResponsesRequestPlans(opts, inputImages)
+  const useSplitStreamPath = shouldUseSplitResponsesStreamPath()
 
   try {
     while (remainingImageCount > 0) {
@@ -540,6 +542,7 @@ async function callResponsesApiWithInputMode(
                   response,
                   ctx.mime,
                   ctx.controller.signal,
+                  useSplitStreamPath,
                   debugLogEntry,
                 )
               : null

@@ -86,6 +86,16 @@ export interface ParsedSseEvent {
   json?: unknown
 }
 
+export interface ResponsesStreamImageEvent {
+  event: string
+  itemId?: string
+  outputIndex?: number
+  outputFormat?: string
+  background?: string
+  base64?: string
+  isPartial: boolean
+}
+
 export interface StreamedPayloadResult {
   payload: unknown
   streamedFinalImageCount: number
