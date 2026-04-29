@@ -1,4 +1,4 @@
-import type { CSSProperties, MouseEventHandler, RefObject } from 'react'
+import type { CSSProperties, MouseEventHandler, RefObject, WheelEventHandler } from 'react'
 
 interface LightboxViewportProps {
   src: string
@@ -11,6 +11,7 @@ interface LightboxViewportProps {
   zoomPercent: number
   containerRef: RefObject<HTMLDivElement | null>
   imageStyle: CSSProperties
+  onWheel: WheelEventHandler<HTMLDivElement>
   onClick: MouseEventHandler<HTMLDivElement>
   onDoubleClick: MouseEventHandler<HTMLDivElement>
   onPrev: () => void
@@ -29,6 +30,7 @@ export default function LightboxViewport(props: LightboxViewportProps) {
     zoomPercent,
     containerRef,
     imageStyle,
+    onWheel,
     onClick,
     onDoubleClick,
     onPrev,
@@ -43,7 +45,12 @@ export default function LightboxViewport(props: LightboxViewportProps) {
       ref={containerRef}
       data-lightbox-root
       className="fixed inset-0 z-[60] flex select-none items-center justify-center"
-      style={{ cursor: isZoomed ? (isDragging ? 'grabbing' : 'grab') : 'pointer' }}
+      style={{
+        cursor: isZoomed ? (isDragging ? 'grabbing' : 'grab') : 'pointer',
+        overscrollBehavior: 'none',
+        touchAction: 'none',
+      }}
+      onWheel={onWheel}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >

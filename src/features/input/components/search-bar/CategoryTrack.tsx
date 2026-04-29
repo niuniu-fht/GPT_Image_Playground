@@ -70,7 +70,7 @@ export default function CategoryTrack({
         className={`category-wheel-track hide-scrollbar flex overflow-x-auto pb-0.5 ${
           isMobile
             ? 'snap-x snap-proximity gap-1.5 overscroll-x-contain pr-1'
-            : 'mask-edge-x gap-2'
+            : 'mask-edge-r gap-2'
         }`}
         onScroll={isMobile ? undefined : onScroll}
       >

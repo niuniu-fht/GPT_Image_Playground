@@ -15,6 +15,7 @@ export default function Lightbox() {
     isDragging,
     showZoomBadge,
     zoomPercent,
+    handleWheel,
     handleClick,
     handleDoubleClick,
   } = useLightboxTransform({
@@ -36,6 +37,7 @@ export default function Lightbox() {
       zoomPercent={zoomPercent}
       containerRef={containerRef}
       imageStyle={imageStyle}
+      onWheel={handleWheel}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onPrev={goPrev}

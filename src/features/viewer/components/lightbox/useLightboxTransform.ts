@@ -5,6 +5,7 @@ import {
   useState,
   type CSSProperties,
   type MouseEventHandler,
+  type WheelEventHandler,
 } from 'react'
 import { clamp, MAX_SCALE, MIN_SCALE } from './shared'
 
@@ -113,28 +114,34 @@ export function useLightboxTransform(options: UseLightboxTransformOptions) {
     [rerender],
   )
 
-  useEffect(() => {
-    const element = containerRef.current
-    if (!element) return
+  const zoomAtPoint = useCallback(
+    (clientX: number, clientY: number, deltaY: number) => {
+      const element = containerRef.current
+      if (!element) return
 
-    const handleWheel = (event: WheelEvent) => {
-      event.preventDefault()
       const scale = scaleRef.current
       const tx = txRef.current
       const ty = tyRef.current
       const rect = element.getBoundingClientRect()
-      const mouseX = event.clientX - rect.left - rect.width / 2
-      const mouseY = event.clientY - rect.top - rect.height / 2
-      const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15
+      const mouseX = clientX - rect.left - rect.width / 2
+      const mouseY = clientY - rect.top - rect.height / 2
+      const factor = deltaY < 0 ? 1.15 : 1 / 1.15
       const nextScale = clamp(scale * factor, MIN_SCALE, MAX_SCALE)
       const ratio = nextScale / scale
 
       apply(nextScale, mouseX - ratio * (mouseX - tx), mouseY - ratio * (mouseY - ty))
-    }
+    },
+    [apply],
+  )
 
-    element.addEventListener('wheel', handleWheel, { passive: false })
-    return () => element.removeEventListener('wheel', handleWheel)
-  }, [apply])
+  const handleWheel: WheelEventHandler<HTMLDivElement> = useCallback(
+    (event) => {
+      event.stopPropagation()
+      event.preventDefault()
+      zoomAtPoint(event.clientX, event.clientY, event.deltaY)
+    },
+    [zoomAtPoint],
+  )
 
   useEffect(() => {
     const element = containerRef.current
@@ -366,6 +373,7 @@ export function useLightboxTransform(options: UseLightboxTransformOptions) {
     isDragging,
     showZoomBadge,
     zoomPercent,
+    handleWheel,
     handleClick,
     handleDoubleClick,
   }
