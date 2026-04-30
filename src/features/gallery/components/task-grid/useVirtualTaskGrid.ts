@@ -18,6 +18,10 @@ interface GridViewportMetrics {
 
 type ScrollContainer = Window | HTMLElement
 
+function isWindowScrollContainer(container: ScrollContainer): container is Window {
+  return container === window
+}
+
 function isScrollableOverflow(value: string): boolean {
   return /(auto|scroll|overlay)/.test(value)
 }
@@ -37,11 +41,11 @@ function resolveScrollContainer(element: HTMLElement | null): ScrollContainer {
 }
 
 function readScrollTop(container: ScrollContainer): number {
-  return container === window ? window.scrollY : container.scrollTop
+  return isWindowScrollContainer(container) ? window.scrollY : container.scrollTop
 }
 
 function readViewportHeight(container: ScrollContainer): number {
-  return container === window ? window.innerHeight : container.clientHeight
+  return isWindowScrollContainer(container) ? window.innerHeight : container.clientHeight
 }
 
 function readGridTop(grid: HTMLDivElement | null, container: ScrollContainer): number {
@@ -50,7 +54,7 @@ function readGridTop(grid: HTMLDivElement | null, container: ScrollContainer): n
     return 0
   }
 
-  if (container === window) {
+  if (isWindowScrollContainer(container)) {
     return rect.top + window.scrollY
   }
 
@@ -121,7 +125,7 @@ export function useVirtualTaskGrid(options: UseVirtualTaskGridOptions) {
           })
         : null
     if (resizeObserver) {
-      if (scrollContainer !== window) {
+      if (!isWindowScrollContainer(scrollContainer)) {
         resizeObserver.observe(scrollContainer)
       }
       if (wrapperRef.current) {

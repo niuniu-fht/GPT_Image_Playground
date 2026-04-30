@@ -59,6 +59,12 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   webp: 'image/webp',
 }
 
+function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const ownedBytes = new Uint8Array(bytes.length)
+  ownedBytes.set(bytes)
+  return ownedBytes.buffer
+}
+
 export async function clearAllData() {
   await dbClearTasks()
   await clearImages()
@@ -255,7 +261,7 @@ async function prepareImportedImage(
   }
 
   const originalMimeType = resolveMimeTypeFromPath(normalizedPath, normalizeOptionalString(info.mimeType) ?? undefined)
-  const originalBlob = new Blob([originalBytes], { type: originalMimeType })
+  const originalBlob = new Blob([toOwnedArrayBuffer(originalBytes)], { type: originalMimeType })
 
   const normalizedThumbnailPath = normalizeOptionalString(info.thumbnailPath)
   let thumbnailBlob: Blob | null | undefined
@@ -265,7 +271,7 @@ async function prepareImportedImage(
       throw new Error(`导入包缺少缩略图文件：${normalizedThumbnailPath}`)
     }
 
-    thumbnailBlob = new Blob([thumbnailBytes], {
+    thumbnailBlob = new Blob([toOwnedArrayBuffer(thumbnailBytes)], {
       type: resolveMimeTypeFromPath(normalizedThumbnailPath),
     })
   }
