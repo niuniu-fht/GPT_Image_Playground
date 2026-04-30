@@ -8,6 +8,27 @@ import type {
 } from '../../types'
 import type { readClientDevProxyConfig } from '../devProxy'
 
+export interface CallImageApiIntent {
+  settings: AppSettings
+  prompt: string
+  params: TaskParams
+  inputImages: ApiInputImage[]
+  editMask?: ApiEditMask | null
+  onFinalImages?: (images: ApiImageAsset[]) => void | Promise<void>
+  registerAbort?: (abort: () => void) => void
+}
+
+export interface ApiInputImage {
+  dataUrl: string
+  id?: string
+}
+
+export interface ApiEditMask {
+  dataUrl: string
+  sourceImageId?: string | null
+  selection?: ImageEditSelection | null
+}
+
 export interface CallApiOptions {
   settings: AppSettings
   prompt: string
