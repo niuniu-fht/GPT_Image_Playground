@@ -321,8 +321,23 @@ async function writeProxyStreamResponse(res: ServerResponse, upstream: Response,
   const [clientStream, logStream] = body.tee()
   writeProxyResponseHeaders(res, upstream, requestId)
   res.flushHeaders()
-  const logBufferPromise = readWebStreamToBuffer(logStream)
-  await pipeline(Readable.fromWeb(clientStream as any), res)
+  let logReadError: unknown = null
+  const logBufferPromise = readWebStreamToBuffer(logStream).catch((error) => {
+    logReadError = error
+    return Buffer.alloc(0)
+  })
+
+  try {
+    await pipeline(Readable.fromWeb(clientStream as any), res)
+  } finally {
+    // 必须等待日志分支收尾，避免上游断流时出现未处理的 rejected promise 直接打崩 dev server。
+    await logBufferPromise
+  }
+
+  if (logReadError) {
+    throw logReadError
+  }
+
   return await logBufferPromise
 }
 

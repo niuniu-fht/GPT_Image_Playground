@@ -1,11 +1,14 @@
 import { callImageApi } from '../lib/api'
+import type { ApiImageAsset } from '../lib/api/types'
+import * as imageDb from '../lib/db'
 import {
   deleteImage,
-  getAllImages,
+  getAllImageRecords,
   getAllTasks,
   putTask,
   storeImage,
 } from '../lib/db'
+import { buildImageThumbnail } from '../lib/imagePreview'
 import { normalizeImageSize } from '../lib/size'
 import type { AppSettings, TaskErrorDebugInfo, TaskRecord } from '../types'
 import {
@@ -20,12 +23,14 @@ import {
 import {
   clearTaskAbortState,
   deleteCachedImage,
-  ensureImageCached,
+  ensureImageDataUrl,
   getTaskAborter,
   isTaskAbortRequested,
   registerTaskAborter,
   requestTaskAbort,
   setCachedImage,
+  setCachedImageMetadata,
+  startLegacyImageMigrationSweep,
 } from './cache'
 import { purgeTasksPermanently } from './collectionActions'
 import type { StoreApiError } from './contracts'
@@ -48,6 +53,32 @@ import { repairCategoryStateFromTasks, updateTaskInStore } from './taskStoreUtil
 
 let recycleBinJanitorId: number | null = null
 let errorLogJanitorId: number | null = null
+
+type StoreImageBlobFn = (
+  blob: Blob,
+  meta?: {
+    source?: 'upload' | 'generated'
+    mimeType?: string | null
+    width?: number | null
+    height?: number | null
+    thumbnailBlob?: Blob | null
+    thumbnailMimeType?: string | null
+    thumbnailWidth?: number | null
+    thumbnailHeight?: number | null
+  },
+) => Promise<string>
+
+function getStoreImageBlob(): StoreImageBlobFn {
+  const storeImageBlob = (imageDb as typeof imageDb & {
+    storeImageBlob?: StoreImageBlobFn
+  }).storeImageBlob
+
+  if (typeof storeImageBlob !== 'function') {
+    throw new Error('DB 层缺少 storeImageBlob(blob, meta) 实现，无法写入生成结果 Blob')
+  }
+
+  return storeImageBlob
+}
 
 function readLocalDebugFromErrorDetails(details: unknown): TaskErrorDebugInfo | null {
   if (!isRecord(details)) {
@@ -153,7 +184,9 @@ export async function initStore() {
   ensureErrorLogJanitorStarted()
 
   window.setTimeout(() => {
-    void cleanupOrphanImages(tasks)
+    void cleanupOrphanImages(tasks).finally(() => {
+      startLegacyImageMigrationSweep()
+    })
   }, 1000)
 }
 
@@ -165,11 +198,20 @@ async function cleanupOrphanImages(tasks: TaskRecord[]) {
     }
   }
 
-  const images = await getAllImages()
+  const images = await getAllImageRecords()
   for (const image of images) {
     if (!referencedIds.has(image.id)) {
       await deleteImage(image.id)
     }
+  }
+}
+
+async function prepareGeneratedImageStorage(blob: Blob) {
+  try {
+    return await buildImageThumbnail(blob)
+  } catch (error) {
+    console.error('生成结果图缩略图构建失败，将仅存原图。', error)
+    return null
   }
 }
 
@@ -368,15 +410,36 @@ async function executeTask(taskId: string, requestSettings?: AppSettings) {
 
   try {
     throwIfTaskAbortRequested(taskId)
+    const storeImageBlob = getStoreImageBlob()
 
-    const appendOutputImages = async (images: string[]) => {
+    const appendOutputImages = async (images: ApiImageAsset[]) => {
       if (!images.length) {
         return
       }
 
-      for (const dataUrl of images) {
-        const imageId = await storeImage(dataUrl, 'generated')
-        setCachedImage(imageId, dataUrl)
+      for (const image of images) {
+        throwIfTaskAbortRequested(taskId)
+        const thumbnail = await prepareGeneratedImageStorage(image.blob)
+        const imageId = await storeImageBlob(image.blob, {
+          source: 'generated',
+          mimeType: image.mimeType || image.blob.type || null,
+          width: thumbnail?.width ?? null,
+          height: thumbnail?.height ?? null,
+          thumbnailBlob: thumbnail?.thumbnailBlob ?? null,
+          thumbnailMimeType: thumbnail?.thumbnailMimeType ?? null,
+          thumbnailWidth: thumbnail?.thumbnailWidth ?? null,
+          thumbnailHeight: thumbnail?.thumbnailHeight ?? null,
+        })
+        setCachedImage(imageId, image.blob, 'original')
+        if (thumbnail?.thumbnailBlob) {
+          setCachedImage(imageId, thumbnail.thumbnailBlob, 'thumbnail')
+        }
+        if (thumbnail) {
+          setCachedImageMetadata(imageId, {
+            width: thumbnail.width,
+            height: thumbnail.height,
+          })
+        }
         outputIds.push(imageId)
       }
 
@@ -389,7 +452,7 @@ async function executeTask(taskId: string, requestSettings?: AppSettings) {
     const loadedInputIds: string[] = []
     for (const imageId of task.inputImageIds) {
       throwIfTaskAbortRequested(taskId)
-      const dataUrl = await ensureImageCached(imageId)
+      const dataUrl = await ensureImageDataUrl(imageId)
       if (!dataUrl) {
         continue
       }
@@ -400,7 +463,7 @@ async function executeTask(taskId: string, requestSettings?: AppSettings) {
 
     throwIfTaskAbortRequested(taskId)
     const editMaskDataUrl = task.editMaskImageId
-      ? await ensureImageCached(task.editMaskImageId)
+      ? await ensureImageDataUrl(task.editMaskImageId)
       : undefined
     if (task.editMaskImageId && !editMaskDataUrl) {
       throw new Error('局部编辑蒙版缺失，请重新选择编辑区域后再试')
@@ -415,6 +478,7 @@ async function executeTask(taskId: string, requestSettings?: AppSettings) {
       params: task.params,
       inputImageDataUrls: inputDataUrls,
       editMaskDataUrl,
+      editSelection: task.editSelection ?? null,
       editSourceImageIndex: editSourceImageIndex >= 0 ? editSourceImageIndex : undefined,
       onFinalImages: appendOutputImages,
       registerAbort: (abort) => {

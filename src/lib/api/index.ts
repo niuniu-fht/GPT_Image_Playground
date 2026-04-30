@@ -44,7 +44,10 @@ export async function callImageApi(opts: CallApiOptions): Promise<CallApiResult>
       opts.editMaskDataUrl != null
         ? {
             ...opts,
-            editMaskDataUrl: await normalizeEditMaskForProvider(opts.editMaskDataUrl),
+            editMaskDataUrl: await normalizeEditMaskForProvider(
+              opts.editMaskDataUrl,
+              opts.editSelection,
+            ),
           }
         : opts
 

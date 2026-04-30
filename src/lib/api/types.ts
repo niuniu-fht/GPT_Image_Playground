@@ -1,6 +1,7 @@
 import type {
   AppliedTransportMeta,
   AppSettings,
+  ImageEditSelection,
   TaskErrorDebugInfo,
   TaskParams,
   TaskResponseMeta,
@@ -13,13 +14,27 @@ export interface CallApiOptions {
   params: TaskParams
   inputImageDataUrls: string[]
   editMaskDataUrl?: string
+  editSelection?: ImageEditSelection | null
   editSourceImageIndex?: number
-  onFinalImages?: (images: string[]) => void | Promise<void>
+  onFinalImages?: (images: ApiImageAsset[]) => void | Promise<void>
   registerAbort?: (abort: () => void) => void
 }
 
+export interface ApiImageAsset {
+  blob: Blob
+  mimeType: string
+  outputFormat?: string
+  sourceUrl?: string
+  itemId?: string
+  outputIndex?: number
+}
+
+export interface DecodedImageAsset extends ApiImageAsset {
+  signature: string
+}
+
 export interface CallApiResult {
-  images: string[]
+  images: ApiImageAsset[]
   responseMeta?: TaskResponseMeta
 }
 
@@ -99,6 +114,6 @@ export interface ResponsesStreamImageEvent {
 export interface StreamedPayloadResult {
   payload: unknown
   streamedFinalImageCount: number
-  streamedImages: string[]
+  streamedImages: ApiImageAsset[]
   actualTransport: ActualTransportKind
 }

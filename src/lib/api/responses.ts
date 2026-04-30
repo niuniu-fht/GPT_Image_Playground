@@ -33,6 +33,7 @@ import {
 } from './helpers'
 import type {
   ActualTransportKind,
+  ApiImageAsset,
   ApiError,
   CallApiOptions,
   CallApiResult,
@@ -474,7 +475,7 @@ async function callResponsesApiWithInputMode(
   responsesImageInputMode: ResponsesImageInputMode,
 ): Promise<CallApiResult> {
   let remainingImageCount = Math.max(1, opts.params.n || 1)
-  const images: string[] = []
+  const images: ApiImageAsset[] = []
   const responseImageGenerationCalls: Parameters<typeof buildTaskResponseMetaFromCalls>[0] = []
   let finalTransportMeta: AppliedTransportMeta | undefined
   const preparedEditAssets = await prepareResponsesInlineEditAssets(opts, responsesImageInputMode)
@@ -552,7 +553,7 @@ async function callResponsesApiWithInputMode(
           for (const call of collectImageGenerationCallsFromPayload(payload)) {
             responseImageGenerationCalls.push(call)
           }
-          const parsedImages =
+          const parsedImages: ApiImageAsset[] =
             actualTransport === 'stream' && streamedImages.length > 0
               ? streamedImages
               : await parseImagesFromPayload(payload, ctx.mime, ctx.controller.signal)

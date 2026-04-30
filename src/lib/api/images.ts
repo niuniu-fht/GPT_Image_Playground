@@ -20,6 +20,7 @@ import {
   shouldRetryNextImagesPlan,
 } from './helpers'
 import type {
+  ApiImageAsset,
   ApiDebugRequestLogEntry,
   CallApiOptions,
   CallApiResult,
@@ -205,7 +206,7 @@ export async function callImagesApi(
       const payload = streamResult?.payload ?? (await readImagesPayload(response, debugLogEntry))
       const streamedImages = streamResult?.streamedImages ?? []
       actualTransport = streamResult?.actualTransport ?? 'json'
-      const images =
+      const images: ApiImageAsset[] =
         actualTransport === 'stream' && streamedImages.length > 0
           ? streamedImages
           : await parseImagesFromPayload(payload, ctx.mime, ctx.controller.signal)

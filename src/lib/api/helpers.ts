@@ -2,6 +2,7 @@ import type {
   AppliedTransportMeta,
   ApiProtocol,
   AppSettings,
+  ImageEditSelection,
   ResponsesImageInputMode,
   ResponsesPromptRevisionMode,
   ResponsesTransportMode,
@@ -13,10 +14,12 @@ import {
   buildApiUrl,
 } from '../devProxy'
 import type {
+  ApiImageAsset,
   ApiDebugRequestLogEntry,
   ApiDebugRequestSnapshot,
   ApiError,
   CallApiOptions,
+  DecodedImageAsset,
   ImagesRequestPlan,
   ParsedSseEvent,
   ResponsesStreamImageEvent,
@@ -27,6 +30,7 @@ import type {
 export const MIME_MAP: Record<string, string> = {
   png: 'image/png',
   jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
   webp: 'image/webp',
 }
 
@@ -39,6 +43,8 @@ const RESPONSES_INLINE_IMAGE_MIN_QUALITY = 0.55
 const DEBUG_STRING_PREVIEW_LIMIT = 1200
 const DEBUG_ARRAY_ITEM_LIMIT = 10
 const DEBUG_OBJECT_KEY_LIMIT = 30
+const MASK_ALPHA_THRESHOLD = 8
+const IMAGE_SIGNATURE_PREVIEW_SIZE = 64
 const RESPONSES_PROMPT_REVISION_COMPAT_PREFIX = [
   '兼容模式要求：不要改写、重排、总结、翻译、润色或省略下面的“原始提示词”内容。',
   '请保留原始提示词中的段落结构、列表、标签、代码块、正向/负向要求、参数描述与措辞重点，并尽量按原文语义直接执行。',
@@ -61,6 +67,14 @@ export function isDataUrl(value: string): boolean {
   return /^data:/i.test(value)
 }
 
+function normalizeBlobMimeType(blob: Blob, fallbackMime: string): Blob {
+  if (blob.type) {
+    return blob
+  }
+
+  return new Blob([blob], { type: fallbackMime })
+}
+
 async function blobToDataUrl(blob: Blob, fallbackMime: string): Promise<string> {
   const bytes = new Uint8Array(await blob.arrayBuffer())
   let binary = ''
@@ -73,11 +87,10 @@ async function blobToDataUrl(blob: Blob, fallbackMime: string): Promise<string> 
   return `data:${blob.type || fallbackMime};base64,${btoa(binary)}`
 }
 
-export async function fetchImageUrlAsDataUrl(
+async function fetchImageUrlAsBlob(
   url: string,
-  fallbackMime: string,
   signal: AbortSignal,
-): Promise<string> {
+): Promise<Blob> {
   const response = await fetch(url, {
     cache: 'no-store',
     signal,
@@ -87,12 +100,81 @@ export async function fetchImageUrlAsDataUrl(
     throw new Error(`图片 URL 下载失败：HTTP ${response.status}`)
   }
 
-  return blobToDataUrl(await response.blob(), fallbackMime)
+  return await response.blob()
 }
 
-export async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
-  const response = await fetch(dataUrl)
+export async function fetchImageUrlAsDataUrl(
+  url: string,
+  fallbackMime: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const blob = normalizeBlobMimeType(await fetchImageUrlAsBlob(url, signal), fallbackMime)
+  return blobToDataUrl(blob, fallbackMime)
+}
+
+export async function dataUrlToBlob(dataUrl: string, signal?: AbortSignal): Promise<Blob> {
+  const response = await fetch(dataUrl, {
+    signal,
+  })
   return response.blob()
+}
+
+function normalizeBase64Payload(base64: string): string {
+  const normalized = base64.trim().replace(/\s+/g, '')
+  if (!normalized) {
+    throw createApiError('图片 base64 数据为空')
+  }
+  if (normalized.length % 4 !== 0) {
+    throw createApiError('图片 base64 数据格式无效')
+  }
+
+  const paddingIndex = normalized.indexOf('=')
+  if (paddingIndex >= 0 && !/^={1,2}$/.test(normalized.slice(paddingIndex))) {
+    throw createApiError('图片 base64 数据格式无效')
+  }
+  if (/[^A-Za-z0-9+/=]/.test(normalized)) {
+    throw createApiError('图片 base64 数据格式无效')
+  }
+
+  return normalized
+}
+
+function resolveImageMimeType(outputFormat: unknown, fallbackMime: string): string {
+  const normalizedOutputFormat = readOptionalText(outputFormat)?.toLowerCase()
+  if (!normalizedOutputFormat) {
+    if (!/^image\//i.test(fallbackMime)) {
+      throw createApiError(`不支持的图片 MIME 类型：${String(fallbackMime)}`)
+    }
+    return fallbackMime
+  }
+
+  if (normalizedOutputFormat.startsWith('image/')) {
+    return normalizedOutputFormat
+  }
+
+  const mimeType = MIME_MAP[normalizedOutputFormat]
+  if (!mimeType) {
+    throw createApiError(`不支持的图片输出格式：${String(outputFormat)}`)
+  }
+
+  return mimeType
+}
+
+export async function base64ToBlob(
+  base64: string,
+  mimeType: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const normalizedBase64 = normalizeBase64Payload(base64)
+  if (signal) {
+    throwIfSignalAborted(signal)
+  }
+
+  try {
+    return await dataUrlToBlob(normalizeBase64Image(normalizedBase64, mimeType), signal)
+  } catch {
+    throw createApiError('图片 base64 解码失败')
+  }
 }
 
 export function getDataUrlByteSize(dataUrl: string): number {
@@ -277,7 +359,102 @@ export async function shrinkImageAndMaskForResponses(
   }
 }
 
-export async function normalizeEditMaskForProvider(maskDataUrl: string): Promise<string> {
+function clampMaskCoordinate(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+function resolveSelectionBounds(
+  selection: ImageEditSelection | null | undefined,
+  width: number,
+  height: number,
+): { left: number; top: number; width: number; height: number } | null {
+  if (!selection) {
+    return null
+  }
+
+  if (
+    !Number.isFinite(selection.x) ||
+    !Number.isFinite(selection.y) ||
+    !Number.isFinite(selection.width) ||
+    !Number.isFinite(selection.height)
+  ) {
+    return null
+  }
+
+  const left = clampMaskCoordinate(Math.round(selection.x * width), 0, width)
+  const top = clampMaskCoordinate(Math.round(selection.y * height), 0, height)
+  const selectionWidth = clampMaskCoordinate(Math.round(selection.width * width), 1, width - left)
+  const selectionHeight = clampMaskCoordinate(Math.round(selection.height * height), 1, height - top)
+
+  if (selectionWidth <= 0 || selectionHeight <= 0) {
+    return null
+  }
+
+  return {
+    left,
+    top,
+    width: selectionWidth,
+    height: selectionHeight,
+  }
+}
+
+function paintCanonicalEditMask(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  selectionBounds: { left: number; top: number; width: number; height: number },
+) {
+  context.clearRect(0, 0, width, height)
+  context.fillStyle = '#ffffff'
+  context.fillRect(0, 0, width, height)
+  context.clearRect(
+    selectionBounds.left,
+    selectionBounds.top,
+    selectionBounds.width,
+    selectionBounds.height,
+  )
+}
+
+interface AlphaBounds {
+  count: number
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+function createEmptyAlphaBounds(width: number, height: number): AlphaBounds {
+  return {
+    count: 0,
+    left: width,
+    top: height,
+    right: -1,
+    bottom: -1,
+  }
+}
+
+function includeAlphaBounds(bounds: AlphaBounds, x: number, y: number) {
+  bounds.count += 1
+  bounds.left = Math.min(bounds.left, x)
+  bounds.top = Math.min(bounds.top, y)
+  bounds.right = Math.max(bounds.right, x)
+  bounds.bottom = Math.max(bounds.bottom, y)
+}
+
+function coversFullCanvas(bounds: AlphaBounds, width: number, height: number): boolean {
+  return (
+    bounds.count > 0 &&
+    bounds.left === 0 &&
+    bounds.top === 0 &&
+    bounds.right === width - 1 &&
+    bounds.bottom === height - 1
+  )
+}
+
+export async function normalizeEditMaskForProvider(
+  maskDataUrl: string,
+  selection?: ImageEditSelection | null,
+): Promise<string> {
   const maskImage = await loadImageElement(maskDataUrl)
   const width = Math.max(1, maskImage.naturalWidth || maskImage.width)
   const height = Math.max(1, maskImage.naturalHeight || maskImage.height)
@@ -290,11 +467,54 @@ export async function normalizeEditMaskForProvider(maskDataUrl: string): Promise
     return maskDataUrl
   }
 
-  context.fillStyle = '#ffffff'
-  context.fillRect(0, 0, width, height)
-  context.globalCompositeOperation = 'destination-out'
+  const selectionBounds = resolveSelectionBounds(selection, width, height)
+  if (selectionBounds) {
+    paintCanonicalEditMask(context, width, height, selectionBounds)
+    return canvas.toDataURL('image/png')
+  }
+
+  context.clearRect(0, 0, width, height)
   context.drawImage(maskImage, 0, 0, width, height)
-  context.globalCompositeOperation = 'source-over'
+  const sourceImageData = context.getImageData(0, 0, width, height)
+  const transparentBounds = createEmptyAlphaBounds(width, height)
+  const opaqueBounds = createEmptyAlphaBounds(width, height)
+
+  for (let offset = 0; offset < sourceImageData.data.length; offset += 4) {
+    const alpha = sourceImageData.data[offset + 3]
+    const pixelIndex = offset / 4
+    const x = pixelIndex % width
+    const y = Math.floor(pixelIndex / width)
+
+    if (alpha <= MASK_ALPHA_THRESHOLD) {
+      includeAlphaBounds(transparentBounds, x, y)
+      continue
+    }
+
+    includeAlphaBounds(opaqueBounds, x, y)
+  }
+
+  if (transparentBounds.count === 0 || opaqueBounds.count === 0) {
+    return maskDataUrl
+  }
+
+  const opaqueCoversWholeCanvas = coversFullCanvas(opaqueBounds, width, height)
+  const transparentCoversWholeCanvas = coversFullCanvas(transparentBounds, width, height)
+  const editPixelsAreOpaque =
+    opaqueCoversWholeCanvas !== transparentCoversWholeCanvas
+      ? !opaqueCoversWholeCanvas
+      : opaqueBounds.count <= transparentBounds.count
+
+  const normalizedMask = context.createImageData(width, height)
+  for (let offset = 0; offset < sourceImageData.data.length; offset += 4) {
+    const alpha = sourceImageData.data[offset + 3]
+    const isEditPixel = editPixelsAreOpaque ? alpha > MASK_ALPHA_THRESHOLD : alpha <= MASK_ALPHA_THRESHOLD
+    normalizedMask.data[offset] = 255
+    normalizedMask.data[offset + 1] = 255
+    normalizedMask.data[offset + 2] = 255
+    normalizedMask.data[offset + 3] = isEditPixel ? 0 : 255
+  }
+
+  context.putImageData(normalizedMask, 0, 0)
 
   return canvas.toDataURL('image/png')
 }
@@ -312,7 +532,7 @@ export function getFileExtensionFromMime(mimeType: string): string {
 
 export async function emitFinalImages(
   opts: CallApiOptions,
-  images: string[],
+  images: ApiImageAsset[],
 ): Promise<void> {
   if (!images.length || typeof opts.onFinalImages !== 'function') {
     return
@@ -837,13 +1057,29 @@ function buildResponsesStreamEventPayloadForImages(
 }
 
 function extractSseImageStringField(dataText: string, fieldName: string): string | undefined {
-  const marker = `"${fieldName}":"`
-  const markerIndex = dataText.indexOf(marker)
+  const keyMarker = `"${fieldName}"`
+  const markerIndex = dataText.indexOf(keyMarker)
   if (markerIndex < 0) {
     return undefined
   }
 
-  const valueStart = markerIndex + marker.length
+  let valueStart = markerIndex + keyMarker.length
+  while (valueStart < dataText.length && /\s/.test(dataText[valueStart])) {
+    valueStart += 1
+  }
+  if (dataText[valueStart] !== ':') {
+    return undefined
+  }
+
+  valueStart += 1
+  while (valueStart < dataText.length && /\s/.test(dataText[valueStart])) {
+    valueStart += 1
+  }
+  if (dataText[valueStart] !== '"') {
+    return undefined
+  }
+
+  valueStart += 1
   let index = valueStart
   let escaped = false
 
@@ -872,7 +1108,7 @@ function extractSseImageStringField(dataText: string, fieldName: string): string
 }
 
 function extractSseImageNumberField(dataText: string, fieldName: string): number | undefined {
-  const match = dataText.match(new RegExp(`"${fieldName}":(-?\\d+)`))
+  const match = dataText.match(new RegExp(`"${fieldName}"\\s*:\\s*(-?\\d+)`))
   if (!match) {
     return undefined
   }
@@ -937,6 +1173,12 @@ function sanitizeResponsesOutputItemFromDataText(dataText: string): Record<strin
   if (typeof outputIndex === 'number') {
     sanitized.output_index = outputIndex
   }
+
+  const url = extractSseImageStringField(dataText, 'url')
+  if (url) sanitized.url = url
+
+  const imageUrl = extractSseImageStringField(dataText, 'image_url')
+  if (imageUrl) sanitized.image_url = imageUrl
 
   return sanitized
 }
@@ -1009,6 +1251,8 @@ function sanitizeResponsesOutputItem(item: Record<string, unknown>): Record<stri
   if (typeof item.background === 'string' && item.background) sanitized.background = item.background
   if (typeof item.action === 'string' && item.action) sanitized.action = item.action
   if (typeof item.revised_prompt === 'string' && item.revised_prompt) sanitized.revised_prompt = item.revised_prompt
+  if (typeof item.url === 'string' && item.url) sanitized.url = item.url
+  if (typeof item.image_url === 'string' && item.image_url) sanitized.image_url = item.image_url
 
   return Object.keys(sanitized).length > 0 ? sanitized : { type: 'image_generation_call' }
 }
@@ -1182,20 +1426,141 @@ function hasUsableImagePayload(item: Record<string, unknown>): boolean {
   return false
 }
 
-async function appendImageFromItem(
-  images: string[],
+interface ImageItemAssetMeta {
+  mimeType: string
+  outputFormat?: string
+  itemId?: string
+  outputIndex?: number
+}
+
+function buildImageItemAssetMeta(
+  item: Record<string, unknown>,
+  fallbackMime: string,
+): ImageItemAssetMeta {
+  const outputFormat = readOptionalText(item.output_format) ?? undefined
+  const outputIndex =
+    typeof item.output_index === 'number' && Number.isFinite(item.output_index)
+      ? item.output_index
+      : undefined
+
+  return {
+    mimeType: resolveImageMimeType(outputFormat, fallbackMime),
+    outputFormat,
+    itemId: readOptionalText(item.id) ?? undefined,
+    outputIndex,
+  }
+}
+
+function buildDecodedImageAsset(
+  blob: Blob,
+  signature: string,
+  meta: ImageItemAssetMeta,
+  sourceUrl?: string,
+): DecodedImageAsset {
+  const normalizedBlob = normalizeBlobMimeType(blob, meta.mimeType)
+
+  return {
+    signature,
+    blob: normalizedBlob,
+    mimeType: normalizedBlob.type || meta.mimeType,
+    outputFormat: meta.outputFormat,
+    sourceUrl,
+    itemId: meta.itemId,
+    outputIndex: meta.outputIndex,
+  }
+}
+
+function stripDecodedImageAssetSignature(asset: DecodedImageAsset): ApiImageAsset {
+  return {
+    blob: asset.blob,
+    mimeType: asset.mimeType,
+    outputFormat: asset.outputFormat,
+    sourceUrl: asset.sourceUrl,
+    itemId: asset.itemId,
+    outputIndex: asset.outputIndex,
+  }
+}
+
+function buildCompactImagePayloadSignature(prefix: string, value: string): string {
+  if (value.length <= IMAGE_SIGNATURE_PREVIEW_SIZE * 2) {
+    return `${prefix}:${value}`
+  }
+
+  const head = value.slice(0, IMAGE_SIGNATURE_PREVIEW_SIZE)
+  const tail = value.slice(-IMAGE_SIGNATURE_PREVIEW_SIZE)
+  return `${prefix}:length=${value.length}:head=${head}:tail=${tail}`
+}
+
+function buildStreamImageEventSignature(streamEvent: ResponsesStreamImageEvent): string {
+  if (streamEvent.itemId && typeof streamEvent.outputIndex === 'number') {
+    return `id:${streamEvent.itemId}:output_index:${streamEvent.outputIndex}`
+  }
+  if (streamEvent.itemId) {
+    return `id:${streamEvent.itemId}`
+  }
+
+  return buildCompactImagePayloadSignature('result', streamEvent.base64 ?? '')
+}
+
+async function decodeResponsesOutputDoneImageEventToAsset(
+  streamEvent: ResponsesStreamImageEvent,
+  fallbackMime: string,
+  signal: AbortSignal,
+): Promise<ApiImageAsset | null> {
+  if (!streamEvent.base64 || streamEvent.isPartial) {
+    return null
+  }
+
+  throwIfSignalAborted(signal)
+  const mimeType = resolveImageMimeType(streamEvent.outputFormat, fallbackMime)
+  const blob = await base64ToBlob(streamEvent.base64, mimeType, signal)
+
+  return stripDecodedImageAssetSignature(
+    buildDecodedImageAsset(blob, buildStreamImageEventSignature(streamEvent), {
+      mimeType,
+      outputFormat: streamEvent.outputFormat,
+      itemId: streamEvent.itemId,
+      outputIndex: typeof streamEvent.outputIndex === 'number' ? streamEvent.outputIndex : undefined,
+    }),
+  )
+}
+
+async function buildDecodedImageAssetFromUrlValue(
+  urlValue: string,
+  fieldName: 'url' | 'image_url',
+  signature: string,
+  meta: ImageItemAssetMeta,
+  signal: AbortSignal,
+): Promise<DecodedImageAsset> {
+  if (isDataUrl(urlValue)) {
+    return buildDecodedImageAsset(await dataUrlToBlob(urlValue), signature, meta)
+  }
+
+  if (isHttpUrl(urlValue)) {
+    return buildDecodedImageAsset(
+      await fetchImageUrlAsBlob(urlValue, signal),
+      signature,
+      meta,
+      urlValue,
+    )
+  }
+
+  throw createApiError(`接口返回了不支持的图片 ${fieldName} 格式：${urlValue}`)
+}
+
+async function decodeImageAssetFromItem(
   item: unknown,
   fallbackMime: string,
   signal: AbortSignal,
-) {
+): Promise<DecodedImageAsset | null> {
   throwIfSignalAborted(signal)
 
   if (!isRecord(item)) {
-    return
+    return null
   }
 
   if (typeof item.type === 'string' && item.type.includes('partial_image')) {
-    return
+    return null
   }
 
   if (
@@ -1204,44 +1569,44 @@ async function appendImageFromItem(
     item.status !== 'completed' &&
     !hasUsableImagePayload(item)
   ) {
-    return
+    return null
   }
+
+  const signatures = collectImageSignaturesFromItem(item)
+  if (!signatures.length) {
+    return null
+  }
+
+  const signature = signatures[0]
+  const meta = buildImageItemAssetMeta(item, fallbackMime)
 
   const b64 = item.b64_json
   if (typeof b64 === 'string' && b64) {
     throwIfSignalAborted(signal)
-    images.push(normalizeBase64Image(b64, fallbackMime))
-    return
+    return buildDecodedImageAsset(await base64ToBlob(b64, meta.mimeType, signal), signature, meta)
   }
 
   const result = item.result
   if (typeof result === 'string' && result) {
     throwIfSignalAborted(signal)
-    images.push(normalizeBase64Image(result, fallbackMime))
-    return
+    return buildDecodedImageAsset(await base64ToBlob(result, meta.mimeType, signal), signature, meta)
   }
 
   if (typeof item.url === 'string' && item.url) {
-    if (isDataUrl(item.url)) {
-      images.push(item.url)
-      return
-    }
-    if (isHttpUrl(item.url)) {
-      images.push(await fetchImageUrlAsDataUrl(item.url, fallbackMime, signal))
-      return
-    }
+    return await buildDecodedImageAssetFromUrlValue(item.url, 'url', signature, meta, signal)
   }
 
   if (typeof item.image_url === 'string' && item.image_url) {
-    if (isDataUrl(item.image_url)) {
-      images.push(item.image_url)
-      return
-    }
-    if (isHttpUrl(item.image_url)) {
-      images.push(await fetchImageUrlAsDataUrl(item.image_url, fallbackMime, signal))
-      return
-    }
+    return await buildDecodedImageAssetFromUrlValue(
+      item.image_url,
+      'image_url',
+      signature,
+      meta,
+      signal,
+    )
   }
+
+  throw createApiError('接口返回了不支持的图片载荷格式')
 }
 
 function collectImageSignaturesFromItem(item: unknown): string[] {
@@ -1258,6 +1623,10 @@ function collectImageSignaturesFromItem(item: unknown): string[] {
     return []
   }
 
+  if (!hasUsableImagePayload(item)) {
+    return []
+  }
+
   const id = readOptionalText(item.id)
   const outputIndex =
     typeof item.output_index === 'number' && Number.isFinite(item.output_index)
@@ -1271,10 +1640,10 @@ function collectImageSignaturesFromItem(item: unknown): string[] {
   }
 
   if (typeof item.b64_json === 'string' && item.b64_json) {
-    return [`b64_json:${item.b64_json}`]
+    return [buildCompactImagePayloadSignature('b64_json', item.b64_json)]
   }
   if (typeof item.result === 'string' && item.result) {
-    return [`result:${item.result}`]
+    return [buildCompactImagePayloadSignature('result', item.result)]
   }
   if (typeof item.url === 'string' && item.url) {
     return [`url:${item.url}`]
@@ -1285,20 +1654,12 @@ function collectImageSignaturesFromItem(item: unknown): string[] {
   return []
 }
 
-export async function emitNewImagesFromPayload(
+function collectNewImageItemsFromPayload(
   payload: unknown,
-  fallbackMime: string,
-  signal: AbortSignal,
   emittedImageSignatures: Set<string>,
-  onImages?: (images: string[]) => void | Promise<void>,
-): Promise<number> {
-  throwIfSignalAborted(signal)
-
-  if (typeof onImages !== 'function') {
-    return 0
-  }
-
+): Record<string, unknown>[] {
   const itemsToEmit: Record<string, unknown>[] = []
+
   forEachPayloadRecord(payload, (item) => {
     const signatures = collectImageSignaturesFromItem(item)
     if (!signatures.length) {
@@ -1316,14 +1677,34 @@ export async function emitNewImagesFromPayload(
     itemsToEmit.push(item)
   })
 
+  return itemsToEmit
+}
+
+export async function emitNewImagesFromPayload(
+  payload: unknown,
+  fallbackMime: string,
+  signal: AbortSignal,
+  emittedImageSignatures: Set<string>,
+  onImages?: (images: ApiImageAsset[]) => void | Promise<void>,
+): Promise<number> {
+  throwIfSignalAborted(signal)
+
+  if (typeof onImages !== 'function') {
+    return 0
+  }
+
+  const itemsToEmit = collectNewImageItemsFromPayload(payload, emittedImageSignatures)
   if (!itemsToEmit.length) {
     return 0
   }
 
-  const images: string[] = []
+  const images: ApiImageAsset[] = []
   for (const item of itemsToEmit) {
     throwIfSignalAborted(signal)
-    await appendImageFromItem(images, item, fallbackMime, signal)
+    const imageAsset = await decodeImageAssetFromItem(item, fallbackMime, signal)
+    if (imageAsset) {
+      images.push(stripDecodedImageAssetSignature(imageAsset))
+    }
   }
 
   if (!images.length) {
@@ -1557,21 +1938,18 @@ export async function parseImagesFromPayload(
   payload: unknown,
   fallbackMime: string,
   signal: AbortSignal,
-): Promise<string[]> {
+): Promise<ApiImageAsset[]> {
   throwIfSignalAborted(signal)
 
-  const images: string[] = []
-  const imageItems: Record<string, unknown>[] = []
-
-  forEachPayloadRecord(payload, (item) => {
-    if (collectImageSignaturesFromItem(item).length > 0) {
-      imageItems.push(item)
-    }
-  })
+  const images: ApiImageAsset[] = []
+  const imageItems = collectNewImageItemsFromPayload(payload, new Set<string>())
 
   for (const item of imageItems) {
     throwIfSignalAborted(signal)
-    await appendImageFromItem(images, item, fallbackMime, signal)
+    const imageAsset = await decodeImageAssetFromItem(item, fallbackMime, signal)
+    if (imageAsset) {
+      images.push(stripDecodedImageAssetSignature(imageAsset))
+    }
   }
 
   return images
@@ -2111,7 +2489,7 @@ export async function readResponsesPayloadStream(
   const requestId = attachDebugResponseMeta(logEntry, response)
   const emittedImageSignatures = new Set<string>()
   let streamedFinalImageCount = 0
-  const streamedImages: string[] = []
+  const streamedImages: ApiImageAsset[] = []
   const outputItems: Record<string, unknown>[] = []
   let completedResponse: Record<string, unknown> | null = null
   let failedPayload: Record<string, unknown> | null = null
@@ -2128,17 +2506,18 @@ export async function readResponsesPayloadStream(
 
         const outputDoneImageEvent = parseResponsesOutputDoneImageEvent(event)
         if (outputDoneImageEvent?.base64) {
-          const finalPayload = buildImagePayloadFromStreamImageEvent(outputDoneImageEvent)
-          if (finalPayload) {
-            streamedFinalImageCount += await emitNewImagesFromPayload(
-              finalPayload,
+          const signature = buildStreamImageEventSignature(outputDoneImageEvent)
+          if (!emittedImageSignatures.has(signature)) {
+            const imageAsset = await decodeResponsesOutputDoneImageEventToAsset(
+              outputDoneImageEvent,
               fallbackMime,
               signal,
-              emittedImageSignatures,
-              async (images) => {
-                streamedImages.push(...images)
-              },
             )
+            if (imageAsset) {
+              emittedImageSignatures.add(signature)
+              streamedImages.push(imageAsset)
+              streamedFinalImageCount += 1
+            }
           }
         }
       }
@@ -2195,7 +2574,9 @@ export async function readResponsesPayloadStream(
         signal,
         emittedImageSignatures,
         async (images) => {
-          streamedImages.push(...images)
+          for (const image of images) {
+            streamedImages.push(image)
+          }
         },
       )
     },
@@ -2275,7 +2656,7 @@ export async function readImagesPayloadStream(
   const requestId = attachDebugResponseMeta(logEntry, response)
   const emittedImageSignatures = new Set<string>()
   let streamedFinalImageCount = 0
-  const streamedImages: string[] = []
+  const streamedImages: ApiImageAsset[] = []
   const completedItems: Record<string, unknown>[] = []
   const standaloneImages: Record<string, unknown>[] = []
   let failedPayload: Record<string, unknown> | null = null
@@ -2302,7 +2683,9 @@ export async function readImagesPayloadStream(
       signal,
       emittedImageSignatures,
       async (images) => {
-        streamedImages.push(...images)
+        for (const image of images) {
+          streamedImages.push(image)
+        }
       },
     )
   })
