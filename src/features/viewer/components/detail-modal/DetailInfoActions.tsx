@@ -1,5 +1,5 @@
 import type { TaskRecord } from '../../../../types'
-import { canRetryTask } from '../../../../store'
+import { canRetryTask, resolveTaskKind } from '../../../../store'
 
 interface DetailInfoActionsProps {
   task: TaskRecord
@@ -8,15 +8,17 @@ interface DetailInfoActionsProps {
   onReuse: () => void
   onEdit: () => void
   onRetry: () => void
+  onShare: () => void
   onDelete: () => void
   onRestore: () => void
   onPurge: () => void
 }
 
 export default function DetailInfoActions(props: DetailInfoActionsProps) {
-  const { task, inRecycleBin, canEditOutputs, onReuse, onEdit, onRetry, onDelete, onRestore, onPurge } = props
+  const { task, inRecycleBin, canEditOutputs, onReuse, onEdit, onRetry, onShare, onDelete, onRestore, onPurge } = props
   const canRetry = canRetryTask(task)
   const showEditAction = canEditOutputs
+  const canShare = task.status === 'done' && resolveTaskKind(task) !== 'image'
 
   return (
     <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-3 dark:border-white/[0.08]">
@@ -86,6 +88,21 @@ export default function DetailInfoActions(props: DetailInfoActionsProps) {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m14.216 2A7.5 7.5 0 005.582 9m0 0H10m10 11v-5h-.581m0 0H14a7.5 7.5 0 01-13.418-2" />
                 </svg>
                 重试
+              </span>
+            </button>
+          )}
+          {canShare && (
+            <button
+              type="button"
+              onClick={onShare}
+              className="flex-1 whitespace-nowrap rounded-lg bg-blue-50 px-2 py-2 text-xs font-medium text-blue-600 transition hover:bg-blue-100 sm:px-3 sm:text-sm dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
+            >
+              <span className="flex items-center justify-center gap-1.5">
+                <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8.5 12 4m0 0 5 4.5M12 4v12" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 14.5v2.75A2.75 2.75 0 0 0 7.75 20h8.5A2.75 2.75 0 0 0 19 17.25V14.5" />
+                </svg>
+                分享
               </span>
             </button>
           )}

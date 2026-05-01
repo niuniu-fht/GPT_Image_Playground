@@ -35,6 +35,7 @@ export default function DetailModal() {
   const providers = useStore((state) => state.providers)
   const detailTaskId = useStore((state) => state.detailTaskId)
   const setDetailTaskId = useStore((state) => state.setDetailTaskId)
+  const setShareToSquareTarget = useStore((state) => state.setShareToSquareTarget)
   const showToast = useStore((state) => state.showToast)
   const [lineageRootTaskId, setLineageRootTaskId] = useState<string | null>(null)
   const previousDetailTaskIdRef = useRef<string | null>(null)
@@ -167,6 +168,10 @@ export default function DetailModal() {
 
   const handleRetry = () => {
     applyGalleryTaskDetailAction('retry', task)
+  }
+
+  const handleShare = () => {
+    setShareToSquareTarget({ kind: 'task', taskId: task.id })
   }
 
   const handleToggleFavorite = () => {
@@ -329,6 +334,7 @@ export default function DetailModal() {
             onReuse={handleReuse}
             onEdit={handleEdit}
             onRetry={handleRetry}
+            onShare={handleShare}
             onDelete={handleDelete}
             onRestore={handleRestore}
             onPurge={handlePurge}

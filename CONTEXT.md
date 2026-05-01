@@ -80,6 +80,24 @@ _Avoid_: trash, deleted items
 用户保存的可复用提示词集合。每条包含标题、正文和创建/更新时间。
 _Avoid_: saved prompts, template library
 
+### 图片分享广场
+
+**Square Share**:
+用户显式发布到图片分享广场的一条公开内容。协议层保留 `image`、`task`、`prompt` 三类，其中 `image` 与 `task` 都属于图任务分享配额；当前前端只把生成图作为 `task` 分享和展示，不提供独立图片 tab。
+_Avoid_: post, publication, cloud sync
+
+**Square Asset**:
+Square Share 引用的远端图片资产，包括原图和缩略图。Square Asset 只作为广场内容的组成部分存在，不改变本地 **Stored Image** 的语义。
+_Avoid_: remote stored image, public image record
+
+**Square Publisher**:
+广场发布者身份。第一版可以是匿名发布者，前端只保存发布 token，后端只保存 token hash。
+_Avoid_: account, owner, user profile
+
+**Share Manifest**:
+前端向广场后端提交的结构化分享描述，包含分享类型、标题、提示词、标签、任务链快照、资产引用和 schemaVersion。它是 Worker 与未来真实后端之间保持兼容的接口契约。
+_Avoid_: payload, post body, upload metadata
+
 ### 局部编辑
 
 **Image Edit Session** (ImageEditSession):
@@ -104,6 +122,8 @@ _Avoid_: backup, download all
 - **Planner** 根据 **Provider** 配置和 **Task Params** 生成 **Request Plan** 列表
 - **Gallery** 展示 **Task** 列表，支持按分类、状态、搜索词筛选
 - **Recycle Bin** 是 **Task** 的暂存状态（`deletedAt` 不为 null），保洁定期清理过期项
+- **Square Share** 从用户显式选择的 **Task** 或 **Prompt Library** 项生成，不自动同步本地数据
+- **Share Manifest** 可以包含 **Task Lineage** 快照和对应 **Square Asset** 引用，但不得包含 Provider 密钥、baseUrl 或错误调试日志
 
 ## Example dialogue
 

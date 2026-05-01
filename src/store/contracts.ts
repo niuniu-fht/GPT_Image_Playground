@@ -1,17 +1,22 @@
 import type {
   AppSettings,
+  AppView,
   CategoryConfig,
   GalleryDisplayMode,
   ImageEditSession,
   InputImage,
   PromptLibraryItem,
   ProviderConfig,
+  SquareShareTarget,
   TaskParams,
   TaskRecord,
   TaskView,
 } from '../types'
 
 export interface AppState {
+  appView: AppView
+  setAppView: (view: AppView) => void
+
   settings: AppSettings
   providers: ProviderConfig[]
   activeProviderId: string
@@ -68,6 +73,8 @@ export interface AppState {
   setShowSettings: (visible: boolean) => void
   showPromptLibrary: boolean
   setShowPromptLibrary: (visible: boolean) => void
+  shareToSquareTarget: SquareShareTarget | null
+  setShareToSquareTarget: (target: SquareShareTarget | null) => void
 
   toast: { message: string; type: 'info' | 'success' | 'error' } | null
   showToast: (message: string, type?: 'info' | 'success' | 'error') => void
@@ -92,6 +99,7 @@ export type PersistedAppStateSnapshot = Partial<
     | 'params'
     | 'promptLibrary'
     | 'galleryDisplayMode'
+    | 'appView'
   >
 > &
   Record<string, unknown>

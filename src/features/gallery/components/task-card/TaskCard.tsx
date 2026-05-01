@@ -27,6 +27,7 @@ function TaskCard({
   onEditOutputs,
   onRetry,
   onAbort,
+  onShare,
   onToggleFavorite,
   onMoveCategory,
   onDelete,
@@ -179,6 +180,7 @@ function TaskCard({
               onReuse={onReuse}
               onEditOutputs={onEditOutputs}
               onRetry={onRetry}
+              onShare={onShare}
               onMoveCategory={onMoveCategory}
               onDelete={onDelete}
               onPurge={onPurge}

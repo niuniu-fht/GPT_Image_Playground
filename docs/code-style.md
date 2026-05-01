@@ -14,7 +14,7 @@
 ## Frontend
 
 - 页面/业务模块放在 `src/features/*`，按功能域拆分，不按“所有组件都堆一个目录”组织。
-- 当 feature 内单个组件继续膨胀时，允许在该 feature 内继续下钻子目录，例如 `components/input-bar/*`、`components/prompt-library-drawer/*`、`components/search-bar/*`、`components/size-picker/*`、`components/task-grid/*`、`components/task-card/*`、`components/settings-modal/*`、`components/detail-modal/*`、`components/image-edit-modal/*`、`components/lightbox/*`，把容器、分区组件、常量、hooks 和工具拆开。
+- 当 feature 内单个组件继续膨胀时，允许在该 feature 内继续下钻子目录，例如 `components/input-bar/*`、`components/prompt-library-drawer/*`、`components/search-bar/*`、`components/size-picker/*`、`components/task-grid/*`、`components/task-card/*`、`components/settings-modal/*`、`components/square/*`、`components/detail-modal/*`、`components/image-edit-modal/*`、`components/lightbox/*`，把容器、分区组件、常量、hooks 和工具拆开。
 - 通用组件放在 `src/shared/components`，只有跨模块复用的组件才进入 shared。
 - 应用级骨架和顶层编排放在 `src/app` 或 `src/App.tsx`，不要把业务细节塞进根组件。
 - 接口调用统一收敛到 `src/lib/api` 或独立 api adapter，UI 组件不要直接承载复杂协议兼容逻辑；协议测试优先跟随 `src/lib/api/__tests__`。
@@ -27,6 +27,7 @@
 ## Backend
 
 - 当前仓库以前端为主；若后续引入后端，目录和职责必须分层明确。
+- 图片分享广场第一版后端实现放在 `workers/square-api/*`，但前端只能依赖 `/api/v1` 协议与 adapter，不要把 Worker、D1、R2 细节泄漏进 UI 组件。
 - 后端至少区分实体类、接口定义、服务层、数据访问层、数据库连接/配置层。
 - 路由层只做请求接收和响应组装，不直接堆业务逻辑与数据库细节。
 - 数据库访问、事务、第三方服务调用不要散落在控制器或实体类中。

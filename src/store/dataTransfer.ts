@@ -9,10 +9,12 @@ import type {
   CategoryConfig,
   ExportData,
   ExportImageFileEntry,
+  GalleryDisplayMode,
   ProviderConfig,
   StoredImage,
   TaskParams,
 } from '../types'
+import type { PersistedAppStateSnapshot } from './contracts'
 import {
   getImportedCategoriesFromExport,
   getImportedPromptLibraryFromExport,
@@ -36,7 +38,7 @@ import {
   getImageMimeTypeFromPath,
 } from '../lib/imageMime'
 import { isRemoteImageUrl } from '../lib/imageUrl'
-import { DEFAULT_PARAMS } from './taskParams'
+import { DEFAULT_PARAMS, resolveTaskParamSizeOrDefault } from './taskParams'
 
 interface PreparedImportedRemoteImage {
   id: string
@@ -145,6 +147,83 @@ function normalizeOptionalString(value: unknown): string | null | undefined {
     return value
   }
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function isTaskQuality(value: unknown): value is TaskParams['quality'] {
+  return value === 'auto' || value === 'low' || value === 'medium' || value === 'high'
+}
+
+function isTaskOutputFormat(value: unknown): value is TaskParams['output_format'] {
+  return value === 'png' || value === 'jpeg' || value === 'webp'
+}
+
+function isTaskModeration(value: unknown): value is TaskParams['moderation'] {
+  return value === 'auto' || value === 'low'
+}
+
+function getImportedActiveProviderId(
+  data: ExportData,
+  persistedStateSnapshot: PersistedAppStateSnapshot | null,
+  providerIdMap: Map<string, string>,
+): string | undefined {
+  const activeProviderId =
+    normalizeOptionalString(persistedStateSnapshot?.activeProviderId) ??
+    normalizeOptionalString(data.activeProviderId)
+
+  return activeProviderId ? providerIdMap.get(activeProviderId) ?? activeProviderId : undefined
+}
+
+function getImportedActiveCategoryFilter(
+  data: ExportData,
+  persistedStateSnapshot: PersistedAppStateSnapshot | null,
+  categoryIdMap: Map<string, string>,
+): string | undefined {
+  const activeCategoryFilter =
+    normalizeOptionalString(persistedStateSnapshot?.activeCategoryFilter) ??
+    normalizeOptionalString(data.activeCategoryFilter)
+
+  return activeCategoryFilter
+    ? categoryIdMap.get(activeCategoryFilter) ?? activeCategoryFilter
+    : undefined
+}
+
+function getImportedGalleryDisplayMode(
+  persistedStateSnapshot: PersistedAppStateSnapshot | null,
+): GalleryDisplayMode | null {
+  const galleryDisplayMode = persistedStateSnapshot?.galleryDisplayMode
+  return galleryDisplayMode === 'image' || galleryDisplayMode === 'standard'
+    ? galleryDisplayMode
+    : null
+}
+
+function getImportedParams(
+  data: ExportData,
+  persistedStateSnapshot: PersistedAppStateSnapshot | null,
+): TaskParams | null {
+  const params = persistedStateSnapshot?.params ?? data.params
+  if (!params || typeof params !== 'object' || Array.isArray(params)) {
+    return null
+  }
+
+  const record = params as Partial<TaskParams> & Record<string, unknown>
+  const outputCompression = record.output_compression
+  const n = record.n
+
+  return {
+    size: typeof record.size === 'string'
+      ? resolveTaskParamSizeOrDefault(record.size)
+      : DEFAULT_PARAMS.size,
+    quality: isTaskQuality(record.quality) ? record.quality : DEFAULT_PARAMS.quality,
+    output_format: isTaskOutputFormat(record.output_format)
+      ? record.output_format
+      : DEFAULT_PARAMS.output_format,
+    output_compression:
+      typeof outputCompression === 'number' && Number.isFinite(outputCompression)
+        ? outputCompression
+        : null,
+    moderation: isTaskModeration(record.moderation) ? record.moderation : DEFAULT_PARAMS.moderation,
+    n: typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : DEFAULT_PARAMS.n,
+  }
 }
 
 async function exportImageRecord(
@@ -380,19 +459,31 @@ export async function importData(file: File) {
     const currentState = useStore.getState()
     const existingTasks = await getAllTasks()
     const existingTaskIds = new Set(existingTasks.map((task) => task.id))
+    const existingImages = await listImages()
+    const existingImageIds = new Set(existingImages.map((image) => image.id))
     const importedProviders = getImportedProvidersFromExport(data, persistedStateSnapshot)
     const importedCategories = getImportedCategoriesFromExport(data, persistedStateSnapshot)
     const importedPromptLibrary = getImportedPromptLibraryFromExport(data, persistedStateSnapshot)
-    const { providers: mergedProviders, providerIdMap, addedProviderCount } = mergeImportedProviders(
-      currentState.providers,
-      importedProviders,
-    )
+    const {
+      providers: mergedProviders,
+      providerIdMap,
+      addedProviderCount,
+      skippedProviderCount,
+    } = mergeImportedProviders(currentState.providers, importedProviders)
     const { categories: mergedCategories, categoryIdMap, addedCategoryCount } = mergeImportedCategories(
       currentState.categories,
       importedCategories,
     )
     const { promptLibrary: mergedPromptLibrary, addedCount: addedPromptLibraryCount } =
       mergePromptLibraryItems(currentState.promptLibrary, importedPromptLibrary)
+    const importedActiveProviderId = getImportedActiveProviderId(data, persistedStateSnapshot, providerIdMap)
+    const importedActiveCategoryFilter = getImportedActiveCategoryFilter(
+      data,
+      persistedStateSnapshot,
+      categoryIdMap,
+    )
+    const importedParams = getImportedParams(data, persistedStateSnapshot)
+    const importedGalleryDisplayMode = getImportedGalleryDisplayMode(persistedStateSnapshot)
 
     const tasksToImport = data.tasks
       .filter((task) => !existingTaskIds.has(task.id))
@@ -415,19 +506,20 @@ export async function importData(file: File) {
     }
 
     for (const referencedImageId of referencedImageIds) {
-      if (!(referencedImageId in data.imageFiles)) {
+      if (!(referencedImageId in data.imageFiles) && !existingImageIds.has(referencedImageId)) {
         throw new Error(`导入包缺少被任务引用的图片条目：${referencedImageId}`)
       }
     }
 
     const preparedImages: PreparedImportedImage[] = []
     for (const [id, info] of Object.entries(data.imageFiles)) {
-      if (!referencedImageIds.has(id)) {
+      if (existingImageIds.has(id)) {
         continue
       }
 
       preparedImages.push(await prepareImportedImage(id, info, unzipped))
     }
+    const skippedImageCount = Object.keys(data.imageFiles).length - preparedImages.length
 
     for (const preparedImage of preparedImages) {
       await writeImportedImage(preparedImage)
@@ -437,9 +529,19 @@ export async function importData(file: File) {
       await putTask(task)
     }
 
-    useStore.getState().replaceProviderState(mergedProviders, currentState.activeProviderId)
-    useStore.getState().replaceCategoryState(mergedCategories, currentState.activeCategoryFilter)
+    useStore
+      .getState()
+      .replaceProviderState(mergedProviders, importedActiveProviderId ?? currentState.activeProviderId)
+    useStore
+      .getState()
+      .replaceCategoryState(mergedCategories, importedActiveCategoryFilter ?? currentState.activeCategoryFilter)
     useStore.getState().replacePromptLibrary(mergedPromptLibrary)
+    if (importedParams) {
+      useStore.getState().setParams(importedParams)
+    }
+    if (importedGalleryDisplayMode) {
+      useStore.getState().setGalleryDisplayMode(importedGalleryDisplayMode)
+    }
 
     const tasks = await getAllTasks()
     useStore.getState().setTasks(tasks)
@@ -452,8 +554,17 @@ export async function importData(file: File) {
     if (skippedTaskCount > 0) {
       summaryParts.push(`跳过 ${skippedTaskCount} 条重复记录`)
     }
+    if (preparedImages.length > 0) {
+      summaryParts.push(`导入 ${preparedImages.length} 张图片`)
+    }
+    if (skippedImageCount > 0) {
+      summaryParts.push(`跳过 ${skippedImageCount} 张重复图片`)
+    }
     if (addedProviderCount > 0) {
       summaryParts.push(`新增 ${addedProviderCount} 个供应商`)
+    }
+    if (skippedProviderCount > 0) {
+      summaryParts.push(`跳过 ${skippedProviderCount} 个重复供应商`)
     }
     if (addedCategoryCount > 0) {
       summaryParts.push(`新增 ${addedCategoryCount} 个分类`)

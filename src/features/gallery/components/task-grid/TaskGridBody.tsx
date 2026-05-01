@@ -30,6 +30,7 @@ interface TaskGridBodyProps {
   onTaskEditOutputs: (task: TaskRecord) => void
   onTaskRetry: (task: TaskRecord) => void
   onTaskAbort: (task: TaskRecord) => void
+  onTaskShare: (task: TaskRecord) => void
   onTaskToggleFavorite: (task: TaskRecord) => void
   onTaskMoveCategory: (task: TaskRecord) => void
   onTaskDelete: (task: TaskRecord) => void
@@ -58,6 +59,7 @@ export default function TaskGridBody({
   onTaskEditOutputs,
   onTaskRetry,
   onTaskAbort,
+  onTaskShare,
   onTaskToggleFavorite,
   onTaskMoveCategory,
   onTaskDelete,
@@ -139,6 +141,7 @@ export default function TaskGridBody({
             onEditOutputs={() => onTaskEditOutputs(task)}
             onRetry={() => onTaskRetry(task)}
             onAbort={() => onTaskAbort(task)}
+            onShare={() => onTaskShare(task)}
             onToggleFavorite={() => onTaskToggleFavorite(task)}
             onMoveCategory={() => onTaskMoveCategory(task)}
             onDelete={() => onTaskDelete(task)}

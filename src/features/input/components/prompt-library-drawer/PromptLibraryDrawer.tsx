@@ -13,6 +13,7 @@ export default function PromptLibraryDrawer() {
   const promptLibrary = useStore((state) => state.promptLibrary)
   const savePromptLibraryItem = useStore((state) => state.savePromptLibraryItem)
   const removePromptLibraryItem = useStore((state) => state.removePromptLibraryItem)
+  const setShareToSquareTarget = useStore((state) => state.setShareToSquareTarget)
   const showToast = useStore((state) => state.showToast)
   const [draftTitle, setDraftTitle] = useState('')
   const [draftContent, setDraftContent] = useState('')
@@ -73,6 +74,13 @@ export default function PromptLibraryDrawer() {
             onContentChange={setDraftContent}
             onFillFromCurrent={() => setDraftContent(prompt.trim())}
             onSave={handleSave}
+            onShare={() => {
+              setShareToSquareTarget({
+                kind: 'prompt',
+                title: draftTitle.trim() || undefined,
+                content: draftContent,
+              })
+            }}
           />
 
           <PromptLibraryList
@@ -83,6 +91,13 @@ export default function PromptLibraryDrawer() {
             }}
             onCopy={(content) => {
               void handleCopy(content)
+            }}
+            onShare={(item) => {
+              setShareToSquareTarget({
+                kind: 'prompt',
+                title: item.title,
+                content: item.content,
+              })
             }}
             onDelete={(item) => {
               removePromptLibraryItem(item.id)

@@ -12,6 +12,7 @@ interface Props {
   onReuse: () => void
   onEdit: () => void
   onRetry: () => void
+  onShare: () => void
   onToggleFavorite: () => void
   onMoveCategory: () => void
   onDelete: () => void
@@ -64,6 +65,7 @@ export default function TaskContextMenu({
   onReuse,
   onEdit,
   onRetry,
+  onShare,
   onToggleFavorite,
   onMoveCategory,
   onDelete,
@@ -120,6 +122,7 @@ export default function TaskContextMenu({
   const canEditOutputs = canEditTaskOutputs(task)
   const canRetry = canRetryTask(task)
   const showEditAction = canEditOutputs
+  const canShare = task.status === 'done' && task.taskKind !== 'image'
 
   return (
     <div
@@ -215,6 +218,20 @@ export default function TaskContextMenu({
             >
               <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m14.216 2A7.5 7.5 0 005.582 9m0 0H10m10 11v-5h-.581m0 0H14a7.5 7.5 0 01-13.418-2" />
+              </svg>
+            </MenuItem>
+          )}
+          {canShare && (
+            <MenuItem
+              label="分享到广场"
+              onClick={() => {
+                onClose()
+                onShare()
+              }}
+            >
+              <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8.5 12 4m0 0 5 4.5M12 4v12" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 14.5v2.75A2.75 2.75 0 0 0 7.75 20h8.5A2.75 2.75 0 0 0 19 17.25V14.5" />
               </svg>
             </MenuItem>
           )}

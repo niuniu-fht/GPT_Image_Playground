@@ -1,4 +1,4 @@
-import type { GalleryDisplayMode } from '../types'
+import type { AppView, GalleryDisplayMode } from '../types'
 import type { AppState, PersistedAppStateSnapshot } from './contracts'
 import {
   createInitialProviderState,
@@ -19,11 +19,16 @@ export function buildPersistedAppStateSnapshot(state: AppState): PersistedAppSta
     params: state.params,
     promptLibrary: state.promptLibrary,
     galleryDisplayMode: state.galleryDisplayMode,
+    appView: state.appView,
   }
 }
 
 function resolveGalleryDisplayMode(value: unknown): GalleryDisplayMode {
   return value === 'image' ? 'image' : 'standard'
+}
+
+function resolveAppView(value: unknown): AppView {
+  return value === 'square' ? 'square' : 'local'
 }
 
 export function readPersistedAppStateSnapshot(input: unknown): PersistedAppStateSnapshot | null {
@@ -76,5 +81,6 @@ export function mergePersistedAppState(
     },
     promptLibrary: normalizedPromptLibrary,
     galleryDisplayMode: resolveGalleryDisplayMode(persistedState?.galleryDisplayMode),
+    appView: resolveAppView(persistedState?.appView),
   }
 }

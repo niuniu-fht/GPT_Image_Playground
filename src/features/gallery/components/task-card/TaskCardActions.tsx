@@ -1,5 +1,5 @@
 import type { TaskRecord } from '../../../../types'
-import { canRetryTask } from '../../../../store'
+import { canRetryTask, resolveTaskKind } from '../../../../store'
 
 interface TaskCardActionsProps {
   isInRecycleBin: boolean
@@ -8,6 +8,7 @@ interface TaskCardActionsProps {
   onReuse: () => void
   onEditOutputs: () => void
   onRetry: () => void
+  onShare: () => void
   onMoveCategory: () => void
   onDelete: () => void
   onPurge: () => void
@@ -21,6 +22,7 @@ export default function TaskCardActions({
   onReuse,
   onEditOutputs,
   onRetry,
+  onShare,
   onMoveCategory,
   onDelete,
   onPurge,
@@ -28,6 +30,7 @@ export default function TaskCardActions({
 }: TaskCardActionsProps) {
   const canRetry = canRetryTask(task)
   const showEditButton = canEditOutputs
+  const canShare = task.status === 'done' && resolveTaskKind(task) !== 'image'
 
   return (
     <div
@@ -93,6 +96,20 @@ export default function TaskCardActions({
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m14.216 2A7.5 7.5 0 005.582 9m0 0H10m10 11v-5h-.581m0 0H14a7.5 7.5 0 01-13.418-2" />
+              </svg>
+            </button>
+          )}
+
+          {canShare && (
+            <button
+              type="button"
+              onClick={onShare}
+              className="flex h-8 w-8 items-center justify-center rounded-xl border border-transparent text-gray-400 transition-all duration-200 hover:-translate-y-px hover:border-blue-100 hover:bg-blue-50 hover:text-blue-500 dark:hover:border-blue-500/10 dark:hover:bg-blue-950/30"
+              title="分享到广场"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8.5 12 4m0 0 5 4.5M12 4v12" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 14.5v2.75A2.75 2.75 0 0 0 7.75 20h8.5A2.75 2.75 0 0 0 19 17.25V14.5" />
               </svg>
             </button>
           )}

@@ -1,7 +1,7 @@
 # Project
 
 `GPT Image Playground` 是一个面向 OpenAI / GPT Image 工作流的本地优先图片生成与编辑工作台。  
-当前仓库以前端为主，技术栈为 `React 19 + TypeScript + Vite + Zustand`，核心能力包括图片生成与编辑、任务画廊、本地持久化、供应商配置、协议兼容与导入导出。
+当前仓库以前端为主，技术栈为 `React 19 + TypeScript + Vite + Zustand`，核心能力包括图片生成与编辑、任务画廊、图片分享广场、本地持久化、供应商配置、协议兼容与导入导出。
 
 领域语言与关键概念定义见 [CONTEXT.md](./CONTEXT.md)。
 
@@ -44,6 +44,8 @@ npm run preview
 │  ├─ code-style.md
 │  └─ images/
 ├─ public/
+├─ workers/
+│  └─ square-api/               图片分享广场 API 的 Cloudflare Worker 第一版实现
 ├─ src/
 │  ├─ app/                      应用级骨架组件
 │  ├─ features/                 按功能拆分的业务 UI 模块
@@ -60,6 +62,7 @@ npm run preview
 │  │  ├─ settings/
 │  │  │  └─ components/
 │  │  │     └─ settings-modal/  设置抽屉继续按供应商 / 凭据 / 请求策略 / 数据管理分区拆分
+│  │  ├─ square/                图片分享广场，按页面 / 卡片 / 分享弹窗 / API adapter / manifest 构建拆分
 │  │  └─ viewer/
 │  │     └─ components/
 │  │        ├─ detail-modal/    详情弹窗继续按预览区 / 信息区 / 图片状态 hook 拆分
@@ -86,11 +89,12 @@ npm run preview
 架构约束：
 
 - `src/features/*` 放业务模块。
-- 复杂 feature 允许继续下钻子目录，例如 `components/input-bar/*`、`components/prompt-library-drawer/*`、`components/search-bar/*`、`components/size-picker/*`、`components/task-grid/*`、`components/task-card/*`、`components/settings-modal/*`、`components/detail-modal/*`、`components/image-edit-modal/*`、`components/lightbox/*`。
+- 复杂 feature 允许继续下钻子目录，例如 `components/input-bar/*`、`components/prompt-library-drawer/*`、`components/search-bar/*`、`components/size-picker/*`、`components/task-grid/*`、`components/task-card/*`、`components/settings-modal/*`、`components/square/*`、`components/detail-modal/*`、`components/image-edit-modal/*`、`components/lightbox/*`。
 - `src/shared/components` 只放跨模块复用的通用组件。
 - `src/store/*` 放状态、任务编排、缓存、导入导出等逻辑实现；基础状态优先收敛到 `src/store/slices/*`。
 - `src/lib/api/*` 放协议适配、请求编排、流式解析与相关测试；`src/lib/api.ts` 仅作为统一导出入口。
 - `src/lib/db/*` 放 IndexedDB schema、task 读写、image 读写与迁移逻辑；不要再把整套 DB 细节堆回单文件。
+- `workers/square-api/*` 放图片分享广场 API 的 Worker 实现；前端只能依赖 `/api/v1` 协议与 adapter，不能反向依赖 Worker、D1 或 R2 细节。
 
 # Important Notes
 

@@ -32,6 +32,7 @@ jobs:
       - run: npm run build
         env:
           VITE_BASE: /${{ github.event.repository.name }}/
+          VITE_SQUARE_API_URL: https://gpt-image-square-api.1530885478.workers.dev
 
       - uses: actions/upload-pages-artifact@v4
         with:

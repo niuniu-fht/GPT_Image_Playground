@@ -27,6 +27,7 @@ interface TaskGridOverlaysProps {
   onDeleteTask: (task: TaskRecord) => void
   onPurgeTask: (task: TaskRecord) => void
   onRestoreTask: (task: TaskRecord) => void
+  onShareTask: (task: TaskRecord) => void
 }
 
 export default function TaskGridOverlays(props: TaskGridOverlaysProps) {
@@ -47,6 +48,7 @@ export default function TaskGridOverlays(props: TaskGridOverlaysProps) {
     onDeleteTask,
     onPurgeTask,
     onRestoreTask,
+    onShareTask,
   } = props
 
   return (
@@ -97,6 +99,11 @@ export default function TaskGridOverlays(props: TaskGridOverlaysProps) {
         onRetry={() => {
           if (contextMenuState?.task) {
             runGalleryRetry(contextMenuState.task)
+          }
+        }}
+        onShare={() => {
+          if (contextMenuState?.task) {
+            onShareTask(contextMenuState.task)
           }
         }}
         onToggleFavorite={() => {

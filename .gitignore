@@ -5,4 +5,8 @@ dist/
 logs/*
 !logs/.gitkeep
 /.idea/
-/.idea/
+.ace-tool/
+workers/**/.dev.vars
+workers/**/.dev.vars.*
+workers/**/.wrangler/
+workers/square-api/wrangler.jsonc

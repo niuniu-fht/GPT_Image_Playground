@@ -56,7 +56,7 @@ export default function LightboxViewport(props: LightboxViewportProps) {
     <div
       ref={containerRef}
       data-lightbox-root
-      className="fixed inset-0 z-[60] flex select-none items-center justify-center"
+      className="fixed inset-0 z-[90] flex select-none items-center justify-center"
       style={{
         cursor: isZoomed ? (isDragging ? 'grabbing' : 'grab') : 'pointer',
         overscrollBehavior: 'none',

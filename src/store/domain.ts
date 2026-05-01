@@ -429,11 +429,6 @@ function getProviderNameKey(name: string): string {
   return name.trim().toLocaleLowerCase()
 }
 
-function hasProviderName(providers: ProviderConfig[], name: string): boolean {
-  const nameKey = getProviderNameKey(name)
-  return providers.some((provider) => getProviderNameKey(provider.name) === nameKey)
-}
-
 function isSameProviderConfig(left: ProviderConfig, right: ProviderConfig): boolean {
   const leftSettings = getProviderSettings(left)
   const rightSettings = getProviderSettings(right)
@@ -451,27 +446,6 @@ function isSameProviderConfig(left: ProviderConfig, right: ProviderConfig): bool
     leftSettings.apiProtocol === rightSettings.apiProtocol &&
     leftSettings.requestMode === rightSettings.requestMode
   )
-}
-
-function getNextImportedProviderName(
-  providers: ProviderConfig[],
-  preferredName: string,
-): string {
-  const normalizedName = preferredName.trim() || '未命名供应商'
-  if (!hasProviderName(providers, normalizedName)) {
-    return normalizedName
-  }
-
-  const importedName = `${normalizedName} (导入)`
-  if (!hasProviderName(providers, importedName)) {
-    return importedName
-  }
-
-  let index = 2
-  while (hasProviderName(providers, `${normalizedName} (导入 ${index})`)) {
-    index += 1
-  }
-  return `${normalizedName} (导入 ${index})`
 }
 
 function getCategoryNameKey(name: string): string {
@@ -497,33 +471,18 @@ export function mergeImportedProviders(
   providers: ProviderConfig[]
   providerIdMap: Map<string, string>
   addedProviderCount: number
+  skippedProviderCount: number
 } {
   const mergedProviders = normalizeProviderList(currentProviders)
   const providerIdMap = new Map<string, string>()
   const baseCount = mergedProviders.length
+  let skippedProviderCount = 0
 
   for (const importedProvider of normalizeProviderList(importedProviders)) {
     const providerWithSameId = mergedProviders.find((provider) => provider.id === importedProvider.id)
     if (providerWithSameId) {
-      if (isSameProviderConfig(providerWithSameId, importedProvider)) {
-        providerIdMap.set(importedProvider.id, providerWithSameId.id)
-        continue
-      }
-
-      const providerWithSameConfig = mergedProviders.find((provider) =>
-        isSameProviderConfig(provider, importedProvider),
-      )
-      if (providerWithSameConfig) {
-        providerIdMap.set(importedProvider.id, providerWithSameConfig.id)
-        continue
-      }
-
-      const renamedProvider = createProviderConfig(
-        getProviderSettings(importedProvider),
-        getNextImportedProviderName(mergedProviders, importedProvider.name),
-      )
-      mergedProviders.push(renamedProvider)
-      providerIdMap.set(importedProvider.id, renamedProvider.id)
+      providerIdMap.set(importedProvider.id, providerWithSameId.id)
+      skippedProviderCount += 1
       continue
     }
 
@@ -543,6 +502,7 @@ export function mergeImportedProviders(
     providers: mergedProviders,
     providerIdMap,
     addedProviderCount: mergedProviders.length - baseCount,
+    skippedProviderCount,
   }
 }
 

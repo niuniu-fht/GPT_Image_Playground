@@ -3,8 +3,11 @@
 一个面向 OpenAI / GPT Image 工作流的本地优先图片生成与编辑工作台。  
 它提供纯前端 Web UI，支持文本生图、参考图编辑、局部编辑、任务画廊、多供应商配置、Responses / Images 双协议兼容、流式优先传输、生成中增量保留已出图，以及本地数据导入导出。
 
-> 二次开发说明  
-> 本项目基于 [CookSleep/gpt_image_playground](https://github.com/CookSleep/gpt_image_playground) 二次开发，并在其基础上持续扩展多供应商、多协议兼容、分类/收藏/回收站、多选与右键菜单、局部编辑蒙版工作流、尺寸合法范围规整等能力。
+这个项目现在更像一个“图片生成工作台”，而不是一次性出图的小面板：它会记录每次请求的参数、供应商、传输方式、输出图、失败上下文和来源链路，让图片从生成、筛选、复用、编辑到归档都有明确位置。
+
+它仍然保持纯前端和本地优先：默认数据只存在浏览器里，适合个人工作流、私有 API 节点和高频试验；当用户需要公开交流时，才通过图片分享广场把选定的成功图任务、任务链或提示词发布出去。广场后端第一版使用 Cloudflare Worker + D1 + R2，但前端只依赖 `/api/v1` 协议，后续可以迁移到真实后端。
+
+项目重点放在实际创作流程里的细节：多供应商切换、Images / Responses 双协议兼容、流式优先与自动降级、尺寸合法范围规整、参考图输入策略、局部编辑蒙版、任务分类/收藏/回收站、多选与右键菜单、任务链追踪、ZIP 导入导出，以及可控的远端分享与存储清理。
 
 ## 界面预览
 
@@ -41,6 +44,8 @@
 - `Images API` 与 `Responses API` 都可按设置优先尝试流式；不兼容时会自动回退，并记录实际传输方式。
 - 失败任务可原任务重试；运行中任务可确认中止；多图任务会边出边存，后续失败也尽量保留已生成结果。
 - 标准任务卡片模式与纯图拼贴模式并存，支持拖图/粘图直接生成单图任务。
+- 图片分享广场前端骨架，按 `/api/v1` 协议读取公开任务和提示词，并支持本地内容显式发布。
+- 广场 Worker 会在取消分享时清理 R2 图片资产，并默认自动清理发布超过 90 天的公开图任务分享。
 - 分类、收藏、回收站、搜索、状态筛选、多选、框选、批量操作。
 - 尺寸选择器、比例预设、自定义宽高、合法尺寸自动规整。
 - 图片右键菜单、任务右键菜单、大图查看、快速复用历史配置、多输出编辑翻页、来源任务链查看。
@@ -62,6 +67,7 @@ React UI
   │  │  └─ size-picker/          尺寸选择器按模式面板 / 标签区 / 共享常量拆分
   │  ├─ settings/components/
   │  │  └─ settings-modal/       设置抽屉按供应商 / 凭据 / 请求策略 / 数据管理拆分
+  │  ├─ square/                  图片分享广场，按页面 / 卡片 / 分享弹窗 / API adapter / manifest 构建拆分
   │  ├─ gallery/components/
   │  │  ├─ task-grid/            网格容器按框选 hook、工具条、网格体、纯图拼贴模式拆分
   │  │  ├─ task-card/            卡片按预览区、元信息、操作区、状态 hook 拆分
@@ -81,6 +87,11 @@ React UI
   ├─ IndexedDB + 内存缓存        图片、任务、完整错误日志持久化、去重、按需读取
   ├─ Dev Proxy Logger            本地代理请求转发与开发机 success/error 日志落盘
   └─ PWA Shell                   manifest + service worker
+
+workers/square-api
+  ├─ src/                         图片分享广场 API 路由、校验、配额、用量统计、R2 资产读取
+  ├─ migrations/                  D1 数据库迁移
+  └─ wrangler.example.jsonc       Cloudflare Worker / D1 / R2 binding 示例配置
 ```
 
 核心数据流：
@@ -91,6 +102,16 @@ React UI
   -> lib/api.ts 按协议发送请求
   -> lib/db/index.ts 与 imageAssets 写入 IndexedDB / 内存缓存
   -> TaskGrid / DetailModal / Lightbox 展示
+```
+
+广场数据流：
+
+```text
+用户显式分享
+  -> src/features/square/lib/buildShareManifest.ts 打包 Share Manifest 与图片 Blob
+  -> src/features/square/lib/squareApiClient.ts 调用 /api/v1
+  -> workers/square-api 检查配额和容量后写入 D1 与 R2
+  -> SquarePage 通过 /api/v1/square 分页读取公开内容
 ```
 
 ## 关键设计点
@@ -111,7 +132,7 @@ React UI
   IndexedDB 访问已拆到 `src/lib/db/schema.ts`、`src/lib/db/tasks.ts`、`src/lib/db/images.ts`，分别处理 schema、任务记录和图片记录/迁移逻辑，避免协议层和 UI 直接接触底层存储细节。
 
 - 组件分层细化
-  当单个功能模块继续膨胀时，会在 feature 内部继续下钻子目录，例如 `input-bar/`、`prompt-library-drawer/`、`search-bar/`、`size-picker/`、`task-grid/`、`task-card/`、`settings-modal/`、`detail-modal/`、`image-edit-modal/`、`lightbox/`，把容器、分区组件、交互 hook、选项常量和交互壳层拆开，而不是继续把实现堆回单个入口文件。
+  当单个功能模块继续膨胀时，会在 feature 内部继续下钻子目录，例如 `input-bar/`、`prompt-library-drawer/`、`search-bar/`、`size-picker/`、`task-grid/`、`task-card/`、`settings-modal/`、`square/`、`detail-modal/`、`image-edit-modal/`、`lightbox/`，把容器、分区组件、交互 hook、选项常量和交互壳层拆开，而不是继续把实现堆回单个入口文件。
 
 - 长请求传输策略
   设置中的传输偏好会同时影响 `Images API` 与 `Responses API`。兼容时优先走流式；不兼容时自动回退到普通 JSON，并把任务最终实际走的是 `流式 / JSON / JSON（降级）` 记录到任务元信息与界面状态里。
@@ -272,6 +293,76 @@ npm run preview
 - GitHub Pages、`vite preview`、静态托管等环境都只能使用 `direct`，并且要求上游接口支持浏览器直连（`HTTPS`、`CORS`、预检）。
 - `deploy/` 目录中的 Docker / Nginx 文件仍保留，可作为自托管部署参考。
 
+### 5. 广场 Worker 常用操作
+
+以下命令都在仓库根目录下执行，示例使用 PowerShell。真实的 `wrangler.jsonc`、`.dev.vars`、Cloudflare 资源 ID 和密钥不要提交到 Git。
+
+```powershell
+cd workers/square-api
+npm install
+npx wrangler login
+```
+
+首次部署前，复制示例配置并填入自己的 D1、R2 和 CORS 域名：
+
+```powershell
+Copy-Item wrangler.example.jsonc wrangler.jsonc
+```
+
+创建 Cloudflare 资源：
+
+```powershell
+npx wrangler d1 create <database-name>
+npx wrangler r2 bucket create <bucket-name>
+```
+
+设置 Worker 密钥。命令后面是密钥名，执行后再输入密钥值：
+
+```powershell
+npx wrangler secret put TOKEN_HASH_SECRET
+npx wrangler secret put ADMIN_TOKEN
+```
+
+有数据库迁移时执行：
+
+```powershell
+npm run db:migrate
+```
+
+部署 Worker：
+
+```powershell
+npm run deploy
+```
+
+检查 Worker 是否在线：
+
+```powershell
+$api = "https://<your-worker-domain>"
+Invoke-RestMethod "$api/api/v1/health"
+```
+
+查看用量和手动清理需要配置 `ADMIN_TOKEN`：
+
+```powershell
+$api = "https://<your-worker-domain>"
+$token = "<your-admin-token>"
+
+Invoke-RestMethod "$api/api/v1/admin/usage" -Headers @{
+  Authorization = "Bearer $token"
+}
+
+Invoke-RestMethod "$api/api/v1/admin/cleanup" `
+  -Method Post `
+  -Headers @{
+    Authorization = "Bearer $token"
+    "Content-Type" = "application/json"
+  } `
+  -Body '{"dryRun":true,"limit":50}'
+```
+
+更多 Worker 命令见 [图片分享广场方案](./docs/图片分享广场/README.md)。
+
 ## 项目结构
 
 ```text
@@ -296,6 +387,8 @@ npm run preview
 │  ├─ manifest.webmanifest      PWA manifest
 │  ├─ pwa-icon.svg              PWA 图标
 │  └─ sw.js                     Service Worker
+├─ workers/
+│  └─ square-api/               图片分享广场 API 的 Cloudflare Worker 第一版实现
 ├─ src/
 │  ├─ app/                      应用级骨架组件
 │  ├─ features/                 按功能拆分的业务 UI 模块
@@ -309,6 +402,7 @@ npm run preview
 │  │  │  └─ size-picker/        尺寸选择器拆分后的真实实现
 │  │  ├─ settings/components/
 │  │  │  └─ settings-modal/     设置抽屉按 API 分区 / 数据管理拆分后的真实实现
+│  │  ├─ square/                图片分享广场，按页面 / 卡片 / 分享弹窗 / API adapter / manifest 构建拆分
 │  │  └─ viewer/components/
 │  │     ├─ detail-modal/       详情弹窗拆分后的真实实现
 │  │     ├─ image-edit-modal/   局部编辑弹窗拆分后的真实实现

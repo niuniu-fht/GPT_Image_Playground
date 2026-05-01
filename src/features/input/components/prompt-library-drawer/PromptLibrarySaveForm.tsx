@@ -6,6 +6,7 @@ interface PromptLibrarySaveFormProps {
   onContentChange: (value: string) => void
   onFillFromCurrent: () => void
   onSave: () => void
+  onShare: () => void
 }
 
 export default function PromptLibrarySaveForm({
@@ -16,6 +17,7 @@ export default function PromptLibrarySaveForm({
   onContentChange,
   onFillFromCurrent,
   onSave,
+  onShare,
 }: PromptLibrarySaveFormProps) {
   return (
     <section className="rounded-2xl border border-gray-200/80 bg-white/70 p-3.5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
@@ -61,6 +63,14 @@ export default function PromptLibrarySaveForm({
             className="inline-flex items-center rounded-full bg-blue-500 px-3.5 py-1.5 text-[13px] font-medium text-white transition hover:bg-blue-600"
           >
             保存到提示词库
+          </button>
+          <button
+            type="button"
+            onClick={onShare}
+            disabled={!draftContent.trim()}
+            className="inline-flex items-center rounded-full border border-blue-200/80 bg-white px-3.5 py-1.5 text-[13px] font-medium text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-blue-400/20 dark:bg-gray-900 dark:text-blue-300 dark:hover:bg-blue-500/10"
+          >
+            分享到广场
           </button>
         </div>
       </div>

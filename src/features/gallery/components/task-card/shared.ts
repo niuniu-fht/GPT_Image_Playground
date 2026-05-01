@@ -12,6 +12,7 @@ export interface TaskCardProps {
   onEditOutputs: () => void
   onRetry: () => void
   onAbort: () => void
+  onShare: () => void
   onToggleFavorite: () => void
   onMoveCategory: () => void
   onDelete: () => void

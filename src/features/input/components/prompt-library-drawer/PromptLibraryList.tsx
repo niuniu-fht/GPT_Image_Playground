@@ -5,6 +5,7 @@ interface PromptLibraryListProps {
   items: PromptLibraryItem[]
   onApply: (item: PromptLibraryItem) => void
   onCopy: (content: string) => void
+  onShare: (item: PromptLibraryItem) => void
   onDelete: (item: PromptLibraryItem) => void
 }
 
@@ -12,6 +13,7 @@ export default function PromptLibraryList({
   items,
   onApply,
   onCopy,
+  onShare,
   onDelete,
 }: PromptLibraryListProps) {
   return (
@@ -79,6 +81,13 @@ export default function PromptLibraryList({
                   className="inline-flex items-center rounded-full border border-gray-200/80 bg-white px-3 py-1.5 text-[13px] font-medium text-gray-600 transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.06]"
                 >
                   复制
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onShare(item)}
+                  className="inline-flex items-center rounded-full border border-blue-200/80 bg-white px-3 py-1.5 text-[13px] font-medium text-blue-600 transition hover:bg-blue-50 dark:border-blue-400/20 dark:bg-gray-900 dark:text-blue-300 dark:hover:bg-blue-500/10"
+                >
+                  分享
                 </button>
               </div>
             </article>

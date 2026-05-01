@@ -1,0 +1,49 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "gpt-image-square-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-05-01",
+	"triggers": {
+		"crons": [
+			"17 19 * * *"
+		]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "gpt-image-square",
+			"database_id": "<your-d1-database-id>",
+			"migrations_dir": "migrations"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "IMAGES",
+			"bucket_name": "gpt-image-square-images"
+		}
+	],
+	"vars": {
+		"API_VERSION": "v1",
+		"ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173,https://<your-github-user>.github.io",
+		"DEFAULT_SHARE_STATUS": "published",
+		"MAX_IMAGE_BYTES": "10485760",
+		"MAX_THUMB_BYTES": "524288",
+		"MAX_REQUEST_BYTES": "62914560",
+		"DAILY_MEDIA_SHARE_LIMIT": "3",
+		"DAILY_PROMPT_SHARE_LIMIT": "99",
+		"PUBLISHER_SHARE_RATE_LIMIT_PER_MINUTE": "2",
+		"IP_SHARE_RATE_LIMIT_PER_MINUTE": "10",
+		"IP_IDENTITY_RATE_LIMIT_PER_HOUR": "20",
+		"AUTO_HIDE_REPORT_THRESHOLD": "5",
+		"REQUIRE_TURNSTILE": "false",
+		"MAX_R2_STORAGE_BYTES": "9663676416",
+		"CLEANUP_TARGET_R2_STORAGE_BYTES": "8589934592",
+		"MAX_PUBLISHED_SHARES": "3000",
+		"MAX_STORED_SHARES": "5000",
+		"CLEANUP_BATCH_LIMIT": "50",
+		"CLEANUP_DELETED_RETENTION_DAYS": "1",
+		"CLEANUP_HIDDEN_RETENTION_DAYS": "30",
+		"CLEANUP_PUBLISHED_MEDIA_RETENTION_DAYS": "90",
+		"CLEANUP_PRUNE_PUBLISHED": "true"
+	}
+}

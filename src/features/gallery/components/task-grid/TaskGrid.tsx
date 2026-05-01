@@ -30,6 +30,7 @@ export default function TaskGrid() {
   const setSelectedTaskIds = useStore((state) => state.setSelectedTaskIds)
   const toggleTaskSelection = useStore((state) => state.toggleTaskSelection)
   const clearSelectedTasks = useStore((state) => state.clearSelectedTasks)
+  const setShareToSquareTarget = useStore((state) => state.setShareToSquareTarget)
 
   const uiState = useTaskGridUiState({
     categories,
@@ -203,6 +204,9 @@ export default function TaskGrid() {
             runGalleryRetry(task)
           }}
           onTaskAbort={handleAbort}
+          onTaskShare={(task) => {
+            setShareToSquareTarget({ kind: 'task', taskId: task.id })
+          }}
           onTaskToggleFavorite={(task) => {
             runGalleryToggleFavorite(task)
           }}
@@ -233,6 +237,9 @@ export default function TaskGrid() {
         onDeleteTask={handleDelete}
         onPurgeTask={handlePurge}
         onRestoreTask={handleRestore}
+        onShareTask={(task) => {
+          setShareToSquareTarget({ kind: 'task', taskId: task.id })
+        }}
       />
     </div>
   )

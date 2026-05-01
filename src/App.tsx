@@ -1,13 +1,16 @@
 import { useEffect } from 'react'
-import { initStore, startRecycleBinJanitor } from './store'
+import { initStore, startRecycleBinJanitor, useStore } from './store'
 import { Header } from './app/components'
 import { ImageContextMenu, TaskGrid } from './features/gallery'
 import { InputBar, PromptLibraryDrawer, SearchBar } from './features/input'
 import { SettingsModal } from './features/settings'
+import { ShareToSquareModal, SquarePage } from './features/square'
 import { DetailModal, ImageEditModal, Lightbox } from './features/viewer'
 import { ConfirmDialog, Toast } from './shared/components'
 
 export default function App() {
+  const appView = useStore((state) => state.appView)
+
   useEffect(() => {
     initStore()
     const stopRecycleBinJanitor = startRecycleBinJanitor()
@@ -25,8 +28,14 @@ export default function App() {
       <main className="relative flex min-w-0 flex-1 flex-col overflow-y-auto pb-28 md:pb-0">
         <Header />
         <div className="max-w-7xl mx-auto w-full px-4 pb-12">
-          <SearchBar />
-          <TaskGrid />
+          {appView === 'square' ? (
+            <SquarePage />
+          ) : (
+            <>
+              <SearchBar />
+              <TaskGrid />
+            </>
+          )}
         </div>
       </main>
 
@@ -43,6 +52,7 @@ export default function App() {
       <Lightbox />
       <PromptLibraryDrawer />
       <SettingsModal />
+      <ShareToSquareModal />
       <ConfirmDialog />
       <Toast />
       <ImageContextMenu />
