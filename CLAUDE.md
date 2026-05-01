@@ -3,6 +3,8 @@
 `GPT Image Playground` 是一个面向 OpenAI / GPT Image 工作流的本地优先图片生成与编辑工作台。  
 当前仓库以前端为主，技术栈为 `React 19 + TypeScript + Vite + Zustand`，核心能力包括图片生成与编辑、任务画廊、本地持久化、供应商配置、协议兼容与导入导出。
 
+领域语言与关键概念定义见 [CONTEXT.md](./CONTEXT.md)。
+
 # Code Style
 
 本文件只保留代码规范摘要，详细规则统一见 [docs/code-style.md](./docs/code-style.md)。
@@ -20,12 +22,14 @@
 npm install
 npm run dev
 npm run build
+npm run test
+npm run test:watch
 npm run preview
 ```
 
 补充说明：
 
-- 当前 `package.json` 中没有独立的 `test` 脚本。
+- 当前 `package.json` 已提供 `test` 与 `test:watch`，基于 `vitest`。
 - `npm run build` 会执行 `tsc -b && vite build`。
 
 # Architecture
@@ -64,12 +68,13 @@ npm run preview
 │  ├─ hooks/                    自定义 hooks
 │  ├─ lib/                      基础能力与适配层
 │  │  ├─ api/                   Images / Responses 协议实现
-│  │  ├─ db.ts                  IndexedDB 访问
+│  │  ├─ db/                    IndexedDB schema / tasks / images 访问拆分
 │  │  ├─ devProxy.ts            本地代理辅助
 │  │  └─ size.ts                尺寸计算与规整
 │  ├─ shared/
 │  │  └─ components/            通用组件
-│  ├─ store/                    Zustand 状态、任务工作流、导入导出等实现
+│  ├─ store/                    Zustand 状态、切片、任务工作流、导入导出等实现
+│  │  └─ slices/                provider / inputDraft / task / viewer / dialog 基础切片
 │  ├─ App.tsx                   应用根组件
 │  ├─ main.tsx                  入口
 │  ├─ store.ts                  Store 统一导出入口
@@ -83,8 +88,9 @@ npm run preview
 - `src/features/*` 放业务模块。
 - 复杂 feature 允许继续下钻子目录，例如 `components/input-bar/*`、`components/prompt-library-drawer/*`、`components/search-bar/*`、`components/size-picker/*`、`components/task-grid/*`、`components/task-card/*`、`components/settings-modal/*`、`components/detail-modal/*`、`components/image-edit-modal/*`、`components/lightbox/*`。
 - `src/shared/components` 只放跨模块复用的通用组件。
-- `src/store/*` 放状态、任务编排、缓存、导入导出等逻辑实现。
-- `src/lib/api/*` 放协议适配与请求编排；`src/lib/api.ts` 仅作为统一导出入口。
+- `src/store/*` 放状态、任务编排、缓存、导入导出等逻辑实现；基础状态优先收敛到 `src/store/slices/*`。
+- `src/lib/api/*` 放协议适配、请求编排、流式解析与相关测试；`src/lib/api.ts` 仅作为统一导出入口。
+- `src/lib/db/*` 放 IndexedDB schema、task 读写、image 读写与迁移逻辑；不要再把整套 DB 细节堆回单文件。
 
 # Important Notes
 

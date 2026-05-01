@@ -17,8 +17,9 @@
 - 当 feature 内单个组件继续膨胀时，允许在该 feature 内继续下钻子目录，例如 `components/input-bar/*`、`components/prompt-library-drawer/*`、`components/search-bar/*`、`components/size-picker/*`、`components/task-grid/*`、`components/task-card/*`、`components/settings-modal/*`、`components/detail-modal/*`、`components/image-edit-modal/*`、`components/lightbox/*`，把容器、分区组件、常量、hooks 和工具拆开。
 - 通用组件放在 `src/shared/components`，只有跨模块复用的组件才进入 shared。
 - 应用级骨架和顶层编排放在 `src/app` 或 `src/App.tsx`，不要把业务细节塞进根组件。
-- 接口调用统一收敛到 `src/lib/api` 或独立 api adapter，UI 组件不要直接承载复杂协议兼容逻辑。
-- Zustand 状态与任务工作流放在 `src/store/*`，按 `state / runtime / actions / domain / cache` 这样的职责拆分。
+- 接口调用统一收敛到 `src/lib/api` 或独立 api adapter，UI 组件不要直接承载复杂协议兼容逻辑；协议测试优先跟随 `src/lib/api/__tests__`。
+- Zustand 状态与任务工作流放在 `src/store/*`，基础状态优先拆到 `src/store/slices/*`，运行时与任务编排继续拆到独立模块。
+- IndexedDB 访问统一收敛到 `src/lib/db/*`，按 `schema / tasks / images` 拆分，不要回退到单文件巨型 DB 模块。
 - 表单、弹窗、卡片、列表、右键菜单等组件要注意进一步拆分，避免再次出现超大 TSX 文件。
 - 组件优先通过 props、hooks、shared utility 复用，避免复制粘贴同类逻辑。
 - 复杂实现可以保留薄的 re-export 入口，但真实实现文件应移动到职责更清晰的子目录里。

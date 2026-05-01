@@ -37,12 +37,14 @@
 - `stream / json / auto` 传输模式与 `file_id / auto` 参考图输入模式。
 - `Images API` 与 `Responses API` 都可按设置优先尝试流式；不兼容时会自动回退，并记录实际传输方式。
 - 失败任务可原任务重试；运行中任务可确认中止；多图任务会边出边存，后续失败也尽量保留已生成结果。
+- 标准任务卡片模式与纯图拼贴模式并存，支持拖图/粘图直接生成单图任务。
 - 分类、收藏、回收站、搜索、状态筛选、多选、框选、批量操作。
 - 尺寸选择器、比例预设、自定义宽高、合法尺寸自动规整。
-- 图片右键菜单、任务右键菜单、大图查看、快速复用历史配置、多输出编辑翻页。
+- 图片右键菜单、任务右键菜单、大图查看、快速复用历史配置、多输出编辑翻页、来源任务链查看。
 - IndexedDB 本地持久化、SHA-256 去重、ZIP 导入导出。
 - 完整报错会随任务一起保存在浏览器本地，并在 15 天后自动清理。
 - 本地代理模式下，开发服务器仍会额外把成功和失败请求写入 `logs/` 目录，便于本机排查。
+- 内置 `vitest` 测试脚本，覆盖请求规划、SSE 读取与 payload 归一化等协议层逻辑。
 - PWA 基础支持，可离线缓存应用壳资源。
 
 ## 架构一览
@@ -54,14 +56,11 @@ React UI
   │  │  ├─ input-bar/            输入面板按提示词 / 参考图 / 参数 / 本地状态 hook 拆分
   │  │  ├─ prompt-library-drawer/ 提示词库按头部 / 保存表单 / 列表拆分
   │  │  ├─ search-bar/           画廊筛选栏按摘要、分类轨道、筛选区、状态 hook / 循环滚动 hook 拆分
-  │  │  ├─ size-picker/          尺寸选择器按模式面板 / 标签区 / 共享常量拆分
-  │  │  ├─ PromptLibraryDrawer   薄入口，转发到 prompt-library-drawer/
-  │  │  ├─ SearchBar             薄入口，转发到 search-bar/
-  │  │  └─ SizePickerModal       薄入口，转发到 size-picker/
+  │  │  └─ size-picker/          尺寸选择器按模式面板 / 标签区 / 共享常量拆分
   │  ├─ settings/components/
   │  │  └─ settings-modal/       设置抽屉按供应商 / 凭据 / 请求策略 / 数据管理拆分
   │  ├─ gallery/components/
-  │  │  ├─ task-grid/            网格容器按框选 hook、工具条、网格体、覆盖层拆分
+  │  │  ├─ task-grid/            网格容器按框选 hook、工具条、网格体、纯图拼贴模式拆分
   │  │  ├─ task-card/            卡片按预览区、元信息、操作区、状态 hook 拆分
   │  │  └─ ...                   右键菜单、移动分类弹窗等独立组件
   │  └─ viewer/components/
@@ -71,7 +70,11 @@ React UI
   │     └─ ...                   大图查看、局部编辑等查看器模块
   ├─ shared/components/          通用弹窗、Toast、Select 等共享组件
   ├─ store/                      状态管理、任务编排、分类/收藏/回收站、导入导出
-  ├─ lib/api/                    Images API / Responses API / 本地代理 / SSE 解析 / 协议回退
+  │  ├─ slices/                  provider / inputDraft / task / viewer / dialog 基础切片
+  │  └─ taskRunner / gallery     任务运行时与画廊领域动作继续拆分
+  ├─ lib/api/                    Images API / Responses API / SSE 解析 / 请求规划 / 响应归一化
+  │  └─ __tests__/               协议层单测
+  ├─ lib/db/                     IndexedDB schema / task / image 读写与迁移
   ├─ IndexedDB + 内存缓存        图片、任务、完整错误日志持久化、去重、按需读取
   ├─ Dev Proxy Logger            本地代理请求转发与开发机 success/error 日志落盘
   └─ PWA Shell                   manifest + service worker
@@ -83,7 +86,7 @@ React UI
 用户输入
   -> store.ts 组装任务
   -> lib/api.ts 按协议发送请求
-  -> 返回图片写入 IndexedDB / 内存缓存
+  -> lib/db/index.ts 与 imageAssets 写入 IndexedDB / 内存缓存
   -> TaskGrid / DetailModal / Lightbox 展示
 ```
 
@@ -96,7 +99,13 @@ React UI
   每次请求失败时，会把完整错误上下文随任务一起保存到浏览器本地，便于“复制完整报错”直接拿到该次请求的完整排查信息；完整错误日志默认保留 15 天，过期后自动清理。
 
 - 协议适配层
-  `src/lib/api.ts` 是统一入口，具体实现拆分在 `src/lib/api/` 下，负责封装 `images/generations`、`images/edits`、`responses` 三类请求，并处理自动回退、SSE 解析、图片内联压缩、文件上传等差异。
+  `src/lib/api.ts` 是统一入口，具体实现拆分在 `src/lib/api/` 下，负责封装 `images/generations`、`images/edits`、`responses` 三类请求，并处理请求规划、自动回退、SSE 解析、响应归一化、图片内联压缩、文件上传等差异；相关回归测试放在 `src/lib/api/__tests__/`。
+
+- 状态切片与领域模块
+  `src/store/state.ts` 只做 store 装配，基础状态拆到 `src/store/slices/*`，任务运行时、画廊动作、图片资产、回收站清理等继续保持独立模块，避免再回到单文件大 store。
+
+- DB 分层
+  IndexedDB 访问已拆到 `src/lib/db/schema.ts`、`src/lib/db/tasks.ts`、`src/lib/db/images.ts`，分别处理 schema、任务记录和图片记录/迁移逻辑，避免协议层和 UI 直接接触底层存储细节。
 
 - 组件分层细化
   当单个功能模块继续膨胀时，会在 feature 内部继续下钻子目录，例如 `input-bar/`、`prompt-library-drawer/`、`search-bar/`、`size-picker/`、`task-grid/`、`task-card/`、`settings-modal/`、`detail-modal/`、`image-edit-modal/`、`lightbox/`，把容器、分区组件、交互 hook、选项常量和交互壳层拆开，而不是继续把实现堆回单个入口文件。
@@ -134,6 +143,7 @@ React UI
 ### 2. 任务画廊与组织能力
 
 - 瀑布流任务卡片。
+- 纯图拼贴模式与单图任务导入。
 - 分类、收藏、未分类、回收站视图。
 - 关键词搜索、状态筛选，以及实际传输方式状态标识（`流式 / JSON / JSON（降级）`）。
 - 多选、框选、批量收藏、批量移动分类、批量移入回收站/恢复。
@@ -175,6 +185,7 @@ React UI
 | 构建工具 | Vite 6 |
 | 样式方案 | Tailwind CSS 3 |
 | 状态管理 | Zustand |
+| 测试 | Vitest |
 | 本地存储 | IndexedDB |
 | 数据打包 | fflate |
 | 运行方式 | 本地开发 / 静态构建 |
@@ -186,6 +197,12 @@ React UI
 ```bash
 npm install
 npm run dev
+```
+
+如需执行协议层单测，可额外运行：
+
+```bash
+npm run test
 ```
 
 启动后访问：
@@ -247,9 +264,10 @@ npm run preview
 
 ### 4. 部署
 
-- 当前仓库已移除 GitHub Pages / Vercel 等平台部署预设。
-- 如需静态部署，只能使用 `direct`，并且要求上游接口支持浏览器直连（`HTTPS`、`CORS`、预检）。
-- `deploy/` 目录中的 Docker / Nginx 文件仅保留为历史参考，不再作为默认运行路径。
+- 当前仓库保留了 GitHub Pages 自动部署工作流，配置见 `.github/workflows/deploy.yml`。
+- 推送符合 `v*` 规则的标签后，会自动执行 `npm ci`、`npm run build` 并发布到 GitHub Pages。
+- GitHub Pages、`vite preview`、静态托管等环境都只能使用 `direct`，并且要求上游接口支持浏览器直连（`HTTPS`、`CORS`、预检）。
+- `deploy/` 目录中的 Docker / Nginx 文件仍保留，可作为自托管部署参考。
 
 ## 项目结构
 
@@ -257,6 +275,10 @@ npm run preview
 .
 ├─ AGENTS.md
 ├─ CLAUDE.md
+├─ CONTEXT.md                  领域语言与概念约束
+├─ .github/workflows/
+│  ├─ deploy.yml               GitHub Pages 标签部署
+│  └─ docker.yml               Docker 相关工作流
 ├─ docs/
 │  ├─ code-style.md            详细代码规范
 │  └─ images/                  README 截图资源
@@ -276,32 +298,29 @@ npm run preview
 │  ├─ features/                 按功能拆分的业务 UI 模块
 │  │  ├─ gallery/components/
 │  │  │  ├─ task-card/          任务卡片拆分后的真实实现
-│  │  │  ├─ task-grid/          任务网格拆分后的真实实现
-│  │  │  ├─ TaskCard.tsx        薄入口
-│  │  │  └─ TaskGrid.tsx        薄入口
+│  │  │  └─ task-grid/          任务网格与纯图拼贴模式
 │  │  ├─ input/components/
 │  │  │  ├─ input-bar/          输入面板拆分后的真实实现
 │  │  │  ├─ prompt-library-drawer/ 提示词库拆分后的真实实现
 │  │  │  ├─ search-bar/         搜索/分类栏拆分后的真实实现
-│  │  │  ├─ size-picker/        尺寸选择器拆分后的真实实现
-│  │  │  ├─ InputBar.tsx        薄入口
-│  │  │  ├─ PromptLibraryDrawer.tsx 薄入口
-│  │  │  ├─ SearchBar.tsx       薄入口
-│  │  │  └─ SizePickerModal.tsx 薄入口
+│  │  │  └─ size-picker/        尺寸选择器拆分后的真实实现
 │  │  ├─ settings/components/
-│  │     ├─ settings-modal/     设置抽屉按 API 分区 / 数据管理拆分后的真实实现
-│  │     └─ SettingsModal.tsx   薄入口
+│  │  │  └─ settings-modal/     设置抽屉按 API 分区 / 数据管理拆分后的真实实现
 │  │  └─ viewer/components/
 │  │     ├─ detail-modal/       详情弹窗拆分后的真实实现
 │  │     ├─ image-edit-modal/   局部编辑弹窗拆分后的真实实现
-│  │     ├─ lightbox/           大图查看拆分后的真实实现
-│  │     ├─ DetailModal.tsx     薄入口
-│  │     ├─ ImageEditModal.tsx  薄入口
-│  │     └─ Lightbox.tsx        薄入口
+│  │     └─ lightbox/           大图查看拆分后的真实实现
 │  ├─ hooks/                    自定义 hooks
-│  ├─ lib/                      API 适配、尺寸处理、DB、代理等基础模块
+│  ├─ lib/
+│  │  ├─ api/                   协议适配、请求规划、SSE 解析、归一化
+│  │  │  └─ __tests__/          协议层单测
+│  │  ├─ db/                    schema / tasks / images
+│  │  ├─ devProxy.ts            本地代理辅助
+│  │  └─ size.ts                尺寸处理
 │  ├─ shared/                   共享组件
-│  ├─ store/                    Zustand 状态与任务工作流实现
+│  ├─ store/
+│  │  ├─ slices/                provider / inputDraft / task / viewer / dialog
+│  │  └─ ...                    gallery、taskRunner、imageAssets 等领域模块
 │  ├─ App.tsx                   应用骨架
 │  ├─ main.tsx                  入口与 Service Worker 注册
 │  ├─ store.ts                  Store 统一导出入口
