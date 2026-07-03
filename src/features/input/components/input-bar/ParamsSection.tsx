@@ -1,21 +1,20 @@
 import type { Dispatch, SetStateAction } from 'react'
-import type { TaskParams } from '../../../../types'
+import type { ModelConfig, TaskParams } from '../../../../types'
 import ParamsAdvancedFields from './ParamsAdvancedFields'
 import ParamsCoreFields from './ParamsCoreFields'
-import type { ProviderOption } from './paramsSectionShared'
 
 interface ParamsSectionProps {
   isMobile: boolean
   mobileAdvancedParamsVisible: boolean
   setMobileAdvancedParamsVisible: Dispatch<SetStateAction<boolean>>
-  activeProviderId: string
-  providerOptions: ProviderOption[]
+  activeModelId: string | null
+  models: ModelConfig[]
   normalizedSize: string
   params: TaskParams
   outputCompressionInput: string
   nInput: string
   selectClass: string
-  onActiveProviderChange: (providerId: string) => void
+  onActiveModelChange: (modelId: string) => void
   onOpenSizePicker: () => void
   onSetParams: (params: Partial<TaskParams>) => void
   onOutputCompressionInputChange: (value: string) => void
@@ -28,14 +27,14 @@ export default function ParamsSection({
   isMobile,
   mobileAdvancedParamsVisible,
   setMobileAdvancedParamsVisible,
-  activeProviderId,
-  providerOptions,
+  activeModelId,
+  models,
   normalizedSize,
   params,
   outputCompressionInput,
   nInput,
   selectClass,
-  onActiveProviderChange,
+  onActiveModelChange,
   onOpenSizePicker,
   onSetParams,
   onOutputCompressionInputChange,
@@ -58,12 +57,12 @@ export default function ParamsSection({
         <div className="flex flex-col gap-2 text-[13px]">
           <ParamsCoreFields
             compact
-            activeProviderId={activeProviderId}
-            providerOptions={providerOptions}
+            activeModelId={activeModelId}
+            models={models}
             normalizedSize={normalizedSize}
             quality={params.quality}
             selectClass={selectClass}
-            onActiveProviderChange={onActiveProviderChange}
+            onActiveModelChange={onActiveModelChange}
             onOpenSizePicker={onOpenSizePicker}
             onSetQuality={(quality) => onSetParams({ quality })}
           />
@@ -107,12 +106,12 @@ export default function ParamsSection({
     <div className="flex flex-col gap-3 text-sm">
       <ParamsCoreFields
         compact={false}
-        activeProviderId={activeProviderId}
-        providerOptions={providerOptions}
+        activeModelId={activeModelId}
+        models={models}
         normalizedSize={normalizedSize}
         quality={params.quality}
         selectClass={selectClass}
-        onActiveProviderChange={onActiveProviderChange}
+        onActiveModelChange={onActiveModelChange}
         onOpenSizePicker={onOpenSizePicker}
         onSetQuality={(quality) => onSetParams({ quality })}
       />

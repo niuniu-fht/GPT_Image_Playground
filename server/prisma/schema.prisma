@@ -1,0 +1,297 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  user
+  admin
+}
+
+enum ApiProtocol {
+  images
+  responses
+}
+
+enum TaskStatus {
+  running
+  done
+  error
+}
+
+enum UserStatus {
+  active
+  disabled
+}
+
+enum AnnouncementStatus {
+  draft
+  published
+  archived
+}
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  passwordHash  String
+  role          UserRole       @default(user)
+  status        UserStatus     @default(active)
+  segment       String         @default("normal")
+  adminNote     String         @default("")
+  creditBalance Int            @default(0)
+  lastLoginAt   DateTime?
+  loginCount    Int            @default(0)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  ledgers       CreditLedger[]
+  tasks         GenerationTask[]
+  redemptions   CreditRedemption[]
+  creditOrders  CreditOrder[]
+  supportTickets SupportTicket[]
+  loginLogs     LoginLog[]
+}
+
+model LoginLog {
+  id        String   @id @default(cuid())
+  email     String
+  userId    String?
+  success   Boolean
+  reason    String
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([email, createdAt])
+  @@index([userId, createdAt])
+  @@index([success, createdAt])
+}
+
+model ModelConfig {
+  id            String           @id @default(cuid())
+  name          String           @unique
+  displayName   String
+  description   String
+  icon          String           @default("sparkles")
+  costCredits   Int
+  upstreamModel String
+  upstreamProviderId String?
+  apiProtocol   ApiProtocol      @default(images)
+  enabled       Boolean          @default(true)
+  isNew         Boolean          @default(false)
+  sortOrder     Int              @default(0)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  tasks         GenerationTask[]
+  upstreamProvider UpstreamProvider? @relation(fields: [upstreamProviderId], references: [id], onDelete: SetNull)
+}
+
+model UpstreamProvider {
+  id        String        @id @default(cuid())
+  name      String
+  baseUrl   String
+  apiKey    String
+  enabled   Boolean       @default(true)
+  priority  Int           @default(100)
+  timeoutSeconds Int       @default(900)
+  notes     String        @default("")
+  lastCheckedAt DateTime?
+  lastHealthStatus String  @default("unknown")
+  lastLatencyMs Int?
+  lastHttpStatus Int?
+  lastHealthMessage String @default("")
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  models    ModelConfig[]
+
+  @@index([enabled, priority])
+}
+
+model CreditLedger {
+  id           String   @id @default(cuid())
+  userId       String
+  delta        Int
+  reason       String
+  taskId       String?
+  balanceAfter Int
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model RedeemCode {
+  id             String             @id @default(cuid())
+  code           String             @unique
+  name           String
+  credits        Int
+  maxRedemptions Int                @default(1)
+  perUserLimit   Int                @default(1)
+  usedCount      Int                @default(0)
+  status         String             @default("active")
+  startsAt       DateTime?
+  endsAt         DateTime?
+  note           String             @default("")
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  redemptions    CreditRedemption[]
+
+  @@index([status, startsAt, endsAt])
+}
+
+model CreditRedemption {
+  id             String      @id @default(cuid())
+  redeemCodeId   String
+  userId         String
+  credits        Int
+  balanceAfter   Int
+  createdAt      DateTime    @default(now())
+  redeemCode     RedeemCode  @relation(fields: [redeemCodeId], references: [id], onDelete: Cascade)
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([redeemCodeId, createdAt])
+}
+
+model CreditPackage {
+  id          String        @id @default(cuid())
+  name        String
+  description String       @default("")
+  credits     Int
+  bonusCredits Int         @default(0)
+  priceCents  Int
+  currency    String       @default("CNY")
+  badge       String       @default("")
+  enabled     Boolean      @default(true)
+  sortOrder   Int          @default(100)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  orders      CreditOrder[]
+
+  @@index([enabled, sortOrder])
+}
+
+model CreditOrder {
+  id               String         @id @default(cuid())
+  orderNo          String         @unique
+  userId           String
+  creditPackageId  String?
+  packageName      String
+  credits          Int
+  bonusCredits     Int            @default(0)
+  totalCredits     Int
+  priceCents       Int
+  currency         String         @default("CNY")
+  status           String         @default("pending")
+  paymentMethod    String         @default("manual")
+  userNote         String         @default("")
+  adminNote        String         @default("")
+  paidAt           DateTime?
+  cancelledAt      DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creditPackage    CreditPackage? @relation(fields: [creditPackageId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+model SupportTicket {
+  id             String   @id @default(cuid())
+  userId         String
+  category       String   @default("general")
+  priority       String   @default("normal")
+  status         String   @default("open")
+  title          String
+  content        String
+  contact        String   @default("")
+  relatedTaskId  String?
+  relatedOrderNo String?
+  adminReply     String   @default("")
+  adminNote      String   @default("")
+  repliedAt      DateTime?
+  closedAt       DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status, priority, createdAt])
+}
+
+model ModerationRule {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   @default("keyword")
+  pattern     String
+  action      String   @default("block")
+  message     String   @default("提示词包含平台暂不支持的内容，请调整后重试")
+  enabled     Boolean  @default(true)
+  priority    Int      @default(100)
+  hitCount    Int      @default(0)
+  lastHitAt   DateTime?
+  note        String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([enabled, priority])
+}
+
+model GenerationTask {
+  id            String       @id @default(cuid())
+  userId        String
+  modelConfigId String
+  prompt        String
+  params        Json
+  status        TaskStatus   @default(running)
+  costCredits   Int
+  outputImages  Json?
+  error         String?
+  createdAt     DateTime     @default(now())
+  finishedAt    DateTime?
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  modelConfig   ModelConfig  @relation(fields: [modelConfigId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+model Announcement {
+  id          String             @id @default(cuid())
+  title       String
+  content     String
+  level       String             @default("info")
+  placement   String             @default("global")
+  actionLabel String             @default("")
+  actionUrl   String             @default("")
+  status      AnnouncementStatus @default(draft)
+  pinned      Boolean            @default(false)
+  startsAt    DateTime?
+  endsAt      DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  target    String
+  detail    Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+}
+
+model PlatformSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

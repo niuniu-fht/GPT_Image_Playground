@@ -186,10 +186,16 @@ function parseManifest(raw: string): ShareManifest {
 
 function readFormFile(form: FormData, name: string): File {
   const value = form.get(name)
-  if (!(value instanceof File)) {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    typeof (value as File).name !== 'string' ||
+    typeof (value as File).size !== 'number' ||
+    typeof (value as File).arrayBuffer !== 'function'
+  ) {
     throw validationFailed(`缺少文件字段 ${name}`)
   }
-  return value
+  return value as File
 }
 
 function assertFileAllowed(file: File, maxBytes: number, label: string): void {

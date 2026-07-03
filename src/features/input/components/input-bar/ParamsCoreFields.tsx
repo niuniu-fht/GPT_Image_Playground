@@ -1,27 +1,28 @@
-import type { TaskParams } from '../../../../types'
+import type { ModelConfig, TaskParams } from '../../../../types'
 import Select from '../../../../shared/components/Select'
-import { type ProviderOption, QUALITY_OPTIONS } from './paramsSectionShared'
+import { QUALITY_OPTIONS } from './paramsSectionShared'
+import ModelSelector from './ModelSelector'
 
 interface ParamsCoreFieldsProps {
   compact: boolean
-  activeProviderId: string
-  providerOptions: ProviderOption[]
+  activeModelId: string | null
+  models: ModelConfig[]
   normalizedSize: string
   quality: TaskParams['quality']
   selectClass: string
-  onActiveProviderChange: (providerId: string) => void
+  onActiveModelChange: (modelId: string) => void
   onOpenSizePicker: () => void
   onSetQuality: (quality: TaskParams['quality']) => void
 }
 
 export default function ParamsCoreFields({
   compact,
-  activeProviderId,
-  providerOptions,
+  activeModelId,
+  models,
   normalizedSize,
   quality,
   selectClass,
-  onActiveProviderChange,
+  onActiveModelChange,
   onOpenSizePicker,
   onSetQuality,
 }: ParamsCoreFieldsProps) {
@@ -33,12 +34,12 @@ export default function ParamsCoreFields({
   return (
     <>
       <label className={`flex flex-col ${labelGapClass}`}>
-        <span className="font-medium text-gray-500 dark:text-gray-400">供应商</span>
-        <Select
-          value={activeProviderId}
-          onChange={(value) => onActiveProviderChange(String(value))}
-          options={providerOptions}
-          className={selectClass}
+        <span className="font-medium text-gray-500 dark:text-gray-400">模型</span>
+        <ModelSelector
+          models={models}
+          activeModelId={activeModelId}
+          compact={compact}
+          onChange={onActiveModelChange}
         />
       </label>
 

@@ -1,0 +1,3 @@
+ALTER TABLE "User"
+  ADD COLUMN "segment" TEXT NOT NULL DEFAULT 'normal',
+  ADD COLUMN "adminNote" TEXT NOT NULL DEFAULT '';

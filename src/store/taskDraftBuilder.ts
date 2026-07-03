@@ -21,7 +21,9 @@ import { resolveTaskParamSizeOrDefault } from './taskParams'
 import { createGenerationTaskRecord } from './taskRecords'
 
 export type PrepareTaskDraftFailureReason =
-  | 'missing_api_key'
+  | 'missing_login'
+  | 'missing_model'
+  | 'insufficient_credits'
   | 'missing_prompt_or_inputs'
   | 'too_many_masked_inputs'
 
@@ -34,6 +36,9 @@ export interface TaskDraftStoreSnapshot {
   prompt: string
   inputImages: InputImage[]
   params: TaskParams
+  currentUser: import('../types').CurrentUser | null
+  activeModelId: string | null
+  models: import('../types').ModelConfig[]
 }
 
 export interface StagedTaskDraftAssets {
@@ -71,8 +76,13 @@ export interface ImageEditDraftWriteResult {
 export function validateTaskDraftSnapshot(
   snapshot: TaskDraftStoreSnapshot,
 ): PrepareTaskDraftFailureReason | null {
-  if (!snapshot.settings.apiKey) {
-    return 'missing_api_key'
+  if (!snapshot.currentUser) {
+    return 'missing_login'
+  }
+
+  const selectedModel = snapshot.models.find((model) => model.id === snapshot.activeModelId)
+  if (!selectedModel) {
+    return 'missing_model'
   }
 
   if (!snapshot.prompt.trim() && !snapshot.inputImages.length) {
@@ -82,6 +92,10 @@ export function validateTaskDraftSnapshot(
   const maskedInputCount = snapshot.inputImages.filter((image) => Boolean(image.maskDataUrl)).length
   if (maskedInputCount > 1) {
     return 'too_many_masked_inputs'
+  }
+
+  if (snapshot.currentUser.creditBalance < selectedModel.costCredits) {
+    return 'insufficient_credits'
   }
 
   return null
@@ -98,6 +112,7 @@ export function buildPreparedTaskDraft(
   }
 
   const selectedProvider = findProviderById(snapshot.providers, snapshot.activeProviderId)
+  const selectedModel = snapshot.models.find((model) => model.id === snapshot.activeModelId)
   const selectedCategory =
     snapshot.activeCategoryFilter !== ALL_CATEGORY_FILTER &&
     snapshot.activeCategoryFilter !== FAVORITES_CATEGORY_FILTER &&
@@ -113,6 +128,10 @@ export function buildPreparedTaskDraft(
     task: createGenerationTaskRecord({
       providerId: selectedProvider?.id ?? null,
       providerName: selectedProvider?.name?.trim() || UNKNOWN_TASK_PROVIDER_NAME,
+      modelConfigId: selectedModel?.id ?? null,
+      modelName: selectedModel?.name ?? null,
+      modelDisplayName: selectedModel?.displayName ?? null,
+      costCredits: selectedModel?.costCredits ?? null,
       categoryId: selectedCategory?.id ?? null,
       categoryName: selectedCategory?.name ?? null,
       parentTaskId,

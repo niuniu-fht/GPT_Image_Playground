@@ -1,4 +1,5 @@
 import { getAllTasks, putTask } from '../lib/db'
+import { platformApi } from '../lib/platformApi'
 import type { TaskRecord } from '../types'
 import {
   ERROR_LOG_POLL_INTERVAL_MS,
@@ -89,6 +90,25 @@ async function cleanupOrphanImages(tasks: TaskRecord[]) {
 }
 
 export async function initStore() {
+  void platformApi
+    .getMe()
+    .then(({ user }) => useStore.getState().setCurrentUser(user))
+    .catch(() => useStore.getState().setCurrentUser(null))
+    .finally(() => useStore.getState().setAuthReady(true))
+
+  void platformApi
+    .listModels()
+    .then(({ models }) => useStore.getState().setModels(models))
+    .catch(() => {
+      useStore.getState().setModels([])
+      useStore.getState().showToast('模型列表加载失败，请确认后端服务已启动', 'error')
+    })
+
+  void platformApi
+    .listPublicAnnouncements()
+    .then(({ items }) => useStore.getState().setAnnouncements(items))
+    .catch(() => undefined)
+
   const tasks = await cleanupExpiredErrorDebugLogs(await getAllTasks())
   useStore.getState().setTasks(tasks)
   repairCategoryStateFromTasks(tasks)

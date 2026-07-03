@@ -14,6 +14,7 @@ import { DEFAULT_PARAMS, openLightbox, resolveTaskParamSizeOrDefault, useStore, 
 import {
   ALL_CATEGORY_FILTER,
   FAVORITES_CATEGORY_FILTER,
+  type ModelConfig,
   resolveCategoryFilterName,
   type InputImage,
   type TaskParams,
@@ -22,11 +23,6 @@ import { API_MAX_IMAGES } from './shared'
 import { useInputImageControls } from './useInputImageControls'
 import { usePromptInputController } from './usePromptInputController'
 import { useIsMobile } from './useIsMobile'
-
-interface ProviderOption {
-  label: string
-  value: string
-}
 
 export interface PromptSectionViewModel {
   prompt: string
@@ -64,14 +60,14 @@ export interface ParamsSectionViewModel {
   isMobile: boolean
   mobileAdvancedParamsVisible: boolean
   setMobileAdvancedParamsVisible: Dispatch<SetStateAction<boolean>>
-  activeProviderId: string
-  providerOptions: ProviderOption[]
+  activeModelId: string | null
+  models: ModelConfig[]
   normalizedSize: string
   params: TaskParams
   outputCompressionInput: string
   nInput: string
   selectClass: string
-  onActiveProviderChange: (providerId: string) => void
+  onActiveModelChange: (modelId: string) => void
   onOpenSizePicker: () => void
   onSetParams: (params: Partial<TaskParams>) => void
   onOutputCompressionInputChange: (value: string) => void
@@ -82,7 +78,10 @@ export interface ParamsSectionViewModel {
 
 export interface SubmitSectionViewModel {
   generationTargetLabel: string
-  hasApiKey: boolean
+  isLoggedIn: boolean
+  activeModel: ModelConfig | null
+  creditBalance: number
+  estimatedCost: number
   canSubmit: boolean
   isMobile: boolean
   onSubmit: () => void
@@ -133,13 +132,13 @@ export function useInputBarState(): InputBarViewModel {
   const clearInputImages = useStore((state) => state.clearInputImages)
   const categories = useStore((state) => state.categories)
   const activeCategoryFilter = useStore((state) => state.activeCategoryFilter)
-  const providers = useStore((state) => state.providers)
-  const activeProviderId = useStore((state) => state.activeProviderId)
-  const setActiveProvider = useStore((state) => state.setActiveProvider)
+  const currentUser = useStore((state) => state.currentUser)
+  const models = useStore((state) => state.models)
+  const activeModelId = useStore((state) => state.activeModelId)
+  const setActiveModelId = useStore((state) => state.setActiveModelId)
   const params = useStore((state) => state.params)
   const setParams = useStore((state) => state.setParams)
-  const settings = useStore((state) => state.settings)
-  const setShowSettings = useStore((state) => state.setShowSettings)
+  const openAuthModal = useStore((state) => state.openAuthModal)
   const setConfirmDialog = useStore((state) => state.setConfirmDialog)
 
   // ===== Local state =====
@@ -153,10 +152,7 @@ export function useInputBarState(): InputBarViewModel {
 
   // ===== Derived values =====
   const isMobile = useIsMobile()
-  const providerOptions = providers.map((provider) => ({
-    label: provider.name,
-    value: provider.id,
-  }))
+  const activeModel = models.find((model) => model.id === activeModelId) ?? models[0] ?? null
   const generationTargetLabel =
     activeCategoryFilter === ALL_CATEGORY_FILTER || activeCategoryFilter === FAVORITES_CATEGORY_FILTER
       ? '未分类'
@@ -164,7 +160,13 @@ export function useInputBarState(): InputBarViewModel {
   const promptHintText = isMobile
     ? '先写主体需求，下面直接补充供应商、质量和尺寸'
     : '桌面端支持 Ctrl+Enter 直接生成'
-  const canSubmit = (prompt.trim() || inputImages.length) && settings.apiKey
+  const estimatedCost = activeModel?.costCredits ?? 0
+  const creditBalance = currentUser?.creditBalance ?? 0
+  const canSubmit =
+    Boolean(prompt.trim() || inputImages.length) &&
+    Boolean(currentUser) &&
+    Boolean(activeModel) &&
+    creditBalance >= estimatedCost
   const atImageLimit = inputImages.length >= API_MAX_IMAGES
   const maskedInputCount = inputImages.filter((image) => Boolean(image.maskDataUrl)).length
   const primaryMaskedInputIndex = inputImages.findIndex((image) => Boolean(image.maskDataUrl))
@@ -260,14 +262,14 @@ export function useInputBarState(): InputBarViewModel {
     isMobile,
     mobileAdvancedParamsVisible,
     setMobileAdvancedParamsVisible,
-    activeProviderId,
-    providerOptions,
+    activeModelId,
+    models,
     normalizedSize,
     params,
     outputCompressionInput,
     nInput,
     selectClass,
-    onActiveProviderChange: setActiveProvider,
+    onActiveModelChange: setActiveModelId,
     onOpenSizePicker: () => setShowSizePicker(true),
     onSetParams: setParams,
     onOutputCompressionInputChange: setOutputCompressionInput,
@@ -279,11 +281,14 @@ export function useInputBarState(): InputBarViewModel {
   // ===== Sub-ViewModel: SubmitSection =====
   const submitSectionProps: SubmitSectionViewModel = {
     generationTargetLabel,
-    hasApiKey: Boolean(settings.apiKey),
+    isLoggedIn: Boolean(currentUser),
+    activeModel,
+    creditBalance,
+    estimatedCost,
     canSubmit: Boolean(canSubmit),
     isMobile,
     onSubmit: handleSubmit,
-    onOpenSettings: () => setShowSettings(true),
+    onOpenSettings: () => openAuthModal('login'),
   }
 
   // ===== Assemble InputBarViewModel =====

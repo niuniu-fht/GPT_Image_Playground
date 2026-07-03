@@ -7,11 +7,19 @@ import { enqueueTaskRun, requestAbortTaskRun, retryTaskRun } from "./taskRun"
 
 function handlePrepareFailure(
   snapshot: ReturnType<typeof useStore.getState>,
-  reason: "missing_api_key" | "missing_prompt_or_inputs" | "too_many_masked_inputs",
+  reason: "missing_login" | "missing_model" | "insufficient_credits" | "missing_prompt_or_inputs" | "too_many_masked_inputs",
 ) {
-  if (reason === "missing_api_key") {
-    snapshot.showToast("请先在设置中配置 API Key", "error")
-    snapshot.setShowSettings(true)
+  if (reason === "missing_login") {
+    snapshot.showToast("请先登录后再生成", "error")
+    snapshot.openAuthModal("login")
+    return
+  }
+  if (reason === "missing_model") {
+    snapshot.showToast("暂无可用模型，请联系管理员配置", "error")
+    return
+  }
+  if (reason === "insufficient_credits") {
+    snapshot.showToast("积分不足，无法生成", "error")
     return
   }
   if (reason === "missing_prompt_or_inputs") {
@@ -39,6 +47,9 @@ export async function submitTask() {
     prompt: snapshot.prompt,
     inputImages: snapshot.inputImages,
     params: snapshot.params,
+    currentUser: snapshot.currentUser,
+    activeModelId: snapshot.activeModelId,
+    models: snapshot.models,
   })
   if (!prepared.ok) {
     handlePrepareFailure(snapshot, prepared.reason)

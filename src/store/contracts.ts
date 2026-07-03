@@ -5,6 +5,9 @@ import type {
   GalleryDisplayMode,
   ImageEditSession,
   InputImage,
+  CurrentUser,
+  ModelConfig,
+  AdminAnnouncement,
   PromptLibraryItem,
   ProviderConfig,
   SquareShareTarget,
@@ -26,6 +29,23 @@ export interface AppState {
   updateProviderName: (id: string, name: string) => void
   removeProvider: (id: string) => void
   replaceProviderState: (providers: ProviderConfig[], activeProviderId?: string) => void
+
+  currentUser: CurrentUser | null
+  authReady: boolean
+  authModalOpen: boolean
+  authMode: 'login' | 'register'
+  models: ModelConfig[]
+  announcements: AdminAnnouncement[]
+  activeModelId: string | null
+  showAdminModels: boolean
+  setCurrentUser: (user: CurrentUser | null) => void
+  setAuthReady: (ready: boolean) => void
+  openAuthModal: (mode?: 'login' | 'register') => void
+  closeAuthModal: () => void
+  setModels: (models: ModelConfig[]) => void
+  setAnnouncements: (announcements: AdminAnnouncement[]) => void
+  setActiveModelId: (id: string) => void
+  setShowAdminModels: (visible: boolean) => void
 
   prompt: string
   setPrompt: (prompt: string) => void
@@ -100,6 +120,7 @@ export type PersistedAppStateSnapshot = Partial<
     | 'promptLibrary'
     | 'galleryDisplayMode'
     | 'appView'
+    | 'activeModelId'
   >
 > &
   Record<string, unknown>

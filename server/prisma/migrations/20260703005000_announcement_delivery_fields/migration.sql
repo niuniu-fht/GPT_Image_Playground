@@ -1,0 +1,5 @@
+ALTER TABLE "Announcement"
+  ADD COLUMN "level" TEXT NOT NULL DEFAULT 'info',
+  ADD COLUMN "placement" TEXT NOT NULL DEFAULT 'global',
+  ADD COLUMN "actionLabel" TEXT NOT NULL DEFAULT '',
+  ADD COLUMN "actionUrl" TEXT NOT NULL DEFAULT '';

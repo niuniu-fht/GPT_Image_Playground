@@ -2,7 +2,7 @@ import { ApiError, badRequest, forbidden, unauthorized } from '../errors'
 import { getBearerToken } from '../request'
 import { jsonOk } from '../response'
 import { cleanupSquareStorage, getSquareUsage } from '../storage'
-import type { RequestContext } from '../types'
+import type { RequestContext, ShareKind, ShareStatus } from '../types'
 
 function assertAdmin(ctx: RequestContext): void {
   const expectedToken = ctx.env.ADMIN_TOKEN?.trim()
@@ -42,6 +42,49 @@ function readOptionalNumber(value: unknown): number | undefined {
   return Math.floor(value)
 }
 
+function readLimitParam(value: string | null): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return 30
+  return Math.min(Math.floor(parsed), 100)
+}
+
+function readShareStatus(value: unknown): ShareStatus {
+  if (
+    value === 'published' ||
+    value === 'pending_review' ||
+    value === 'hidden' ||
+    value === 'deleted' ||
+    value === 'rejected'
+  ) {
+    return value
+  }
+  throw badRequest('status 只允许 published、pending_review、hidden、deleted 或 rejected')
+}
+
+function readShareIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    throw badRequest('ids 必须是数组')
+  }
+  const ids = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+  if (ids.length < 1) {
+    throw badRequest('至少选择 1 条广场内容')
+  }
+  if (ids.length > 100) {
+    throw badRequest('单次最多处理 100 条广场内容')
+  }
+  return ids
+}
+
+function safeJsonArray(value: string | null): string[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 export async function handleGetAdminUsage(ctx: RequestContext): Promise<Response> {
   assertAdmin(ctx)
   return jsonOk(await getSquareUsage(ctx.env), {}, ctx.corsHeaders)
@@ -59,4 +102,145 @@ export async function handleRunAdminCleanup(ctx: RequestContext): Promise<Respon
   })
 
   return jsonOk(result, {}, ctx.corsHeaders)
+}
+
+export async function handleListAdminShares(ctx: RequestContext, url: URL): Promise<Response> {
+  assertAdmin(ctx)
+  const limit = readLimitParam(url.searchParams.get('limit'))
+  const status = url.searchParams.get('status')
+  const kind = url.searchParams.get('kind')
+  const q = url.searchParams.get('q')?.trim().toLowerCase() ?? ''
+  const conditions: string[] = []
+  const params: Array<string | number> = []
+
+  if (status && status !== 'all') {
+    conditions.push('s.status = ?')
+    params.push(readShareStatus(status))
+  }
+
+  if (kind && kind !== 'all') {
+    if (kind !== 'image' && kind !== 'task' && kind !== 'prompt') {
+      throw badRequest('kind 只允许 image、task、prompt 或 all')
+    }
+    conditions.push('s.kind = ?')
+    params.push(kind)
+  }
+
+  if (q) {
+    conditions.push('(LOWER(s.title) LIKE ? OR LOWER(s.prompt) LIKE ? OR LOWER(s.tags_json) LIKE ?)')
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`)
+  }
+
+  params.push(limit)
+  const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  const rows = await ctx.env.DB.prepare(
+    `SELECT
+       s.id,
+       s.publisher_id,
+       s.kind,
+       s.title,
+       s.prompt,
+       s.tags_json,
+       s.status,
+       s.client_request_id,
+       s.view_count,
+       s.report_count,
+       s.created_at,
+       s.updated_at,
+       a.id AS cover_asset_id,
+       a.width AS cover_width,
+       a.height AS cover_height
+     FROM shares s
+     LEFT JOIN share_assets a ON a.id = s.cover_asset_id
+     ${whereSql}
+     ORDER BY s.updated_at DESC, s.created_at DESC
+     LIMIT ?`,
+  )
+    .bind(...params)
+    .all<{
+      id: string
+      publisher_id: string
+      kind: ShareKind
+      title: string
+      prompt: string
+      tags_json: string
+      status: ShareStatus
+      client_request_id: string
+      view_count: number
+      report_count: number
+      created_at: number
+      updated_at: number
+      cover_asset_id: string | null
+      cover_width: number | null
+      cover_height: number | null
+    }>()
+
+  return jsonOk(
+    {
+      items: rows.results.map((row) => ({
+        id: row.id,
+        publisherId: row.publisher_id,
+        kind: row.kind,
+        title: row.title,
+        prompt: row.prompt,
+        tags: safeJsonArray(row.tags_json),
+        status: row.status,
+        clientRequestId: row.client_request_id,
+        viewCount: row.view_count,
+        reportCount: row.report_count,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        coverAsset: row.cover_asset_id
+          ? {
+              assetId: row.cover_asset_id,
+              thumbUrl: `/api/v1/assets/${row.cover_asset_id}?variant=thumb`,
+              originalUrl: `/api/v1/assets/${row.cover_asset_id}?variant=original`,
+              width: row.cover_width,
+              height: row.cover_height,
+            }
+          : null,
+      })),
+    },
+    {},
+    ctx.corsHeaders,
+  )
+}
+
+export async function handleUpdateAdminShareStatus(
+  ctx: RequestContext,
+  shareId: string,
+): Promise<Response> {
+  assertAdmin(ctx)
+  const body = await readOptionalJsonBody(ctx.request)
+  const status = readShareStatus(body.status)
+  const result = await ctx.env.DB.prepare(
+    `UPDATE shares
+     SET status = ?, updated_at = ?
+     WHERE id = ?`,
+  )
+    .bind(status, Date.now(), shareId)
+    .run()
+
+  if ((result.meta.changes ?? 0) < 1) {
+    throw badRequest('分享不存在或状态未更新')
+  }
+
+  return jsonOk({ id: shareId, status }, {}, ctx.corsHeaders)
+}
+
+export async function handleBatchUpdateAdminShareStatus(ctx: RequestContext): Promise<Response> {
+  assertAdmin(ctx)
+  const body = await readOptionalJsonBody(ctx.request)
+  const status = readShareStatus(body.status)
+  const ids = readShareIds(body.ids)
+  const now = Date.now()
+  const statements = ids.map((id) => ctx.env.DB.prepare(
+    `UPDATE shares
+     SET status = ?, updated_at = ?
+     WHERE id = ?`,
+  ).bind(status, now, id))
+  const results = await ctx.env.DB.batch(statements)
+  const affected = results.reduce((sum, result) => sum + (result.meta.changes ?? 0), 0)
+
+  return jsonOk({ affected, requested: ids.length, status }, {}, ctx.corsHeaders)
 }

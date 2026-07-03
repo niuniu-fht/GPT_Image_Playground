@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { initStore, startRecycleBinJanitor, useStore } from './store'
 import { Header } from './app/components'
+import { AdminConsole, AnnouncementStrip, AuthModal } from './features/account'
 import { ImageContextMenu, TaskGrid } from './features/gallery'
 import { InputBar, PromptLibraryDrawer, SearchBar } from './features/input'
 import { SettingsModal } from './features/settings'
@@ -10,6 +11,7 @@ import { ConfirmDialog, Toast } from './shared/components'
 
 export default function App() {
   const appView = useStore((state) => state.appView)
+  const setShowAdminModels = useStore((state) => state.setShowAdminModels)
 
   useEffect(() => {
     initStore()
@@ -20,6 +22,16 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    function syncAdminRoute() {
+      setShowAdminModels(window.location.pathname === '/admin')
+    }
+
+    syncAdminRoute()
+    window.addEventListener('popstate', syncAdminRoute)
+    return () => window.removeEventListener('popstate', syncAdminRoute)
+  }, [setShowAdminModels])
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-gray-50 dark:bg-gray-950">
       <InputBar />
@@ -29,9 +41,13 @@ export default function App() {
         <Header />
         <div className="max-w-7xl mx-auto w-full px-4 pb-12">
           {appView === 'square' ? (
-            <SquarePage />
+            <>
+              <AnnouncementStrip placement="square" />
+              <SquarePage />
+            </>
           ) : (
             <>
+              <AnnouncementStrip placement="workspace" />
               <SearchBar />
               <TaskGrid />
             </>
@@ -53,6 +69,8 @@ export default function App() {
       <PromptLibraryDrawer />
       <SettingsModal />
       <ShareToSquareModal />
+      <AuthModal />
+      <AdminConsole />
       <ConfirmDialog />
       <Toast />
       <ImageContextMenu />

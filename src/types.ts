@@ -119,6 +119,397 @@ export interface ProviderConfig extends AppSettings {
   name: string
 }
 
+export interface CurrentUser {
+  id: string
+  email: string
+  role: 'user' | 'admin'
+  status?: 'active' | 'disabled'
+  creditBalance: number
+}
+
+export interface ModelConfig {
+  id: string
+  name: string
+  displayName: string
+  description: string
+  icon: string
+  costCredits: number
+  upstreamModel: string
+  upstreamProviderId?: string | null
+  apiProtocol: ApiProtocol
+  enabled: boolean
+  isNew: boolean
+  sortOrder: number
+  createdAt?: string
+  updatedAt?: string
+  upstreamProvider?: {
+    id: string
+    name: string
+    baseUrl: string
+    enabled: boolean
+    lastCheckedAt?: string | null
+    lastHealthStatus: 'unknown' | 'healthy' | 'error'
+    lastLatencyMs?: number | null
+    lastHttpStatus?: number | null
+    lastHealthMessage: string
+  } | null
+}
+
+export interface AdminUserSummary {
+  id: string
+  email: string
+  role: 'user' | 'admin'
+  status: 'active' | 'disabled'
+  segment: 'normal' | 'vip' | 'trial' | 'risk'
+  adminNote: string
+  creditBalance: number
+  lastLoginAt?: string | null
+  loginCount: number
+  createdAt: string
+  _count?: {
+    tasks: number
+    ledgers: number
+  }
+}
+
+export interface AdminCreditLedger {
+  id: string
+  userId: string
+  delta: number
+  reason: string
+  taskId?: string | null
+  balanceAfter: number
+  createdAt: string
+  user?: { email: string }
+}
+
+export interface AdminRedeemCode {
+  id: string
+  code: string
+  name: string
+  credits: number
+  maxRedemptions: number
+  perUserLimit: number
+  usedCount: number
+  status: 'active' | 'disabled'
+  startsAt?: string | null
+  endsAt?: string | null
+  note: string
+  createdAt: string
+  updatedAt: string
+  _count?: {
+    redemptions: number
+  }
+  redemptions?: Array<{
+    id: string
+    userId: string
+    credits: number
+    balanceAfter: number
+    createdAt: string
+    user?: { email: string }
+  }>
+}
+
+export interface CreditPackage {
+  id: string
+  name: string
+  description: string
+  credits: number
+  bonusCredits: number
+  priceCents: number
+  currency: string
+  badge: string
+  enabled: boolean
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+  _count?: {
+    orders: number
+  }
+}
+
+export interface CreditOrder {
+  id: string
+  orderNo: string
+  userId: string
+  creditPackageId?: string | null
+  packageName: string
+  credits: number
+  bonusCredits: number
+  totalCredits: number
+  priceCents: number
+  currency: string
+  status: 'pending' | 'paid' | 'cancelled'
+  paymentMethod: string
+  userNote: string
+  adminNote: string
+  paidAt?: string | null
+  cancelledAt?: string | null
+  createdAt: string
+  updatedAt: string
+  user?: {
+    email: string
+    status?: 'active' | 'disabled'
+    segment?: 'normal' | 'vip' | 'trial' | 'risk'
+  }
+}
+
+export interface SupportTicket {
+  id: string
+  userId: string
+  category: 'general' | 'generation' | 'billing' | 'square' | 'account'
+  priority: 'low' | 'normal' | 'high' | 'urgent'
+  status: 'open' | 'in_progress' | 'resolved' | 'closed'
+  title: string
+  content: string
+  contact: string
+  relatedTaskId?: string | null
+  relatedOrderNo?: string | null
+  adminReply: string
+  adminNote: string
+  repliedAt?: string | null
+  closedAt?: string | null
+  createdAt: string
+  updatedAt: string
+  user?: {
+    email: string
+    status?: 'active' | 'disabled'
+    segment?: 'normal' | 'vip' | 'trial' | 'risk'
+  }
+}
+
+export interface ModerationRule {
+  id: string
+  name: string
+  type: 'keyword' | 'regex'
+  pattern: string
+  action: 'block'
+  message: string
+  enabled: boolean
+  priority: number
+  hitCount: number
+  lastHitAt?: string | null
+  note: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AdminUserDetail {
+  user: AdminUserSummary & {
+    updatedAt?: string
+  }
+  tasks: AdminGenerationTask[]
+  ledgers: AdminCreditLedger[]
+  loginLogs: AdminLoginLog[]
+  creditOrders: CreditOrder[]
+  supportTickets: SupportTicket[]
+  auditLogs: AdminAuditLog[]
+}
+
+export interface AdminUpstreamProvider {
+  id: string
+  name: string
+  baseUrl: string
+  apiKey: string
+  enabled: boolean
+  priority: number
+  timeoutSeconds: number
+  notes: string
+  lastCheckedAt?: string | null
+  lastHealthStatus: 'unknown' | 'healthy' | 'error'
+  lastLatencyMs?: number | null
+  lastHttpStatus?: number | null
+  lastHealthMessage: string
+  createdAt?: string
+  updatedAt?: string
+  _count?: {
+    models: number
+  }
+  models?: Array<{
+    id: string
+    displayName: string
+    name: string
+    enabled: boolean
+    costCredits: number
+  }>
+}
+
+export interface AdminUpstreamTestResult {
+  ok: boolean
+  status: number
+  latencyMs: number
+  checkedAt: string
+  modelCount?: number
+  message: string
+}
+
+export interface AdminAnnouncement {
+  id: string
+  title: string
+  content: string
+  level: 'info' | 'success' | 'warning' | 'critical'
+  placement: 'global' | 'home' | 'workspace' | 'square'
+  actionLabel: string
+  actionUrl: string
+  status: 'draft' | 'published' | 'archived'
+  pinned: boolean
+  startsAt?: string | null
+  endsAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AdminGenerationTask {
+  id: string
+  prompt: string
+  params?: unknown
+  status: 'running' | 'done' | 'error'
+  costCredits: number
+  outputImages?: unknown
+  error?: string | null
+  createdAt: string
+  finishedAt?: string | null
+  user?: { email: string }
+  modelConfig?: { displayName: string; name: string }
+}
+
+export interface AdminAuditLog {
+  id: string
+  actorId?: string | null
+  actor?: {
+    id: string
+    email: string
+    role: 'user' | 'admin'
+    status: 'active' | 'disabled'
+  } | null
+  action: string
+  target: string
+  detail?: unknown
+  ip?: string | null
+  createdAt: string
+}
+
+export interface AdminLoginLog {
+  id: string
+  email: string
+  userId?: string | null
+  user?: {
+    id: string
+    email: string
+    role: 'user' | 'admin'
+    status: 'active' | 'disabled'
+    segment: 'normal' | 'vip' | 'trial' | 'risk'
+    creditBalance: number
+    loginCount: number
+    lastLoginAt?: string | null
+    createdAt: string
+  } | null
+  success: boolean
+  reason: 'login_success' | 'register_success' | 'unknown_email' | 'wrong_password' | 'account_disabled' | string
+  ip?: string | null
+  userAgent?: string | null
+  createdAt: string
+}
+
+export interface AdminUsageReport {
+  range: {
+    from: string
+    to: string
+  }
+  summary: {
+    totalTasks: number
+    doneTasks: number
+    errorTasks: number
+    runningTasks: number
+    successRate: number
+    errorRate: number
+    credits: number
+    activeUsers: number
+  }
+  trend: Array<{
+    date: string
+    tasks: number
+    done: number
+    error: number
+    running: number
+    credits: number
+  }>
+  modelUsage: Array<{
+    modelConfigId: string
+    displayName: string
+    name: string
+    upstreamModel: string
+    upstreamProviderName: string
+    enabled: boolean
+    tasks: number
+    credits: number
+  }>
+  providerUsage: Array<{
+    providerId: string | null
+    name: string
+    baseUrl: string
+    enabled: boolean
+    health: 'unknown' | 'healthy' | 'error' | string
+    tasks: number
+    credits: number
+    models: number
+  }>
+  userUsage: Array<{
+    userId: string
+    email: string
+    segment: 'normal' | 'vip' | 'trial' | 'risk' | string
+    status: 'active' | 'disabled' | string
+    tasks: number
+    credits: number
+  }>
+}
+
+export interface AdminSquareUsage {
+  storage: {
+    estimatedBytes: number
+    assetCount: number
+    maxBytes: number
+    percentOfMax: number
+  }
+  shares: {
+    total: number
+    published: number
+    hidden: number
+    deleted: number
+    rejected: number
+    pendingReview: number
+    byKind: Record<SquareShareKind, number>
+  }
+  limits: {
+    maxPublishedShares: number
+    maxStoredShares: number
+    cleanupBatchLimit: number
+  }
+}
+
+export interface AdminSquareShare {
+  id: string
+  publisherId: string
+  kind: SquareShareKind
+  title: string
+  prompt: string
+  tags: string[]
+  status: SquareShareStatus
+  clientRequestId: string
+  viewCount: number
+  reportCount: number
+  createdAt: number
+  updatedAt: number
+  coverAsset?: SquareShareAssetSummary | null
+}
+
+export interface AdminPlatformSettings {
+  registerEnabled: boolean
+  generationEnabled: boolean
+  registerBonusCredits: number
+  maintenanceMessage: string
+}
+
 export interface CategoryConfig {
   id: string
   name: string
@@ -277,6 +668,10 @@ export interface TaskRecord {
   providerId?: string | null
   /** 任务提交时记录的供应商名称快照 */
   providerName?: string | null
+  modelConfigId?: string | null
+  modelName?: string | null
+  modelDisplayName?: string | null
+  costCredits?: number | null
   /** 任务提交时记录的分类 ID */
   categoryId?: string | null
   /** 任务提交时记录的分类名称快照 */

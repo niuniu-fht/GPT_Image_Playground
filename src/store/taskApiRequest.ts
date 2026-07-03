@@ -1,7 +1,8 @@
-import { callImageApi } from '../lib/api'
 import type { ApiInputImage, ApiImageAsset, CallApiResult } from '../lib/api'
+import { platformApi } from '../lib/platformApi'
 import type { AppSettings, TaskRecord } from '../types'
 import { getImageView } from './imageAssets'
+import { useStore } from './state'
 
 export type TaskApiOutputImageAsset = ApiImageAsset
 
@@ -54,7 +55,7 @@ async function loadTaskEditMaskDataUrl(
 
 export async function callTaskImageApi(
   task: TaskRecord,
-  settings: AppSettings,
+  _settings: AppSettings,
   handlers: TaskApiRequestHandlers = {},
 ): Promise<CallApiResult> {
   const inputImages = await loadTaskInputImages(
@@ -64,11 +65,14 @@ export async function callTaskImageApi(
   const editMaskDataUrl = await loadTaskEditMaskDataUrl(task, handlers.throwIfAborted)
   handlers.throwIfAborted?.()
 
-  return callImageApi({
-    settings,
+  const result = await platformApi.generate({
+    modelConfigId: task.modelConfigId || '',
     prompt: task.prompt,
     params: task.params,
-    inputImages,
+    inputImages: inputImages.map((image) => ({
+      id: image.id || 'input',
+      dataUrl: image.dataUrl,
+    })),
     editMask: editMaskDataUrl
       ? {
           dataUrl: editMaskDataUrl,
@@ -76,7 +80,24 @@ export async function callTaskImageApi(
           selection: task.editSelection ?? null,
         }
       : null,
-    onFinalImages: handlers.onFinalImages,
-    registerAbort: handlers.registerAbort,
   })
+
+  const images: ApiImageAsset[] = await Promise.all(
+    result.images.map(async (image) => {
+      const response = await fetch(image.dataUrl)
+      const blob = await response.blob()
+      return {
+        blob,
+        mimeType: image.mimeType || blob.type || 'image/png',
+      }
+    }),
+  )
+
+  useStore.getState().setCurrentUser(result.user)
+  await handlers.onFinalImages?.(images)
+
+  return {
+    images,
+    responseMeta: (result.responseMeta as CallApiResult['responseMeta']) ?? undefined,
+  }
 }

@@ -25,6 +25,8 @@ const RESPONSE_OUTPUT_ITEM_STRING_FIELDS = [
   'background',
   'action',
   'revised_prompt',
+  'b64_json',
+  'result',
   'url',
   'image_url',
 ] as const

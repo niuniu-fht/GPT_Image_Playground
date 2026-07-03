@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gpt-image-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gpt_image_playground
+      POSTGRES_USER: gpt_image
+      POSTGRES_PASSWORD: gpt_image_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./docker-data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gpt_image -d gpt_image_playground"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: ${SERVER_NODE_IMAGE:-node:20-bookworm-slim}
+    container_name: gpt-image-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ./server/.env
+    environment:
+      DATABASE_URL: postgresql://gpt_image:gpt_image_password@postgres:5432/gpt_image_playground?schema=public
+      PORT: "8787"
+      FRONTEND_ORIGIN: http://localhost:8080,http://127.0.0.1:8080
+      SQUARE_API_URL: ${SQUARE_API_URL:-}
+      SQUARE_ADMIN_TOKEN: ${SQUARE_ADMIN_TOKEN:-}
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./server/.env:/app/.env:ro
+      - ./logs/server:/app/logs
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      args:
+        NODE_IMAGE: ${WEB_NODE_IMAGE:-node:20-alpine}
+        NGINX_IMAGE: ${WEB_NGINX_IMAGE:-nginx:alpine}
+    container_name: gpt-image-web
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "8080:80"

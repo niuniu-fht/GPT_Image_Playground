@@ -29,6 +29,7 @@ export default function SettingsModal() {
   const updateProviderName = useStore((s) => s.updateProviderName)
   const removeProvider = useStore((s) => s.removeProvider)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
+  const currentUser = useStore((s) => s.currentUser)
 
   const importInputRef = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState<AppSettings>(() => normalizeSettingsDraft(settings))
@@ -38,6 +39,7 @@ export default function SettingsModal() {
 
   const proxyConfig = readClientDevProxyConfig()
   const activeProvider = providers.find((provider) => provider.id === activeProviderId) ?? null
+  const canManageApiSettings = currentUser?.role === 'admin'
 
   useEffect(() => {
     if (!showSettings) return
@@ -152,33 +154,42 @@ export default function SettingsModal() {
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+1.5rem)] pt-5 custom-scrollbar">
           <div className="space-y-6">
-            <ApiSettingsSection
-              draft={draft}
-              setDraft={setDraft}
-              timeoutInput={timeoutInput}
-              setTimeoutInput={setTimeoutInput}
-              showApiKey={showApiKey}
-              setShowApiKey={setShowApiKey}
-              providerNameInput={providerNameInput}
-              setProviderNameInput={setProviderNameInput}
-              providers={providers}
-              activeProviderId={activeProviderId}
-              proxyConfig={proxyConfig}
-              commitSettings={commitSettings}
-              commitProviderName={commitProviderName}
-              commitTimeout={commitTimeout}
-              flushDraft={flushDraft}
-              onActiveProviderChange={setActiveProvider}
-              onCreateProvider={createProvider}
-              onRequestRemoveProvider={() => {
-                if (!activeProvider) return
-                setConfirmDialog({
-                  title: '删除供应商',
-                  message: `确定删除供应商“${activeProvider.name}”吗？`,
-                  action: () => removeProvider(activeProvider.id),
-                })
-              }}
-            />
+            {canManageApiSettings ? (
+              <ApiSettingsSection
+                draft={draft}
+                setDraft={setDraft}
+                timeoutInput={timeoutInput}
+                setTimeoutInput={setTimeoutInput}
+                showApiKey={showApiKey}
+                setShowApiKey={setShowApiKey}
+                providerNameInput={providerNameInput}
+                setProviderNameInput={setProviderNameInput}
+                providers={providers}
+                activeProviderId={activeProviderId}
+                proxyConfig={proxyConfig}
+                commitSettings={commitSettings}
+                commitProviderName={commitProviderName}
+                commitTimeout={commitTimeout}
+                flushDraft={flushDraft}
+                onActiveProviderChange={setActiveProvider}
+                onCreateProvider={createProvider}
+                onRequestRemoveProvider={() => {
+                  if (!activeProvider) return
+                  setConfirmDialog({
+                    title: '删除供应商',
+                    message: `确定删除供应商“${activeProvider.name}”吗？`,
+                    action: () => removeProvider(activeProvider.id),
+                  })
+                }}
+              />
+            ) : (
+              <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
+                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100">平台模式</h4>
+                <p className="mt-2 text-sm leading-6 text-gray-500 dark:text-gray-400">
+                  当前由平台统一管理模型和上游密钥。普通用户只需要登录并使用积分生成图片。
+                </p>
+              </section>
+            )}
 
             <DataManagementSection
               importInputRef={importInputRef}

@@ -52,6 +52,10 @@ export type TaskRunOutcome = 'running' | 'done' | 'partial_error' | 'aborted' | 
 interface GenerationTaskRecordInput {
   providerId: string | null
   providerName: string
+  modelConfigId: string | null
+  modelName: string | null
+  modelDisplayName: string | null
+  costCredits: number | null
   categoryId: string | null
   categoryName: string | null
   parentTaskId: string | null
@@ -70,6 +74,10 @@ export function createGenerationTaskRecord(input: GenerationTaskRecordInput): Ta
     taskKind: 'generation',
     providerId: input.providerId,
     providerName: input.providerName,
+    modelConfigId: input.modelConfigId,
+    modelName: input.modelName,
+    modelDisplayName: input.modelDisplayName,
+    costCredits: input.costCredits,
     categoryId: input.categoryId,
     categoryName: input.categoryName,
     deletedAt: null,

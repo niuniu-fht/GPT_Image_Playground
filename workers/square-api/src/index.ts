@@ -1,7 +1,13 @@
 import { createOptionsResponse, resolveCors } from './cors'
 import { ApiError } from './errors'
 import { jsonError, jsonOk } from './response'
-import { handleGetAdminUsage, handleRunAdminCleanup } from './routes/admin'
+import {
+  handleBatchUpdateAdminShareStatus,
+  handleGetAdminUsage,
+  handleListAdminShares,
+  handleRunAdminCleanup,
+  handleUpdateAdminShareStatus,
+} from './routes/admin'
 import { handleGetAsset } from './routes/assets'
 import { handleCreateIdentity } from './routes/identity'
 import { handleReportShare } from './routes/reports'
@@ -57,8 +63,21 @@ async function route(ctx: RequestContext): Promise<Response> {
     return handleGetAdminUsage(ctx)
   }
 
+  if (method === 'GET' && path === '/api/v1/admin/shares') {
+    return handleListAdminShares(ctx, url)
+  }
+
   if (method === 'POST' && path === '/api/v1/admin/cleanup') {
     return handleRunAdminCleanup(ctx)
+  }
+
+  if (method === 'POST' && path === '/api/v1/admin/shares/batch/status') {
+    return handleBatchUpdateAdminShareStatus(ctx)
+  }
+
+  const adminShareStatusMatch = /^\/api\/v1\/admin\/shares\/([^/]+)\/status$/.exec(path)
+  if (adminShareStatusMatch && method === 'POST') {
+    return handleUpdateAdminShareStatus(ctx, decodeURIComponent(assertShareId(adminShareStatusMatch[1])))
   }
 
   if (method === 'POST' && path === '/api/v1/shares') {

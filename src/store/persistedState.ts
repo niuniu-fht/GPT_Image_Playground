@@ -20,6 +20,7 @@ export function buildPersistedAppStateSnapshot(state: AppState): PersistedAppSta
     promptLibrary: state.promptLibrary,
     galleryDisplayMode: state.galleryDisplayMode,
     appView: state.appView,
+    activeModelId: state.activeModelId,
   }
 }
 
@@ -82,5 +83,9 @@ export function mergePersistedAppState(
     promptLibrary: normalizedPromptLibrary,
     galleryDisplayMode: resolveGalleryDisplayMode(persistedState?.galleryDisplayMode),
     appView: resolveAppView(persistedState?.appView),
+    activeModelId:
+      typeof persistedState?.activeModelId === 'string'
+        ? persistedState.activeModelId
+        : currentState.activeModelId,
   }
 }

@@ -1,7 +1,11 @@
 node_modules
+**/node_modules
 dist
+**/dist
 .git
 .gitignore
 *.md
 Dockerfile
 .dockerignore
+docker-data
+logs
