@@ -1,5 +1,5 @@
 import type { CreditOrder, CreditPackage } from '../../../types'
-import { EmptyState, formatTime, PaginationBar, SectionShell, StatusBadge, type CreditPackageDraft } from './shared'
+import { AdminTableShell, EmptyState, formatTime, PaginationBar, SectionShell, StatusBadge, type CreditPackageDraft } from './shared'
 
 function money(cents: number, currency: string) {
   const symbol = currency === 'CNY' ? '¥' : `${currency} `
@@ -113,10 +113,12 @@ export function BillingSection({
         </select>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
-        <div className="overflow-x-auto">
-          <div className="min-w-[1120px]">
-            <div className="grid grid-cols-[1.2fr_1.2fr_1fr_0.8fr_0.9fr_1fr_1.2fr_1.1fr] gap-4 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.04]">
+      <AdminTableShell
+        mobileHint="横向滑动查看更多订单字段和操作"
+        footer={<PaginationBar page={orderPage} pageSize={20} total={orderTotal} onPageChange={setOrderPage} />}
+      >
+        <div className="min-w-[1120px]">
+            <div className="sticky top-0 z-20 grid grid-cols-[1.2fr_1.2fr_1fr_0.8fr_0.9fr_1fr_1.2fr_1.1fr] gap-4 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
               <span>订单</span><span>用户</span><span>套餐</span><span className="text-right">金额</span><span className="text-right">积分</span><span>状态</span><span>时间</span><span className="text-right">操作</span>
             </div>
             {creditOrders.map((item) => (
@@ -141,10 +143,8 @@ export function BillingSection({
               </div>
             ))}
             {!creditOrders.length && <EmptyState text="暂无充值订单" />}
-          </div>
         </div>
-        <PaginationBar page={orderPage} pageSize={20} total={orderTotal} onPageChange={setOrderPage} />
-      </div>
+      </AdminTableShell>
     </SectionShell>
   )
 }

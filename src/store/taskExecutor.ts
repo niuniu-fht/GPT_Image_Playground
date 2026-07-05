@@ -9,6 +9,7 @@ import type { TaskApiOutputImageAsset } from './taskApiRequest'
 import { callTaskImageApi } from './taskApiRequest'
 import type { StoreApiError } from './contracts'
 import { isRecord } from '../lib/guards'
+import { platformApi } from '../lib/platformApi'
 import { evictImage, storeImage } from './imageAssets'
 import { useStore } from './state'
 import {
@@ -67,6 +68,29 @@ function throwIfTaskAbortRequested(taskId: string) {
   throw error
 }
 
+async function storeGeneratedOutputImage(image: TaskApiOutputImageAsset): Promise<string> {
+  if ('remoteUrl' in image) {
+    try {
+      const blob = await platformApi.fetchRemoteImage({ url: image.remoteUrl })
+      return storeImage(blob, {
+        source: 'generated',
+        mimeType: blob.type || image.mimeType || null,
+      })
+    } catch (error) {
+      console.warn('[generation] failed to cache remote image locally', error)
+      return storeImage(image.remoteUrl, {
+        source: 'generated',
+        mimeType: image.mimeType || null,
+      })
+    }
+  }
+
+  return storeImage(image.blob, {
+    source: 'generated',
+    mimeType: image.mimeType || image.blob.type || null,
+  })
+}
+
 export async function executeTask(taskId: string, requestSettings: AppSettings) {
   const task = useStore.getState().tasks.find((item) => item.id === taskId)
   if (!task) {
@@ -85,10 +109,7 @@ export async function executeTask(taskId: string, requestSettings: AppSettings) 
 
       for (const image of images) {
         throwIfTaskAbortRequested(taskId)
-        const imageId = await storeImage(image.blob, {
-          source: 'generated',
-          mimeType: image.mimeType || image.blob.type || null,
-        })
+        const imageId = await storeGeneratedOutputImage(image)
         throwIfTaskAbortRequested(taskId)
         outputIds.push(imageId)
       }
@@ -115,6 +136,19 @@ export async function executeTask(taskId: string, requestSettings: AppSettings) 
       outputImageIds: outputIds,
       responseMeta: result.responseMeta ?? null,
     })
+
+    if (result.responseMeta?.squareUploadError) {
+      console.warn('[square] generated image upload failed', result.responseMeta.squareUploadError)
+      useStore.getState().showToast('生成完成，但云端存储同步失败，请联系管理员检查 R2 配置', 'error')
+      return
+    }
+
+    const imageResults = result.responseMeta?.imageResults ?? []
+    const failedImageCount = imageResults.filter((item) => item.status === 'error').length
+    if (failedImageCount > 0) {
+      useStore.getState().showToast(`已生成 ${outputIds.length} 张，${failedImageCount} 张未成功，失败积分已退回`, 'info')
+      return
+    }
 
     useStore.getState().showToast(`生成完成，共 ${outputIds.length} 张图片`, 'success')
   } catch (error) {

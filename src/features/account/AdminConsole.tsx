@@ -5,14 +5,17 @@ import { AdminQuickSwitch } from './admin-console/AdminQuickSwitch'
 import { AuditDialog, AuditSection } from './admin-console/AuditSection'
 import { BillingSection } from './admin-console/BillingSection'
 import { LoginLogDialog, LoginLogsSection } from './admin-console/LoginLogsSection'
+import { ModelConfigDrawer } from './admin-console/model-config/ModelConfigDrawer'
 import { ModelsSection } from './admin-console/ModelsSection'
 import { ModerationSection } from './admin-console/ModerationSection'
 import { RedeemCodesSection } from './admin-console/RedeemCodesSection'
 import { SquareDialog, SquareSection } from './admin-console/SquareSection'
 import { TicketsSection } from './admin-console/TicketsSection'
+import { UpstreamConfigDrawer } from './admin-console/upstream-config/UpstreamConfigDrawer'
 import { UsersSection } from './admin-console/UsersSection'
 import {
   adminPageSize,
+  AdminTableShell,
   announcementLevelLabel,
   announcementPlacementLabel,
   announcementStatusLabel,
@@ -63,10 +66,14 @@ import type {
   AdminAnnouncement,
   AdminAuditLog,
   AdminCreditLedger,
+  AdminGeneratedAssetCleanupResult,
   AdminGenerationTask,
   AdminLoginLog,
   AdminPlatformSettings,
   AdminRedeemCode,
+  AdminSquareCleanupResult,
+  AdminSquareConfig,
+  AdminSquareR2TestResult,
   AdminSquareShare,
   AdminSquareUsage,
   AdminUpstreamProvider,
@@ -128,11 +135,51 @@ const navGroupVisuals: Record<string, { mark: string; shell: string; activeShell
   },
 }
 
+function formatAssetSize(byteSize?: number | null): string {
+  if (!byteSize || byteSize <= 0) return '-'
+  if (byteSize < 1024) return `${byteSize} B`
+  if (byteSize < 1024 * 1024) return `${(byteSize / 1024).toFixed(1)} KB`
+  return `${(byteSize / 1024 / 1024).toFixed(2)} MB`
+}
+
+function formatAssetDimensions(width?: number | null, height?: number | null): string {
+  return width && height ? `${width} x ${height}` : '-'
+}
+
+function getAssetHost(publicUrl: string): string {
+  try {
+    return new URL(publicUrl).host
+  } catch {
+    return publicUrl
+  }
+}
+
+function formatTaskCleanupSummary(cleanup: AdminGeneratedAssetCleanupResult): string {
+  const parts = [`云端对象 ${cleanup.r2Objects} 个`]
+  if (cleanup.skippedAssets > 0) {
+    parts.push(`${cleanup.skippedAssets} 个外置资产未处理`)
+  }
+  return parts.join('，')
+}
+
+function formatSquareCleanupPreview(result: AdminSquareCleanupResult): string {
+  const candidates = result.candidates
+  if (!candidates) return '已完成一次广场清理预检'
+  return `可清理 ${candidates.shares} 条已删除分享，${candidates.r2Objects} 个 R2 对象`
+}
+
+function formatSquareCleanupResult(result: AdminSquareCleanupResult): string {
+  const deleted = result.deleted
+  if (!deleted) return '广场清理已完成'
+  return `已清理 ${deleted.shares} 条分享，${deleted.r2Objects} 个 R2 对象`
+}
+
 export default function AdminConsole() {
   const open = useStore((state) => state.showAdminModels)
   const setOpen = useStore((state) => state.setShowAdminModels)
   const setModels = useStore((state) => state.setModels)
   const showToast = useStore((state) => state.showToast)
+  const setConfirmDialog = useStore((state) => state.setConfirmDialog)
   const currentUser = useStore((state) => state.currentUser)
   const authReady = useStore((state) => state.authReady)
   const openAuthModal = useStore((state) => state.openAuthModal)
@@ -180,6 +227,7 @@ export default function AdminConsole() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   const [taskBatchOperating, setTaskBatchOperating] = useState(false)
   const [models, setLocalModels] = useState<ModelConfig[]>([])
+  const [modelLoadError, setModelLoadError] = useState('')
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>([])
   const [modelBatchOperating, setModelBatchOperating] = useState(false)
   const [upstreams, setUpstreams] = useState<AdminUpstreamProvider[]>([])
@@ -204,7 +252,13 @@ export default function AdminConsole() {
   const [loginLogFrom, setLoginLogFrom] = useState('')
   const [loginLogTo, setLoginLogTo] = useState('')
   const [squareUsage, setSquareUsage] = useState<AdminSquareUsage | null>(null)
+  const [squareConfig, setSquareConfig] = useState<AdminSquareConfig | null>(null)
+  const [squareConfigSaving, setSquareConfigSaving] = useState(false)
+  const [squareR2Testing, setSquareR2Testing] = useState(false)
+  const [squareR2TestResult, setSquareR2TestResult] = useState<AdminSquareR2TestResult | null>(null)
   const [squareShares, setSquareShares] = useState<AdminSquareShare[]>([])
+  const [squarePage, setSquarePage] = useState(1)
+  const [squareTotal, setSquareTotal] = useState(0)
   const [query, setQuery] = useState('')
   const [userRoleFilter, setUserRoleFilter] = useState('all')
   const [userStatusFilter, setUserStatusFilter] = useState('all')
@@ -327,6 +381,15 @@ export default function AdminConsole() {
 
   function formatPrice(cents: number, currency: string) {
     return `${currency} ${(cents / 100).toFixed(2)}`
+  }
+
+  function confirmAdminAction(input: {
+    title: string
+    message: string
+    confirmText?: string
+    action: () => void | Promise<void>
+  }) {
+    setConfirmDialog(input)
   }
 
   const filteredModels = useMemo(() => {
@@ -499,6 +562,7 @@ export default function AdminConsole() {
         }
       }
       if (nextTab === 'models') {
+        setModelLoadError('')
         const [modelResult, upstreamResult] = await Promise.all([
           platformApi.listAdminModels(),
           platformApi.listAdminUpstreams(),
@@ -513,17 +577,21 @@ export default function AdminConsole() {
         setSelectedUpstreamIds((prev) => prev.filter((id) => result.items.some((item) => item.id === id)))
       }
       if (nextTab === 'square') {
-        const [usage, shares] = await Promise.all([
+        const [configResult, usage, shares] = await Promise.all([
+          platformApi.getAdminSquareConfig(),
           platformApi.getAdminSquareUsage(),
           platformApi.listAdminSquareShares({
             status: squareStatus,
             kind: squareKind,
             q: squareQuery,
-            limit: 50,
+            page: squarePage,
+            pageSize: adminPageSize,
           }),
         ])
+        setSquareConfig(configResult.config)
         setSquareUsage(usage)
         setSquareShares(shares.items)
+        setSquareTotal(typeof shares.total === 'number' ? shares.total : shares.items.length)
         setSelectedSquareShareIds((prev) => prev.filter((id) => shares.items.some((item) => item.id === id)))
         if (selectedSquareShareId && !shares.items.some((item) => item.id === selectedSquareShareId)) {
           setSelectedSquareShareId(null)
@@ -552,7 +620,9 @@ export default function AdminConsole() {
         }
       }
     } catch (error) {
-      showToast(error instanceof Error ? error.message : '后台数据加载失败', 'error')
+      const message = error instanceof Error ? error.message : '后台数据加载失败'
+      if (nextTab === 'models') setModelLoadError(message)
+      showToast(message, 'error')
     } finally {
       setLoading(false)
     }
@@ -588,6 +658,11 @@ export default function AdminConsole() {
 
   useEffect(() => {
     if (open && tab === 'square') {
+      if (squarePage !== 1) {
+        setSquarePage(1)
+        return
+      }
+      setSquarePage(1)
       const id = window.setTimeout(() => void loadAll('square'), 300)
       return () => window.clearTimeout(id)
     }
@@ -706,6 +781,10 @@ export default function AdminConsole() {
   useEffect(() => {
     if (open && tab === 'tasks') void loadAll('tasks')
   }, [tasksPage])
+
+  useEffect(() => {
+    if (open && tab === 'square') void loadAll('square')
+  }, [squarePage])
 
   useEffect(() => {
     if (open && tab === 'audit') void loadAll('audit')
@@ -979,16 +1058,22 @@ export default function AdminConsole() {
       showToast('运行中的任务不能清理', 'error')
       return
     }
-    if (!window.confirm('确认清理这条生成日志？对应积分流水不会删除。')) return
-    try {
-      await platformApi.deleteAdminTask(taskId)
-      setSelectedTaskIds((prev) => prev.filter((id) => id !== taskId))
-      if (selectedTaskId === taskId) setSelectedTaskId(null)
-      await loadAll('tasks')
-      showToast('生成日志已清理', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '生成日志清理失败', 'error')
-    }
+    confirmAdminAction({
+      title: '清理生成日志',
+      message: '确认清理这条生成日志？对应积分流水不会删除。',
+      confirmText: '确认清理',
+      action: async () => {
+        try {
+          const result = await platformApi.deleteAdminTask(taskId)
+          setSelectedTaskIds((prev) => prev.filter((id) => id !== taskId))
+          if (selectedTaskId === taskId) setSelectedTaskId(null)
+          await loadAll('tasks')
+          showToast(`生成日志已清理，${formatTaskCleanupSummary(result.cleanup)}`, 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '生成日志清理失败', 'error')
+        }
+      },
+    })
   }
 
   async function batchDeleteTasks() {
@@ -998,18 +1083,24 @@ export default function AdminConsole() {
       showToast(`已选中 ${runningCount} 个运行中任务，不能批量清理`, 'error')
       return
     }
-    if (!window.confirm(`确认清理选中的 ${selectedTaskIds.length} 条生成日志？对应积分流水不会删除。`)) return
-    setTaskBatchOperating(true)
-    try {
-      const result = await platformApi.deleteAdminTasks(selectedTaskIds)
-      setSelectedTaskIds([])
-      await loadAll('tasks')
-      showToast(`已清理 ${result.affected} 条生成日志`, 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '批量清理失败', 'error')
-    } finally {
-      setTaskBatchOperating(false)
-    }
+    confirmAdminAction({
+      title: '批量清理生成日志',
+      message: `确认清理选中的 ${selectedTaskIds.length} 条生成日志？对应积分流水不会删除。`,
+      confirmText: '批量清理',
+      action: async () => {
+        setTaskBatchOperating(true)
+        try {
+          const result = await platformApi.deleteAdminTasks(selectedTaskIds)
+          setSelectedTaskIds([])
+          await loadAll('tasks')
+          showToast(`已清理 ${result.affected} 条生成日志，${formatTaskCleanupSummary(result.cleanup)}`, 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '批量清理失败', 'error')
+        } finally {
+          setTaskBatchOperating(false)
+        }
+      },
+    })
   }
 
   function toggleSquareShareSelection(shareId: string) {
@@ -1023,37 +1114,102 @@ export default function AdminConsole() {
   async function batchUpdateSquareSharesStatus(status: AdminSquareShare['status']) {
     if (!selectedSquareShareIds.length) return
     const actionText = status === 'published' ? '公开' : status === 'hidden' ? '隐藏' : status === 'rejected' ? '拒绝' : status === 'deleted' ? '删除' : '设为待审核'
-    if ((status === 'rejected' || status === 'deleted') && !window.confirm(`确认将选中的 ${selectedSquareShareIds.length} 条广场内容${actionText}？`)) return
-    setSquareBatchOperating(true)
-    try {
-      const result = await platformApi.updateAdminSquareSharesStatus(selectedSquareShareIds, status)
-      setSelectedSquareShareIds([])
-      await Promise.all([loadAll('square'), platformApi.getAdminSquareUsage().then(setSquareUsage)])
-      showToast(`已${actionText} ${result.affected} 条广场内容`, 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '批量审核失败', 'error')
-    } finally {
-      setSquareBatchOperating(false)
-    }
+    confirmAdminAction({
+      title: '批量处理广场内容',
+      message: `确认将选中的 ${selectedSquareShareIds.length} 条广场内容${actionText}？`,
+      confirmText: `确认${actionText}`,
+      action: async () => {
+        setSquareBatchOperating(true)
+        try {
+          const result = await platformApi.updateAdminSquareSharesStatus(selectedSquareShareIds, status)
+          setSelectedSquareShareIds([])
+          await Promise.all([loadAll('square'), platformApi.getAdminSquareUsage().then(setSquareUsage)])
+          showToast(`已${actionText} ${result.affected} 条广场内容`, 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '批量审核失败', 'error')
+        } finally {
+          setSquareBatchOperating(false)
+        }
+      },
+    })
   }
 
   async function updateSquareShareStatus(shareId: string, status: AdminSquareShare['status'], successMessage: string, closeAfter = false) {
-    try {
-      await platformApi.updateAdminSquareShareStatus(shareId, status)
-      await loadAll('square')
-      showToast(successMessage, 'success')
-      if (closeAfter) setSelectedSquareShareId(null)
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '状态更新失败', 'error')
-    }
+    confirmAdminAction({
+      title: '修改广场内容状态',
+      message: `确认将该广场内容状态修改为 ${status}？`,
+      confirmText: '确认修改',
+      action: async () => {
+        try {
+          await platformApi.updateAdminSquareShareStatus(shareId, status)
+          await loadAll('square')
+          showToast(successMessage, 'success')
+          if (closeAfter) setSelectedSquareShareId(null)
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '状态更新失败', 'error')
+        }
+      },
+    })
   }
 
   async function cleanupSquareDryRun() {
     try {
-      await platformApi.cleanupAdminSquare({ dryRun: true, limit: 20 })
-      showToast('已完成一次广场清理预检', 'success')
+      const result = await platformApi.cleanupAdminSquare({ dryRun: true, limit: 20 })
+      showToast(formatSquareCleanupPreview(result), 'success')
     } catch (error) {
       showToast(error instanceof Error ? error.message : '清理预检失败', 'error')
+    }
+  }
+
+  async function cleanupSquareNow() {
+    confirmAdminAction({
+      title: '执行广场清理',
+      message: '确认清理状态为 deleted 的广场内容？系统会同步删除对应 R2 原图和缩略图。',
+      confirmText: '执行清理',
+      action: async () => {
+        try {
+          const result = await platformApi.cleanupAdminSquare({ dryRun: false, limit: 50 })
+          await loadAll('square')
+          showToast(formatSquareCleanupResult(result), 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '广场清理失败', 'error')
+        }
+      },
+    })
+  }
+
+  async function saveSquareConfig(input: Partial<AdminSquareConfig> & { squareAdminToken?: string; r2SecretKey?: string }) {
+    confirmAdminAction({
+      title: '保存广场存储配置',
+      message: '确认保存广场 API 与 Cloudflare R2 配置？保存后发布到广场的图片会按新配置写入。',
+      confirmText: '保存配置',
+      action: async () => {
+        setSquareConfigSaving(true)
+        try {
+          const result = await platformApi.updateAdminSquareConfig(input)
+          setSquareConfig(result.config)
+          await loadAll('square')
+          showToast('广场存储配置已保存', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '广场配置保存失败', 'error')
+        } finally {
+          setSquareConfigSaving(false)
+        }
+      },
+    })
+  }
+
+  async function testSquareR2() {
+    setSquareR2Testing(true)
+    try {
+      const result = await platformApi.testAdminSquareR2()
+      setSquareR2TestResult(result.result)
+      showToast(`R2 测试成功，耗时 ${result.result.latencyMs}ms`, 'success')
+    } catch (error) {
+      setSquareR2TestResult(null)
+      showToast(error instanceof Error ? error.message : 'R2 测试失败，请检查配置', 'error')
+    } finally {
+      setSquareR2Testing(false)
     }
   }
 
@@ -1134,125 +1290,186 @@ export default function AdminConsole() {
 
   async function saveModel(event: FormEvent) {
     event.preventDefault()
-    try {
-      if (editingModelId) await platformApi.updateAdminModel(editingModelId, modelDraft)
-      else await platformApi.createAdminModel(modelDraft)
-      closeEditor()
-      setModelDraft(emptyModelDraft)
-      await loadAll('models')
-      await refreshPublicModels()
-      showToast('模型配置已保存', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '模型保存失败', 'error')
-    }
+    confirmAdminAction({
+      title: editingModelId ? '保存模型配置' : '创建模型配置',
+      message: '确认保存当前模型配置？保存后前台模型列表会同步更新。',
+      confirmText: '保存',
+      action: async () => {
+        try {
+          if (editingModelId) await platformApi.updateAdminModel(editingModelId, modelDraft)
+          else await platformApi.createAdminModel(modelDraft)
+          closeEditor()
+          setModelDraft(emptyModelDraft)
+          await loadAll('models')
+          await refreshPublicModels()
+          showToast('模型配置已保存', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '模型保存失败', 'error')
+        }
+      },
+    })
   }
 
   async function saveUpstream(event: FormEvent) {
     event.preventDefault()
-    try {
-      if (editingUpstreamId) await platformApi.updateAdminUpstream(editingUpstreamId, upstreamDraft)
-      else await platformApi.createAdminUpstream(upstreamDraft)
-      closeEditor()
-      setUpstreamDraft(emptyUpstreamDraft)
-      await loadAll('upstreams')
-      showToast('上游渠道已保存', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '上游保存失败', 'error')
-    }
+    confirmAdminAction({
+      title: editingUpstreamId ? '保存上游渠道' : '创建上游渠道',
+      message: '确认保存当前上游渠道配置？关联模型会继续使用该渠道发起请求。',
+      confirmText: '保存',
+      action: async () => {
+        try {
+          if (editingUpstreamId) await platformApi.updateAdminUpstream(editingUpstreamId, upstreamDraft)
+          else await platformApi.createAdminUpstream(upstreamDraft)
+          closeEditor()
+          setUpstreamDraft(emptyUpstreamDraft)
+          await loadAll('upstreams')
+          showToast('上游渠道已保存', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '上游保存失败', 'error')
+        }
+      },
+    })
   }
 
   async function saveAnnouncement(event: FormEvent) {
     event.preventDefault()
-    try {
-      if (editingAnnouncementId) await platformApi.updateAdminAnnouncement(editingAnnouncementId, announcementDraft)
-      else await platformApi.createAdminAnnouncement(announcementDraft)
-      closeEditor()
-      setAnnouncementDraft(emptyAnnouncementDraft)
-      await loadAll('announcements')
-      showToast('公告已保存', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '公告保存失败', 'error')
-    }
+    confirmAdminAction({
+      title: editingAnnouncementId ? '保存公告' : '创建公告',
+      message: '确认保存当前公告？发布状态的公告会在前台展示。',
+      confirmText: '保存',
+      action: async () => {
+        try {
+          if (editingAnnouncementId) await platformApi.updateAdminAnnouncement(editingAnnouncementId, announcementDraft)
+          else await platformApi.createAdminAnnouncement(announcementDraft)
+          closeEditor()
+          setAnnouncementDraft(emptyAnnouncementDraft)
+          await loadAll('announcements')
+          showToast('公告已保存', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '公告保存失败', 'error')
+        }
+      },
+    })
   }
 
   async function saveRedeemCode(event: FormEvent) {
     event.preventDefault()
-    try {
-      if (editingRedeemCodeId) await platformApi.updateAdminRedeemCode(editingRedeemCodeId, redeemCodeDraft)
-      else await platformApi.createAdminRedeemCode(redeemCodeDraft)
-      closeEditor()
-      setRedeemCodeDraft(emptyRedeemCodeDraft)
-      await loadAll('redeemCodes')
-      showToast('兑换码已保存', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '兑换码保存失败', 'error')
-    }
+    confirmAdminAction({
+      title: editingRedeemCodeId ? '保存兑换码' : '创建兑换码',
+      message: '确认保存当前兑换码？用户兑换后会立即影响积分余额。',
+      confirmText: '保存',
+      action: async () => {
+        try {
+          if (editingRedeemCodeId) await platformApi.updateAdminRedeemCode(editingRedeemCodeId, redeemCodeDraft)
+          else await platformApi.createAdminRedeemCode(redeemCodeDraft)
+          closeEditor()
+          setRedeemCodeDraft(emptyRedeemCodeDraft)
+          await loadAll('redeemCodes')
+          showToast('兑换码已保存', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '兑换码保存失败', 'error')
+        }
+      },
+    })
   }
 
   async function saveCreditPackage(event: FormEvent) {
     event.preventDefault()
-    try {
-      if (editingCreditPackageId) await platformApi.updateAdminCreditPackage(editingCreditPackageId, creditPackageDraft)
-      else await platformApi.createAdminCreditPackage(creditPackageDraft)
-      closeEditor()
-      setCreditPackageDraft(emptyCreditPackageDraft)
-      await loadAll('billing')
-      showToast('积分套餐已保存', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '积分套餐保存失败', 'error')
-    }
+    confirmAdminAction({
+      title: editingCreditPackageId ? '保存积分套餐' : '创建积分套餐',
+      message: '确认保存当前套餐？上架套餐会展示给前台用户下单。',
+      confirmText: '保存',
+      action: async () => {
+        try {
+          if (editingCreditPackageId) await platformApi.updateAdminCreditPackage(editingCreditPackageId, creditPackageDraft)
+          else await platformApi.createAdminCreditPackage(creditPackageDraft)
+          closeEditor()
+          setCreditPackageDraft(emptyCreditPackageDraft)
+          await loadAll('billing')
+          showToast('积分套餐已保存', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '积分套餐保存失败', 'error')
+        }
+      },
+    })
   }
 
   async function saveModerationRule(event: FormEvent) {
     event.preventDefault()
-    try {
-      if (editingModerationRuleId) await platformApi.updateAdminModerationRule(editingModerationRuleId, moderationRuleDraft)
-      else await platformApi.createAdminModerationRule(moderationRuleDraft)
-      closeEditor()
-      setModerationRuleDraft(emptyModerationRuleDraft)
-      await loadAll('moderation')
-      showToast('风控规则已保存', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '风控规则保存失败', 'error')
-    }
+    confirmAdminAction({
+      title: editingModerationRuleId ? '保存风控规则' : '创建风控规则',
+      message: '确认保存当前风控规则？启用后会参与生成前校验。',
+      confirmText: '保存',
+      action: async () => {
+        try {
+          if (editingModerationRuleId) await platformApi.updateAdminModerationRule(editingModerationRuleId, moderationRuleDraft)
+          else await platformApi.createAdminModerationRule(moderationRuleDraft)
+          closeEditor()
+          setModerationRuleDraft(emptyModerationRuleDraft)
+          await loadAll('moderation')
+          showToast('风控规则已保存', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '风控规则保存失败', 'error')
+        }
+      },
+    })
   }
 
   async function deleteModel() {
     if (!editingModelId) return
-    if (!window.confirm('确认删除该模型？如果已有任务使用它，系统会改为停用。')) return
-    try {
-      await platformApi.deleteAdminModel(editingModelId)
-      closeEditor()
-      await loadAll('models')
-      await refreshPublicModels()
-      showToast('模型已删除或停用', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '模型删除失败', 'error')
-    }
+    confirmAdminAction({
+      title: '删除模型',
+      message: '确认删除该模型？如果已有任务使用它，系统会改为停用。',
+      confirmText: '删除',
+      action: async () => {
+        try {
+          await platformApi.deleteAdminModel(editingModelId)
+          closeEditor()
+          await loadAll('models')
+          await refreshPublicModels()
+          showToast('模型已删除或停用', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '模型删除失败', 'error')
+        }
+      },
+    })
   }
 
   async function deleteModelById(modelId: string) {
-    if (!window.confirm('确认删除该模型？如果已有任务使用它，系统会改为停用。')) return
-    try {
-      await platformApi.deleteAdminModel(modelId)
-      await loadAll('models')
-      await refreshPublicModels()
-      setSelectedModelIds((prev) => prev.filter((id) => id !== modelId))
-      showToast('模型已删除或停用', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '模型删除失败', 'error')
-    }
+    confirmAdminAction({
+      title: '删除模型',
+      message: '确认删除该模型？如果已有任务使用它，系统会改为停用。',
+      confirmText: '删除',
+      action: async () => {
+        try {
+          await platformApi.deleteAdminModel(modelId)
+          await loadAll('models')
+          await refreshPublicModels()
+          setSelectedModelIds((prev) => prev.filter((id) => id !== modelId))
+          showToast('模型已删除或停用', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '模型删除失败', 'error')
+        }
+      },
+    })
   }
 
   async function patchModel(modelId: string, input: Partial<Pick<ModelConfig, 'enabled' | 'isNew'>>, successMessage: string) {
-    try {
-      await platformApi.updateAdminModel(modelId, input)
-      await loadAll('models')
-      await refreshPublicModels()
-      showToast(successMessage, 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '模型更新失败', 'error')
-    }
+    confirmAdminAction({
+      title: '修改模型配置',
+      message: '确认修改该模型配置？保存后前台模型列表会同步变化。',
+      confirmText: '确认修改',
+      action: async () => {
+        try {
+          await platformApi.updateAdminModel(modelId, input)
+          await loadAll('models')
+          await refreshPublicModels()
+          showToast(successMessage, 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '模型更新失败', 'error')
+        }
+      },
+    })
   }
 
   function toggleModelSelection(modelId: string) {
@@ -1265,30 +1482,43 @@ export default function AdminConsole() {
 
   async function batchPatchModels(input: Partial<Pick<ModelConfig, 'enabled' | 'isNew'>>) {
     if (!selectedModelIds.length) return
-    setModelBatchOperating(true)
-    try {
-      await Promise.all(selectedModelIds.map((id) => platformApi.updateAdminModel(id, input)))
-      await loadAll('models')
-      await refreshPublicModels()
-      showToast(`已更新 ${selectedModelIds.length} 个模型`, 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '模型批量更新失败', 'error')
-    } finally {
-      setModelBatchOperating(false)
-    }
+    confirmAdminAction({
+      title: '批量修改模型',
+      message: `确认批量修改选中的 ${selectedModelIds.length} 个模型？`,
+      confirmText: '批量修改',
+      action: async () => {
+        setModelBatchOperating(true)
+        try {
+          await Promise.all(selectedModelIds.map((id) => platformApi.updateAdminModel(id, input)))
+          await loadAll('models')
+          await refreshPublicModels()
+          showToast(`已更新 ${selectedModelIds.length} 个模型`, 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '模型批量更新失败', 'error')
+        } finally {
+          setModelBatchOperating(false)
+        }
+      },
+    })
   }
 
   async function deleteUpstream() {
     if (!editingUpstreamId) return
-    if (!window.confirm('确认删除该上游渠道？如果已有模型绑定，系统会改为停用。')) return
-    try {
-      await platformApi.deleteAdminUpstream(editingUpstreamId)
-      closeEditor()
-      await loadAll('upstreams')
-      showToast('上游渠道已删除或停用', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '上游删除失败', 'error')
-    }
+    confirmAdminAction({
+      title: '删除上游渠道',
+      message: '确认删除该上游渠道？如果已有模型绑定，系统会改为停用。',
+      confirmText: '删除',
+      action: async () => {
+        try {
+          await platformApi.deleteAdminUpstream(editingUpstreamId)
+          closeEditor()
+          await loadAll('upstreams')
+          showToast('上游渠道已删除或停用', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '上游删除失败', 'error')
+        }
+      },
+    })
   }
 
   async function testUpstream(providerId: string) {
@@ -1337,103 +1567,179 @@ export default function AdminConsole() {
 
   async function deleteAnnouncement() {
     if (!editingAnnouncementId) return
-    if (!window.confirm('确认删除该公告？删除后前台将不再展示。')) return
-    try {
-      await platformApi.deleteAdminAnnouncement(editingAnnouncementId)
-      closeEditor()
-      await loadAll('announcements')
-      showToast('公告已删除', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '公告删除失败', 'error')
-    }
+    confirmAdminAction({
+      title: '删除公告',
+      message: '确认删除该公告？删除后前台将不再展示。',
+      confirmText: '删除',
+      action: async () => {
+        try {
+          await platformApi.deleteAdminAnnouncement(editingAnnouncementId)
+          closeEditor()
+          await loadAll('announcements')
+          showToast('公告已删除', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '公告删除失败', 'error')
+        }
+      },
+    })
+  }
+
+  async function patchAnnouncement(id: string, input: Partial<Pick<AdminAnnouncement, 'status' | 'pinned'>>, successMessage: string, closeAfter = false) {
+    confirmAdminAction({
+      title: '修改公告',
+      message: '确认修改该公告？发布、归档或置顶状态会影响前台展示。',
+      confirmText: '确认修改',
+      action: async () => {
+        try {
+          await platformApi.updateAdminAnnouncement(id, input)
+          await loadAll('announcements')
+          showToast(successMessage, 'success')
+          if (closeAfter) setSelectedAnnouncementId(null)
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '公告状态更新失败', 'error')
+        }
+      },
+    })
   }
 
   async function patchRedeemCode(id: string, input: Partial<RedeemCodeDraft>) {
-    try {
-      await platformApi.updateAdminRedeemCode(id, input)
-      await loadAll('redeemCodes')
-      showToast('兑换码已更新', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '兑换码更新失败', 'error')
-    }
+    confirmAdminAction({
+      title: '修改兑换码',
+      message: '确认修改该兑换码？用户兑换规则会立即按新配置生效。',
+      confirmText: '确认修改',
+      action: async () => {
+        try {
+          await platformApi.updateAdminRedeemCode(id, input)
+          await loadAll('redeemCodes')
+          showToast('兑换码已更新', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '兑换码更新失败', 'error')
+        }
+      },
+    })
   }
 
   async function deleteRedeemCode(id: string) {
-    if (!window.confirm('确认删除该兑换码？如果已有用户兑换，系统会改为停用以保留历史。')) return
-    try {
-      await platformApi.deleteAdminRedeemCode(id)
-      closeEditor()
-      await loadAll('redeemCodes')
-      showToast('兑换码已删除或停用', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '兑换码删除失败', 'error')
-    }
+    confirmAdminAction({
+      title: '删除兑换码',
+      message: '确认删除该兑换码？如果已有用户兑换，系统会改为停用以保留历史。',
+      confirmText: '删除',
+      action: async () => {
+        try {
+          await platformApi.deleteAdminRedeemCode(id)
+          closeEditor()
+          await loadAll('redeemCodes')
+          showToast('兑换码已删除或停用', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '兑换码删除失败', 'error')
+        }
+      },
+    })
   }
 
   async function patchCreditPackage(id: string, input: Partial<CreditPackageDraft>) {
-    try {
-      await platformApi.updateAdminCreditPackage(id, input)
-      await loadAll('billing')
-      showToast('积分套餐已更新', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '积分套餐更新失败', 'error')
-    }
+    confirmAdminAction({
+      title: '修改积分套餐',
+      message: '确认修改该积分套餐？前台下单入口会按新配置展示。',
+      confirmText: '确认修改',
+      action: async () => {
+        try {
+          await platformApi.updateAdminCreditPackage(id, input)
+          await loadAll('billing')
+          showToast('积分套餐已更新', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '积分套餐更新失败', 'error')
+        }
+      },
+    })
   }
 
   async function deleteCreditPackage(id: string) {
-    if (!window.confirm('确认删除该套餐？如果已有订单，系统会改为下架以保留历史。')) return
-    try {
-      await platformApi.deleteAdminCreditPackage(id)
-      closeEditor()
-      await loadAll('billing')
-      showToast('积分套餐已删除或下架', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '积分套餐删除失败', 'error')
-    }
+    confirmAdminAction({
+      title: '删除积分套餐',
+      message: '确认删除该套餐？如果已有订单，系统会改为下架以保留历史。',
+      confirmText: '删除',
+      action: async () => {
+        try {
+          await platformApi.deleteAdminCreditPackage(id)
+          closeEditor()
+          await loadAll('billing')
+          showToast('积分套餐已删除或下架', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '积分套餐删除失败', 'error')
+        }
+      },
+    })
   }
 
   async function patchCreditOrder(id: string, input: { status: 'paid' | 'cancelled'; adminNote?: string }) {
     const label = input.status === 'paid' ? '确认该订单到账并给用户加积分？' : '确认取消该订单？'
-    if (!window.confirm(label)) return
-    try {
-      await platformApi.updateAdminCreditOrder(id, input)
-      await Promise.all([loadAll('billing'), loadAll('credits')])
-      showToast(input.status === 'paid' ? '订单已确认，积分已到账' : '订单已取消', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '订单处理失败', 'error')
-    }
+    confirmAdminAction({
+      title: input.status === 'paid' ? '确认订单到账' : '取消订单',
+      message: label,
+      confirmText: input.status === 'paid' ? '确认到账' : '取消订单',
+      action: async () => {
+        try {
+          await platformApi.updateAdminCreditOrder(id, input)
+          await Promise.all([loadAll('billing'), loadAll('credits')])
+          showToast(input.status === 'paid' ? '订单已确认，积分已到账' : '订单已取消', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '订单处理失败', 'error')
+        }
+      },
+    })
   }
 
   async function patchSupportTicket(id: string, input: Partial<Pick<SupportTicket, 'status' | 'priority' | 'adminReply' | 'adminNote'>>) {
-    try {
-      await platformApi.updateAdminSupportTicket(id, input)
-      await loadAll('tickets')
-      showToast('工单已更新', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '工单更新失败', 'error')
-    }
+    confirmAdminAction({
+      title: '修改工单',
+      message: '确认保存该工单处理结果？用户可能会看到管理员回复。',
+      confirmText: '确认修改',
+      action: async () => {
+        try {
+          await platformApi.updateAdminSupportTicket(id, input)
+          await loadAll('tickets')
+          showToast('工单已更新', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '工单更新失败', 'error')
+        }
+      },
+    })
   }
 
   async function patchModerationRule(id: string, input: Partial<ModerationRuleDraft>) {
-    try {
-      await platformApi.updateAdminModerationRule(id, input)
-      await loadAll('moderation')
-      showToast('风控规则已更新', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '风控规则更新失败', 'error')
-    }
+    confirmAdminAction({
+      title: '修改风控规则',
+      message: '确认修改该风控规则？启用规则会影响生成前校验。',
+      confirmText: '确认修改',
+      action: async () => {
+        try {
+          await platformApi.updateAdminModerationRule(id, input)
+          await loadAll('moderation')
+          showToast('风控规则已更新', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '风控规则更新失败', 'error')
+        }
+      },
+    })
   }
 
   async function deleteModerationRule(id: string) {
-    if (!window.confirm('确认删除该风控规则？删除后将不再参与生成前校验。')) return
-    try {
-      await platformApi.deleteAdminModerationRule(id)
-      closeEditor()
-      await loadAll('moderation')
-      showToast('风控规则已删除', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '风控规则删除失败', 'error')
-    }
+    confirmAdminAction({
+      title: '删除风控规则',
+      message: '确认删除该风控规则？删除后将不再参与生成前校验。',
+      confirmText: '删除',
+      action: async () => {
+        try {
+          await platformApi.deleteAdminModerationRule(id)
+          closeEditor()
+          await loadAll('moderation')
+          showToast('风控规则已删除', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '风控规则删除失败', 'error')
+        }
+      },
+    })
   }
 
   function toggleAnnouncementSelection(id: string) {
@@ -1446,27 +1752,51 @@ export default function AdminConsole() {
 
   async function batchPatchAnnouncements(input: Partial<Pick<AdminAnnouncement, 'status' | 'pinned'>>) {
     if (!selectedAnnouncementIds.length) return
-    setAnnouncementBatchOperating(true)
-    try {
-      await Promise.all(selectedAnnouncementIds.map((id) => platformApi.updateAdminAnnouncement(id, input)))
-      await loadAll('announcements')
-      showToast(`已更新 ${selectedAnnouncementIds.length} 条公告`, 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '公告批量更新失败', 'error')
-    } finally {
-      setAnnouncementBatchOperating(false)
-    }
+    confirmAdminAction({
+      title: '批量修改公告',
+      message: `确认批量修改选中的 ${selectedAnnouncementIds.length} 条公告？`,
+      confirmText: '批量修改',
+      action: async () => {
+        setAnnouncementBatchOperating(true)
+        try {
+          await Promise.all(selectedAnnouncementIds.map((id) => platformApi.updateAdminAnnouncement(id, input)))
+          await loadAll('announcements')
+          showToast(`已更新 ${selectedAnnouncementIds.length} 条公告`, 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '公告批量更新失败', 'error')
+        } finally {
+          setAnnouncementBatchOperating(false)
+        }
+      },
+    })
   }
 
   async function saveSettings(event: FormEvent) {
     event.preventDefault()
     try {
-      const result = await platformApi.updateAdminSettings(settingsDraft)
-      setSettingsDraft(result.settings)
-      showToast('平台设置已保存', 'success')
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '平台设置保存失败', 'error')
+      const parsedHeroSlides = JSON.parse(settingsDraft.landingHeroSlidesJson) as unknown
+      if (!Array.isArray(parsedHeroSlides)) {
+        showToast('首页轮播图配置必须是 JSON 数组', 'error')
+        return
+      }
+    } catch {
+      showToast('首页轮播图配置不是有效 JSON，请检查后再保存', 'error')
+      return
     }
+    confirmAdminAction({
+      title: '保存平台设置',
+      message: '确认保存平台级设置？这些配置会影响注册赠送、生成策略和运营规则。',
+      confirmText: '保存设置',
+      action: async () => {
+        try {
+          const result = await platformApi.updateAdminSettings(settingsDraft)
+          setSettingsDraft(result.settings)
+          showToast('平台设置已保存', 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '平台设置保存失败', 'error')
+        }
+      },
+    })
   }
 
   async function exportUsers() {
@@ -2138,13 +2468,12 @@ export default function AdminConsole() {
           <StatCard label="支出流水" value={expenseCount} hint="生成扣费、人工扣减" />
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
-          <div className="border-b border-gray-100 bg-white px-4 py-2 text-xs text-gray-400 dark:border-white/[0.06] dark:bg-transparent md:hidden">
-            横向滑动查看更多流水字段和操作
-          </div>
-          <div className="overflow-x-auto">
-            <div className="min-w-[980px]">
-              <div className="grid grid-cols-[1.15fr_1.4fr_110px_110px_150px_110px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.04]">
+        <AdminTableShell
+          mobileHint="横向滑动查看更多流水字段和操作"
+          footer={<PaginationBar page={ledgerPage} pageSize={adminPageSize} total={ledgerTotal} onPageChange={setLedgerPage} />}
+        >
+          <div className="min-w-[980px]">
+              <div className="sticky top-0 z-20 grid grid-cols-[1.15fr_1.4fr_110px_110px_150px_110px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
                 <span>用户</span>
                 <span>原因</span>
                 <span>变化</span>
@@ -2173,10 +2502,8 @@ export default function AdminConsole() {
                 </div>
               ))}
               {!creditLedgers.length && <EmptyState text="暂无匹配的积分流水" />}
-            </div>
           </div>
-          <PaginationBar page={ledgerPage} pageSize={adminPageSize} total={ledgerTotal} onPageChange={setLedgerPage} />
-        </div>
+        </AdminTableShell>
       </SectionShell>
     )
   }
@@ -2269,13 +2596,12 @@ export default function AdminConsole() {
             </button>
           </div>
         </div>
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
-          <div className="border-b border-gray-100 bg-white px-4 py-2 text-xs text-gray-400 dark:border-white/[0.06] dark:bg-transparent md:hidden">
-            横向滑动查看更多任务字段和操作
-          </div>
-          <div className="overflow-x-auto">
-            <div className="min-w-[1320px]">
-              <div className="grid grid-cols-[34px_1.65fr_1.05fr_1fr_180px_110px_90px_150px_170px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.04]">
+        <AdminTableShell
+          mobileHint="横向滑动查看更多任务字段和操作"
+          footer={<PaginationBar page={tasksPage} pageSize={adminPageSize} total={tasksTotal} onPageChange={setTasksPage} />}
+        >
+          <div className="min-w-[1320px]">
+              <div className="sticky top-0 z-20 grid grid-cols-[34px_1.65fr_1.05fr_1fr_180px_110px_90px_150px_170px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
                 <label className="flex items-center">
                   <input
                     type="checkbox"
@@ -2309,7 +2635,9 @@ export default function AdminConsole() {
                     </label>
                     <div className="min-w-0">
                       <div className="truncate font-medium text-gray-900 dark:text-gray-100">{task.prompt}</div>
-                      <div className="mt-1 truncate text-xs text-gray-400">ID {task.id.slice(0, 12)}</div>
+                      <div className="mt-1 truncate text-xs text-gray-400">
+                        ID {task.id.slice(0, 12)} · 云端资产 {task.generatedAssets?.length ?? 0}
+                      </div>
                     </div>
                     <span className="truncate text-xs text-gray-500">{task.user?.email ?? '-'}</span>
                     <span className="truncate text-xs text-gray-500">{task.modelConfig?.displayName ?? '-'}</span>
@@ -2332,10 +2660,8 @@ export default function AdminConsole() {
                 )
               })}
               {!tasks.length && <EmptyState text="暂无生成日志" />}
-            </div>
           </div>
-          <PaginationBar page={tasksPage} pageSize={adminPageSize} total={tasksTotal} onPageChange={setTasksPage} />
-        </div>
+        </AdminTableShell>
       </SectionShell>
     )
   }
@@ -2407,16 +2733,12 @@ export default function AdminConsole() {
             </button>
           </div>
         </div>
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
+        <AdminTableShell mobileHint="横向滑动查看更多渠道字段和操作">
           <div className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.04]">
             当前显示 <span className="font-semibold text-gray-900 dark:text-gray-100">{filteredUpstreams.length}</span> / {upstreams.length} 个渠道
           </div>
-          <div className="border-b border-gray-100 bg-white px-4 py-2 text-xs text-gray-400 dark:border-white/[0.06] dark:bg-transparent lg:hidden">
-            横向滑动查看更多渠道字段和操作
-          </div>
-          <div className="overflow-x-auto">
-            <div className="min-w-[1280px]">
-              <div className="grid grid-cols-[34px_1fr_1.05fr_1.2fr_190px_90px_190px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.04]">
+          <div className="min-w-[1280px]">
+              <div className="sticky top-0 z-20 grid grid-cols-[34px_1fr_1.05fr_1.2fr_190px_90px_190px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
                 <span />
                 <span>渠道</span>
                 <span>Base URL</span>
@@ -2500,9 +2822,8 @@ export default function AdminConsole() {
             )
           })}
               {!filteredUpstreams.length && <EmptyState text={upstreams.length ? '暂无匹配的上游渠道' : '暂无上游渠道'} />}
-            </div>
           </div>
-        </div>
+        </AdminTableShell>
       </SectionShell>
     )
   }
@@ -2564,13 +2885,9 @@ export default function AdminConsole() {
             <button type="button" disabled={!selectedAnnouncementIds.length || announcementBatchOperating} onClick={() => setSelectedAnnouncementIds([])} className="h-8 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]">取消选择</button>
           </div>
         </div>
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
-          <div className="border-b border-gray-100 bg-white px-4 py-2 text-xs text-gray-400 dark:border-white/[0.06] dark:bg-transparent md:hidden">
-            横向滑动查看更多公告字段和操作
-          </div>
-          <div className="overflow-x-auto">
-            <div className="min-w-[1500px]">
-              <div className="grid grid-cols-[34px_1.45fr_130px_105px_90px_220px_150px_145px_145px_300px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.04]">
+        <AdminTableShell mobileHint="横向滑动查看更多公告字段和操作">
+          <div className="min-w-[1500px]">
+              <div className="sticky top-0 z-20 grid grid-cols-[34px_1.45fr_130px_105px_90px_220px_150px_145px_145px_300px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
                 <span />
                 <span>公告</span>
                 <span>等级 / 位置</span>
@@ -2624,16 +2941,15 @@ export default function AdminConsole() {
                   <div className="flex flex-wrap justify-end gap-1.5">
                     <button type="button" onClick={() => setSelectedAnnouncementId(item.id)} className="h-8 rounded-lg border border-blue-200 px-2.5 text-xs font-medium text-blue-700 hover:bg-blue-50 dark:border-blue-400/20 dark:hover:bg-blue-400/10">预览</button>
                     <button type="button" onClick={() => openAnnouncementEditor(item)} className="h-8 rounded-lg border border-gray-200 px-2.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]">编辑</button>
-                    <button type="button" onClick={() => void platformApi.updateAdminAnnouncement(item.id, { status: item.status === 'published' ? 'draft' : 'published' }).then(() => loadAll('announcements')).then(() => showToast('公告状态已更新', 'success')).catch((error) => showToast(error instanceof Error ? error.message : '公告状态更新失败', 'error'))} className={cx('h-8 rounded-lg border px-2.5 text-xs font-medium', item.status === 'published' ? 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-400/20 dark:hover:bg-emerald-400/10')}>{item.status === 'published' ? '设草稿' : '发布'}</button>
-                    <button type="button" onClick={() => void platformApi.updateAdminAnnouncement(item.id, { status: 'archived' }).then(() => loadAll('announcements')).then(() => showToast('公告已归档', 'success')).catch((error) => showToast(error instanceof Error ? error.message : '公告归档失败', 'error'))} className="h-8 rounded-lg border border-amber-200 px-2.5 text-xs font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-400/20 dark:hover:bg-amber-400/10">归档</button>
-                    <button type="button" onClick={() => void platformApi.updateAdminAnnouncement(item.id, { pinned: !item.pinned }).then(() => loadAll('announcements')).then(() => showToast('公告置顶状态已更新', 'success')).catch((error) => showToast(error instanceof Error ? error.message : '公告置顶更新失败', 'error'))} className="h-8 rounded-lg border border-blue-200 px-2.5 text-xs font-medium text-blue-700 hover:bg-blue-50 dark:border-blue-400/20 dark:hover:bg-blue-400/10">{item.pinned ? '取消置顶' : '置顶'}</button>
+                    <button type="button" onClick={() => void patchAnnouncement(item.id, { status: item.status === 'published' ? 'draft' : 'published' }, '公告状态已更新')} className={cx('h-8 rounded-lg border px-2.5 text-xs font-medium', item.status === 'published' ? 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-400/20 dark:hover:bg-emerald-400/10')}>{item.status === 'published' ? '设草稿' : '发布'}</button>
+                    <button type="button" onClick={() => void patchAnnouncement(item.id, { status: 'archived' }, '公告已归档')} className="h-8 rounded-lg border border-amber-200 px-2.5 text-xs font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-400/20 dark:hover:bg-amber-400/10">归档</button>
+                    <button type="button" onClick={() => void patchAnnouncement(item.id, { pinned: !item.pinned }, '公告置顶状态已更新')} className="h-8 rounded-lg border border-blue-200 px-2.5 text-xs font-medium text-blue-700 hover:bg-blue-50 dark:border-blue-400/20 dark:hover:bg-blue-400/10">{item.pinned ? '取消置顶' : '置顶'}</button>
                   </div>
                 </div>
               )})}
               {!filteredAnnouncements.length && <EmptyState text={announcements.length ? '暂无匹配的公告' : '暂无公告'} />}
-            </div>
           </div>
-        </div>
+        </AdminTableShell>
       </SectionShell>
     )
   }
@@ -2697,6 +3013,21 @@ export default function AdminConsole() {
                 className="w-full resize-none rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm leading-6 text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
               />
             </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
+              <div className="mb-4">
+                <div className="text-base font-semibold text-gray-950 dark:text-gray-50">首页轮播图</div>
+                <div className="mt-1 text-sm text-gray-500">配置首页首屏背景轮播。每项至少需要 imageUrl，可选 id、title、category、accent。</div>
+              </div>
+              <textarea
+                value={settingsDraft.landingHeroSlidesJson}
+                onChange={(event) => setSettingsDraft((prev) => ({ ...prev, landingHeroSlidesJson: event.target.value }))}
+                rows={14}
+                spellCheck={false}
+                placeholder='[{"id":"cover-1","title":"首页图","category":"展示","imageUrl":"/landing/showcase/travel-portrait.png","accent":"#2563eb"}]'
+                className="min-h-[320px] w-full resize-y rounded-xl border border-gray-200 bg-white px-3 py-2 font-mono text-xs leading-5 text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+              />
+            </div>
           </div>
 
           <aside className="h-fit rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
@@ -2705,6 +3036,7 @@ export default function AdminConsole() {
               <div className="flex items-center justify-between"><span className="text-gray-500">注册</span><StatusBadge tone={settingsDraft.registerEnabled ? 'green' : 'red'}>{settingsDraft.registerEnabled ? '开放' : '关闭'}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">生成</span><StatusBadge tone={settingsDraft.generationEnabled ? 'green' : 'red'}>{settingsDraft.generationEnabled ? '开放' : '维护'}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">注册送分</span><span className="font-semibold text-amber-700">{settingsDraft.registerBonusCredits}</span></div>
+              <div className="flex items-center justify-between"><span className="text-gray-500">首页轮播</span><StatusBadge tone={settingsDraft.landingHeroSlidesJson.trim() ? 'blue' : 'amber'}>{settingsDraft.landingHeroSlidesJson.trim() ? '已配置' : '待配置'}</StatusBadge></div>
             </div>
             <button className="mt-5 h-10 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-gray-950">保存设置</button>
           </aside>
@@ -2779,6 +3111,7 @@ export default function AdminConsole() {
               <StatCard label="消耗积分" value={selected.costCredits} hint="任务创建时快照" />
               <StatCard label="模型" value={selected.modelConfig?.displayName ?? '-'} hint={selected.modelConfig?.name ?? '未记录上游模型'} />
               <StatCard label="用户" value={selected.user?.email ?? '-'} hint={formatTime(selected.finishedAt) === '-' ? '尚未完成' : `完成于 ${formatTime(selected.finishedAt)}`} />
+              <StatCard label="云端资产" value={selected.generatedAssets?.length ?? 0} hint="GeneratedAsset 独立表记录" />
             </div>
             <div>
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">完整提示词</div>
@@ -2793,6 +3126,26 @@ export default function AdminConsole() {
             <div>
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">请求参数</div>
               <pre className="max-h-56 overflow-auto rounded-xl border border-gray-100 bg-gray-950 p-3 text-xs leading-5 text-gray-100 dark:border-white/[0.08]">{formatJson(selected.params)}</pre>
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">云端图片资产</div>
+              <div className="space-y-2">
+                {selected.generatedAssets?.map((asset) => (
+                  <div key={asset.id} className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs text-gray-600 dark:border-white/[0.06] dark:bg-white/[0.04] dark:text-gray-300">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold text-gray-900 dark:text-gray-100">#{asset.imageIndex + 1} · {asset.mimeType}</span>
+                      <span className="text-gray-400">{formatAssetSize(asset.byteSize)} · {formatAssetDimensions(asset.width, asset.height)} · {asset.uploadMode ?? '-'}</span>
+                    </div>
+                    <div className="mt-2 truncate">R2 Key：{asset.r2Key || '外置接口未返回对象 Key'}</div>
+                    <a href={asset.publicUrl} target="_blank" rel="noreferrer" className="mt-1 block truncate text-blue-600 hover:underline dark:text-blue-300">
+                      {getAssetHost(asset.publicUrl)} / 打开公开地址
+                    </a>
+                  </div>
+                ))}
+                {!(selected.generatedAssets?.length) && (
+                  <EmptyState text={selected.status === 'done' ? '暂无云端资产记录，可能未开启自动上传或上传失败' : '任务尚未生成云端资产'} />
+                )}
+              </div>
             </div>
           </div>
           <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 bg-gray-50 px-5 py-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
@@ -2887,7 +3240,7 @@ export default function AdminConsole() {
             <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-4 dark:border-white/[0.08]">
               <button type="button" onClick={() => setSelectedAnnouncementId(null)} className="h-10 rounded-xl border border-gray-200 px-4 text-sm font-medium hover:bg-gray-50 dark:border-white/[0.08] dark:hover:bg-white/[0.06]">关闭</button>
               <button type="button" onClick={() => { setSelectedAnnouncementId(null); openAnnouncementEditor(selected) }} className="h-10 rounded-xl border border-gray-200 px-4 text-sm font-medium hover:bg-gray-50 dark:border-white/[0.08] dark:hover:bg-white/[0.06]">编辑</button>
-              <button type="button" onClick={() => void platformApi.updateAdminAnnouncement(selected.id, { status: selected.status === 'published' ? 'draft' : 'published' }).then(() => loadAll('announcements')).then(() => showToast('公告状态已更新', 'success')).then(() => setSelectedAnnouncementId(null)).catch((error) => showToast(error instanceof Error ? error.message : '公告状态更新失败', 'error'))} className={cx('h-10 rounded-xl px-4 text-sm font-semibold', selected.status === 'published' ? 'border border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-100 dark:hover:bg-white/[0.06]' : 'bg-slate-950 text-white hover:bg-slate-800 dark:bg-white dark:text-gray-950')}>
+              <button type="button" onClick={() => void patchAnnouncement(selected.id, { status: selected.status === 'published' ? 'draft' : 'published' }, '公告状态已更新', true)} className={cx('h-10 rounded-xl px-4 text-sm font-semibold', selected.status === 'published' ? 'border border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-100 dark:hover:bg-white/[0.06]' : 'bg-slate-950 text-white hover:bg-slate-800 dark:bg-white dark:text-gray-950')}>
                 {selected.status === 'published' ? '设为草稿' : '发布公告'}
               </button>
             </div>
@@ -3357,124 +3710,31 @@ export default function AdminConsole() {
           </div>
 
           {activeEditor === 'model' && (
-            <form onSubmit={saveModel} className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-              {(['name', 'displayName', 'description', 'icon', 'upstreamModel'] as const).map((key) => (
-                <label key={key} className="block text-xs font-semibold text-gray-500">
-                  {key}
-                  <input value={String(modelDraft[key] ?? '')} onChange={(event) => setModelDraft((prev) => ({ ...prev, [key]: event.target.value }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" required />
-                </label>
-              ))}
-              <label className="block text-xs font-semibold text-gray-500">
-                上游渠道
-                <select value={modelDraft.upstreamProviderId ?? ''} onChange={(event) => setModelDraft((prev) => ({ ...prev, upstreamProviderId: event.target.value || null }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100">
-                  <option value="">使用环境变量默认上游</option>
-                  {upstreams.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
-                </select>
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block text-xs font-semibold text-gray-500">
-                  积分单价
-                  <input type="number" value={modelDraft.costCredits} onChange={(event) => setModelDraft((prev) => ({ ...prev, costCredits: Number(event.target.value) }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" />
-                </label>
-                <label className="block text-xs font-semibold text-gray-500">
-                  排序
-                  <input type="number" value={modelDraft.sortOrder} onChange={(event) => setModelDraft((prev) => ({ ...prev, sortOrder: Number(event.target.value) }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" />
-                </label>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="flex items-center justify-between rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-white/[0.08]">
-                  启用
-                  <input type="checkbox" checked={modelDraft.enabled} onChange={(event) => setModelDraft((prev) => ({ ...prev, enabled: event.target.checked }))} />
-                </label>
-                <label className="flex items-center justify-between rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-white/[0.08]">
-                  New 标识
-                  <input type="checkbox" checked={modelDraft.isNew} onChange={(event) => setModelDraft((prev) => ({ ...prev, isNew: event.target.checked }))} />
-                </label>
-              </div>
-              <div className="sticky bottom-0 -mx-5 mt-6 flex gap-2 border-t border-gray-100 bg-white px-5 py-4 dark:border-white/[0.08] dark:bg-gray-900">
-                {editingModelId && <button type="button" onClick={() => void deleteModel()} className="h-10 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-600 hover:bg-rose-50 dark:border-rose-400/20 dark:hover:bg-rose-400/10">删除</button>}
-                <button type="button" onClick={closeEditor} className="h-10 flex-1 rounded-xl border border-gray-200 text-sm font-medium hover:bg-gray-50 dark:border-white/[0.08] dark:hover:bg-white/[0.06]">取消</button>
-                <button className="h-10 flex-1 rounded-xl bg-slate-950 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-gray-950">保存模型</button>
-              </div>
-            </form>
+            <ModelConfigDrawer
+              editingModelId={editingModelId}
+              draft={modelDraft}
+              setDraft={setModelDraft}
+              upstreams={upstreams}
+              onSubmit={saveModel}
+              onClose={closeEditor}
+              onDelete={() => void deleteModel()}
+              onError={(message) => showToast(message, 'error')}
+            />
           )}
 
           {activeEditor === 'upstream' && (
-            <form onSubmit={saveUpstream} className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-              {(['name', 'baseUrl', 'apiKey', 'notes'] as const).map((key) => (
-                <label key={key} className="block text-xs font-semibold text-gray-500">
-                  {key === 'apiKey' && editingUpstreamId ? 'apiKey（留空不修改）' : key}
-                  <input value={String(upstreamDraft[key] ?? '')} onChange={(event) => setUpstreamDraft((prev) => ({ ...prev, [key]: event.target.value }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" required={key !== 'apiKey' || !editingUpstreamId} />
-                </label>
-              ))}
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block text-xs font-semibold text-gray-500">
-                  优先级
-                  <input type="number" value={upstreamDraft.priority} onChange={(event) => setUpstreamDraft((prev) => ({ ...prev, priority: Number(event.target.value) }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" />
-                </label>
-                <label className="block text-xs font-semibold text-gray-500">
-                  超时秒数
-                  <input type="number" value={upstreamDraft.timeoutSeconds} onChange={(event) => setUpstreamDraft((prev) => ({ ...prev, timeoutSeconds: Number(event.target.value) }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" />
-                </label>
-              </div>
-              <label className="flex items-center justify-between rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-white/[0.08]">
-                启用渠道
-                <input type="checkbox" checked={upstreamDraft.enabled} onChange={(event) => setUpstreamDraft((prev) => ({ ...prev, enabled: event.target.checked }))} />
-              </label>
-              {editingUpstreamId && (
-                <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-400/15 dark:bg-blue-400/10">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold text-gray-950 dark:text-gray-50">渠道诊断</div>
-                      <div className="mt-1 text-xs leading-5 text-gray-500">调用该渠道的 `/v1/models` 检查 Base URL、Key 和网络连通性。</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void testUpstream(editingUpstreamId)}
-                      disabled={testingUpstreamId === editingUpstreamId}
-                      className="h-9 shrink-0 rounded-xl bg-blue-600 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {testingUpstreamId === editingUpstreamId ? '测试中' : '测试连接'}
-                    </button>
-                  </div>
-                  {(() => {
-                    const provider = upstreams.find((item) => item.id === editingUpstreamId)
-                    if (!provider) return null
-                    const health = upstreamHealthSnapshot(provider, upstreamTests[editingUpstreamId])
-                    return (
-                      <div className="mt-3 rounded-xl border border-white/70 bg-white p-3 text-sm shadow-sm dark:border-white/[0.08] dark:bg-gray-950">
-                        <div className="flex items-center justify-between gap-3">
-                          <StatusBadge tone={upstreamHealthTone(health.status)}>{upstreamHealthLabel(health.status)}</StatusBadge>
-                          <span className="text-xs text-gray-400">{formatTime(health.checkedAt)}</span>
-                        </div>
-                        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                          <div className="rounded-lg bg-gray-50 px-2 py-2 dark:bg-white/[0.04]">
-                            <div className="font-semibold">{health.latencyMs == null ? '-' : `${health.latencyMs}ms`}</div>
-                            <div className="text-[11px] text-gray-400">延迟</div>
-                          </div>
-                          <div className="rounded-lg bg-gray-50 px-2 py-2 dark:bg-white/[0.04]">
-                            <div className="font-semibold">{health.httpStatus || '-'}</div>
-                            <div className="text-[11px] text-gray-400">HTTP</div>
-                          </div>
-                          <div className="rounded-lg bg-gray-50 px-2 py-2 dark:bg-white/[0.04]">
-                            <div className="font-semibold">{health.modelCount ?? '-'}</div>
-                            <div className="text-[11px] text-gray-400">模型数</div>
-                          </div>
-                        </div>
-                        <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-600 dark:bg-white/[0.04] dark:text-gray-300">
-                          {health.message || '尚未执行连接检测'}
-                        </div>
-                      </div>
-                    )
-                  })()}
-                </div>
-              )}
-              <div className="sticky bottom-0 -mx-5 mt-6 flex gap-2 border-t border-gray-100 bg-white px-5 py-4 dark:border-white/[0.08] dark:bg-gray-900">
-                {editingUpstreamId && <button type="button" onClick={() => void deleteUpstream()} className="h-10 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-600 hover:bg-rose-50 dark:border-rose-400/20 dark:hover:bg-rose-400/10">删除</button>}
-                <button type="button" onClick={closeEditor} className="h-10 flex-1 rounded-xl border border-gray-200 text-sm font-medium hover:bg-gray-50 dark:border-white/[0.08] dark:hover:bg-white/[0.06]">取消</button>
-                <button className="h-10 flex-1 rounded-xl bg-slate-950 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-gray-950">保存渠道</button>
-              </div>
-            </form>
+            <UpstreamConfigDrawer
+              editingUpstreamId={editingUpstreamId}
+              draft={upstreamDraft}
+              setDraft={setUpstreamDraft}
+              upstreams={upstreams}
+              upstreamTests={upstreamTests}
+              testingUpstreamId={testingUpstreamId}
+              onSubmit={saveUpstream}
+              onClose={closeEditor}
+              onDelete={() => void deleteUpstream()}
+              onTest={(id) => void testUpstream(id)}
+            />
           )}
 
           {activeEditor === 'announcement' && (
@@ -3831,7 +4091,7 @@ export default function AdminConsole() {
             </div>
           </header>
 
-          <div className="flex-1 overflow-y-auto p-4 md:p-6">
+          <div className="min-h-0 flex-1 overflow-hidden p-4 md:p-6">
             {loading && <div className="mb-4 rounded-xl bg-blue-50 px-3 py-2 text-sm text-blue-700">正在加载...</div>}
             {tab === 'overview' && renderOverview()}
             {tab === 'reports' && renderReports()}
@@ -3970,6 +4230,8 @@ export default function AdminConsole() {
                 modelStatusFilter={modelStatusFilter}
                 modelProviderFilter={modelProviderFilter}
                 modelHealthFilter={modelHealthFilter}
+                loading={loading}
+                loadError={modelLoadError}
                 selectedModelIds={selectedModelIds}
                 modelBatchOperating={modelBatchOperating}
                 setModelQuery={setModelQuery}
@@ -3988,23 +4250,34 @@ export default function AdminConsole() {
             {tab === 'upstreams' && renderUpstreams()}
             {tab === 'square' && (
               <SquareSection
+                squareConfig={squareConfig}
+                squareConfigSaving={squareConfigSaving}
+                squareR2Testing={squareR2Testing}
+                squareR2TestResult={squareR2TestResult}
                 squareUsage={squareUsage}
                 squareShares={squareShares}
+                squareTotal={squareTotal}
+                squarePage={squarePage}
                 squareQuery={squareQuery}
                 squareStatus={squareStatus}
                 squareKind={squareKind}
+                pageSize={adminPageSize}
                 selectedSquareShareIds={selectedSquareShareIds}
                 squareBatchOperating={squareBatchOperating}
                 setSquareQuery={setSquareQuery}
                 setSquareStatus={setSquareStatus}
                 setSquareKind={setSquareKind}
+                setSquarePage={setSquarePage}
                 setSelectedSquareShareIds={setSelectedSquareShareIds}
                 setSelectedSquareShareId={setSelectedSquareShareId}
                 toggleCurrentPageSquareShares={toggleCurrentPageSquareShares}
                 toggleSquareShareSelection={toggleSquareShareSelection}
+                saveSquareConfig={(input) => void saveSquareConfig(input)}
+                testSquareR2={() => void testSquareR2()}
                 batchUpdateSquareSharesStatus={(status) => void batchUpdateSquareSharesStatus(status)}
                 updateSquareShareStatus={(shareId, status, successMessage) => void updateSquareShareStatus(shareId, status, successMessage)}
                 cleanupSquareDryRun={() => void cleanupSquareDryRun()}
+                cleanupSquareNow={() => void cleanupSquareNow()}
               />
             )}
             {tab === 'announcements' && renderAnnouncements()}

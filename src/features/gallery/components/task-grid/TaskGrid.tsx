@@ -130,7 +130,7 @@ export default function TaskGrid() {
       }`}
     >
       {shouldShowSelectionToolbar && (
-        <div className="sticky top-[6.2rem] z-30">
+        <div className="sticky top-4 z-30">
           <SelectionToolbar
             taskView={taskView}
             selectedCount={selectedCount}

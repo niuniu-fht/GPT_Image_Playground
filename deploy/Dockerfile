@@ -19,7 +19,7 @@ FROM ${NGINX_IMAGE}
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 COPY deploy/inject-api-url.sh /docker-entrypoint.d/40-inject-api-url.sh
-RUN chmod +x /docker-entrypoint.d/40-inject-api-url.sh
+RUN sed -i 's/\r$//' /docker-entrypoint.d/40-inject-api-url.sh && chmod +x /docker-entrypoint.d/40-inject-api-url.sh
 
 EXPOSE 80
 

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { sendOk } from '../http.js'
 import { prisma } from '../prisma.js'
+import { getPlatformSettings } from '../settings.js'
 
 const router = Router()
 
@@ -22,6 +23,15 @@ router.get('/announcements', async (req, res, next) => {
       take: 3,
     })
     sendOk(res, { items })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/landing', async (_req, res, next) => {
+  try {
+    const settings = await getPlatformSettings()
+    sendOk(res, { landingHeroSlidesJson: settings.landingHeroSlidesJson })
   } catch (error) {
     next(error)
   }

@@ -1,5 +1,6 @@
 import type { AdminLoginLog } from '../../../types'
 import {
+  AdminTableShell,
   EmptyState,
   formatTime,
   loginReasonLabel,
@@ -125,13 +126,12 @@ export function LoginLogsSection({
         <StatCard label="当前页 IP" value={uniqueIps} hint={disabledCount ? `含 ${disabledCount} 次禁用账号访问` : '用于发现异常集中来源'} />
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
-        <div className="border-b border-gray-100 bg-white px-4 py-2 text-xs text-gray-400 dark:border-white/[0.06] dark:bg-transparent md:hidden">
-          横向滑动查看更多登录字段和操作
-        </div>
-        <div className="overflow-x-auto">
-          <div className="min-w-[1180px]">
-            <div className="grid grid-cols-[1.35fr_110px_130px_130px_1.1fr_160px_110px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.04]">
+      <AdminTableShell
+        mobileHint="横向滑动查看更多登录字段和操作"
+        footer={<PaginationBar page={loginLogPage} pageSize={pageSize} total={loginLogTotal} onPageChange={setLoginLogPage} />}
+      >
+        <div className="min-w-[1180px]">
+            <div className="sticky top-0 z-20 grid grid-cols-[1.35fr_110px_130px_130px_1.1fr_160px_110px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
               <span>账号</span>
               <span>结果</span>
               <span>原因</span>
@@ -160,10 +160,8 @@ export function LoginLogsSection({
               </div>
             ))}
             {!loginLogs.length && <EmptyState text="暂无登录日志" />}
-          </div>
         </div>
-        <PaginationBar page={loginLogPage} pageSize={pageSize} total={loginLogTotal} onPageChange={setLoginLogPage} />
-      </div>
+      </AdminTableShell>
     </SectionShell>
   )
 }

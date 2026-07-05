@@ -45,6 +45,8 @@ model User {
   creditBalance Int            @default(0)
   lastLoginAt   DateTime?
   loginCount    Int            @default(0)
+  squarePublisherId String?
+  squarePublisherToken String? @db.Text
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   ledgers       CreditLedger[]
@@ -53,6 +55,10 @@ model User {
   creditOrders  CreditOrder[]
   supportTickets SupportTicket[]
   loginLogs     LoginLog[]
+  squarePublishers SquarePublisher[]
+  squareShares  SquareShare[]
+  squareReports SquareReport[]
+  generatedAssets GeneratedAsset[]
 }
 
 model LoginLog {
@@ -77,8 +83,10 @@ model ModelConfig {
   name          String           @unique
   displayName   String
   description   String
-  icon          String           @default("sparkles")
+  icon          String           @default("sparkles") @db.Text
   costCredits   Int
+  costCredits2K Int              @default(0)
+  costCredits4K Int              @default(0)
   upstreamModel String
   upstreamProviderId String?
   apiProtocol   ApiProtocol      @default(images)
@@ -257,7 +265,100 @@ model GenerationTask {
   finishedAt    DateTime?
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   modelConfig   ModelConfig  @relation(fields: [modelConfigId], references: [id])
+  generatedAssets GeneratedAsset[]
 
+  @@index([userId, createdAt])
+}
+
+model GeneratedAsset {
+  id         String   @id @default(cuid())
+  taskId     String
+  userId     String
+  imageIndex Int
+  r2Key      String?
+  publicUrl  String   @db.Text
+  mimeType   String
+  byteSize   Int?
+  width      Int?
+  height     Int?
+  uploadMode String?
+  source     String   @default("generated")
+  createdAt  DateTime @default(now())
+  task       GenerationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, imageIndex])
+  @@index([userId, createdAt])
+  @@index([r2Key])
+}
+
+model SquarePublisher {
+  id        String   @id @default(cuid())
+  userId    String?
+  token     String   @unique @db.Text
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  shares    SquareShare[]
+
+  @@index([userId])
+}
+
+model SquareShare {
+  id              String   @id @default(cuid())
+  publisherId     String
+  userId          String?
+  kind            String
+  title           String
+  prompt          String   @db.Text
+  manifestJson    Json
+  coverAssetId    String?
+  tags            Json
+  status          String   @default("published")
+  clientRequestId String
+  viewCount       Int      @default(0)
+  reportCount     Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  publisher       SquarePublisher @relation(fields: [publisherId], references: [id], onDelete: Cascade)
+  user            User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  assets          SquareShareAsset[]
+  reports         SquareReport[]
+
+  @@unique([publisherId, clientRequestId])
+  @@index([status, kind, createdAt])
+  @@index([userId, createdAt])
+}
+
+model SquareShareAsset {
+  id            String   @id @default(cuid())
+  shareId       String
+  clientAssetId String
+  role          String
+  r2Key         String
+  thumbR2Key    String?
+  mimeType      String
+  byteSize      Int
+  thumbByteSize Int      @default(0)
+  width         Int?
+  height        Int?
+  createdAt     DateTime @default(now())
+  share         SquareShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
+
+  @@index([shareId, createdAt])
+}
+
+model SquareReport {
+  id        String   @id @default(cuid())
+  shareId   String
+  userId    String?
+  reason    String
+  createdAt DateTime @default(now())
+  share     SquareShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([shareId, createdAt])
   @@index([userId, createdAt])
 }
 

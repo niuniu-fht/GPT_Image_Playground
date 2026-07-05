@@ -15,6 +15,11 @@ export const env = {
   openaiBaseUrl: (process.env.OPENAI_BASE_URL || 'https://api.openai.com').replace(/\/+$/, ''),
   squareApiUrl: (process.env.SQUARE_API_URL || '').replace(/\/+$/, ''),
   squareAdminToken: process.env.SQUARE_ADMIN_TOKEN || '',
+  r2Endpoint: (process.env.R2_ENDPOINT || '').replace(/\/+$/, ''),
+  r2AccessKey: process.env.R2_ACCESS_KEY_ID || '',
+  r2SecretKey: process.env.R2_SECRET_ACCESS_KEY || '',
+  r2Bucket: process.env.R2_BUCKET || '',
+  r2PublicBaseUrl: (process.env.R2_PUBLIC_BASE_URL || process.env.PUBLIC_ASSET_BASE_URL || '').replace(/\/+$/, ''),
   frontendOrigins: (process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:5173,http://localhost:5174')
     .split(',')
     .map((item) => item.trim())

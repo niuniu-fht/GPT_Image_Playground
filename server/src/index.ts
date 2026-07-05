@@ -14,6 +14,8 @@ import creditsRouter from './routes/credits.js'
 import generationsRouter from './routes/generations.js'
 import modelsRouter from './routes/models.js'
 import publicRouter from './routes/public.js'
+import remoteImagesRouter from './routes/remoteImages.js'
+import squareRouter from './routes/square.js'
 import supportRouter from './routes/support.js'
 
 const app = express()
@@ -33,7 +35,7 @@ app.use(
     credentials: true,
   }),
 )
-app.use(express.json({ limit: '30mb' }))
+app.use(express.json({ limit: '300mb' }))
 app.use(cookieParser())
 app.use(
   session({
@@ -59,6 +61,7 @@ app.use(
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'gpt-image-playground-server', now: Date.now() })
 })
+app.use('/api/v1', squareRouter)
 app.use('/api/auth', authRouter)
 app.use('/api/public', publicRouter)
 app.use('/api/admin', adminRouter)
@@ -67,6 +70,7 @@ app.use('/api', modelsRouter)
 app.use('/api/credits', creditsRouter)
 app.use('/api/support', supportRouter)
 app.use('/api/generations', generationsRouter)
+app.use('/api/remote-images', remoteImagesRouter)
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (error instanceof ZodError) {

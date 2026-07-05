@@ -1,4 +1,4 @@
-import type { AppView, GalleryDisplayMode } from '../types'
+import type { AppThemeMode, AppView, GalleryDisplayMode } from '../types'
 import type { AppState, PersistedAppStateSnapshot } from './contracts'
 import {
   createInitialProviderState,
@@ -20,6 +20,7 @@ export function buildPersistedAppStateSnapshot(state: AppState): PersistedAppSta
     promptLibrary: state.promptLibrary,
     galleryDisplayMode: state.galleryDisplayMode,
     appView: state.appView,
+    themeMode: state.themeMode,
     activeModelId: state.activeModelId,
   }
 }
@@ -29,7 +30,29 @@ function resolveGalleryDisplayMode(value: unknown): GalleryDisplayMode {
 }
 
 function resolveAppView(value: unknown): AppView {
-  return value === 'square' ? 'square' : 'local'
+  if (value === 'square' || value === 'local' || value === 'models' || value === 'assets') return value
+  return 'home'
+}
+
+function resolveThemeMode(value: unknown): AppThemeMode {
+  if (value === 'light' || value === 'dark' || value === 'system') return value
+  return 'system'
+}
+
+function mergePersistedParams(
+  persistedParams: Partial<AppState>['params'],
+  currentParams: AppState['params'],
+): AppState['params'] {
+  const mergedParams = {
+    ...currentParams,
+    ...persistedParams,
+  }
+
+  return {
+    ...mergedParams,
+    size: mergedParams.size === 'auto' ? currentParams.size : mergedParams.size,
+    quality: mergedParams.quality === 'auto' ? currentParams.quality : mergedParams.quality,
+  }
 }
 
 export function readPersistedAppStateSnapshot(input: unknown): PersistedAppStateSnapshot | null {
@@ -76,13 +99,11 @@ export function mergePersistedAppState(
       persistedState?.activeCategoryFilter,
       normalizedCategories,
     ),
-    params: {
-      ...currentState.params,
-      ...persistedState?.params,
-    },
+    params: mergePersistedParams(persistedState?.params, currentState.params),
     promptLibrary: normalizedPromptLibrary,
     galleryDisplayMode: resolveGalleryDisplayMode(persistedState?.galleryDisplayMode),
     appView: resolveAppView(persistedState?.appView),
+    themeMode: resolveThemeMode(persistedState?.themeMode),
     activeModelId:
       typeof persistedState?.activeModelId === 'string'
         ? persistedState.activeModelId

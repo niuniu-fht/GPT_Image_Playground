@@ -4,6 +4,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { writeAudit } from '../audit.js'
 import { requireAdmin } from '../auth.js'
+import { cleanupGeneratedAssetsForTasks } from '../generatedAssetCleanup.js'
 import { HttpError, sendOk } from '../http.js'
 import { prisma } from '../prisma.js'
 import { getPlatformSettings, upsertPlatformSettings } from '../settings.js'
@@ -38,6 +39,61 @@ function getUpstreamErrorMessage(payload: unknown, fallback: string) {
   return fallback
 }
 
+interface UpstreamModelOption {
+  id: string
+  ownedBy?: string
+  created?: number
+}
+
+function readUpstreamModelOptions(payload: unknown): UpstreamModelOption[] {
+  if (!payload || typeof payload !== 'object' || !Array.isArray((payload as { data?: unknown }).data)) {
+    return []
+  }
+  return (payload as { data: unknown[] }).data
+    .map((item): UpstreamModelOption | null => {
+      if (!item || typeof item !== 'object') return null
+      const record = item as { id?: unknown; owned_by?: unknown; created?: unknown }
+      if (typeof record.id !== 'string' || !record.id.trim()) return null
+      return {
+        id: record.id,
+        ownedBy: typeof record.owned_by === 'string' ? record.owned_by : undefined,
+        created: typeof record.created === 'number' ? record.created : undefined,
+      }
+    })
+    .filter((item): item is UpstreamModelOption => item !== null)
+}
+
+async function fetchUpstreamModels(provider: { baseUrl: string; apiKey: string; timeoutSeconds: number }) {
+  if (!provider.apiKey) {
+    throw new HttpError(400, 'missing_api_key', '渠道尚未配置 API Key，无法拉取模型列表')
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), Math.min(provider.timeoutSeconds, 20) * 1000)
+  try {
+    const baseUrl = provider.baseUrl.replace(/\/+$/, '')
+    const response = await fetch(`${baseUrl}/v1/models`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${provider.apiKey}`,
+        Accept: 'application/json',
+      },
+      signal: controller.signal,
+    })
+    const payload = (await response.json().catch(() => null)) as unknown
+    if (!response.ok) {
+      throw new HttpError(response.status, 'upstream_models_failed', getUpstreamErrorMessage(payload, `渠道返回 HTTP ${response.status}`))
+    }
+    return readUpstreamModelOptions(payload)
+  } catch (error) {
+    if (error instanceof HttpError) throw error
+    const isAbort = error instanceof Error && error.name === 'AbortError'
+    throw new HttpError(502, 'upstream_models_failed', isAbort ? '拉取模型列表超时，请检查渠道网络或超时时间' : error instanceof Error ? error.message : '拉取模型列表失败')
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 async function testUpstreamProvider(provider: { baseUrl: string; apiKey: string; timeoutSeconds: number }) {
   if (!provider.apiKey) {
     return {
@@ -63,9 +119,7 @@ async function testUpstreamProvider(provider: { baseUrl: string; apiKey: string;
       signal: controller.signal,
     })
     const payload = (await response.json().catch(() => null)) as unknown
-    const models = payload && typeof payload === 'object' && Array.isArray((payload as { data?: unknown }).data)
-      ? (payload as { data: unknown[] }).data.length
-      : undefined
+    const models = readUpstreamModelOptions(payload).length || undefined
     return {
       ok: response.ok,
       status: response.status,
@@ -166,6 +220,7 @@ router.get('/overview', async (_req, res, next) => {
           include: {
             user: { select: { email: true } },
             modelConfig: { select: { displayName: true } },
+            generatedAssets: { orderBy: { imageIndex: 'asc' } },
           },
         }),
         prisma.user.findMany({
@@ -607,6 +662,7 @@ router.get('/users/:id', async (req, res, next) => {
         take: 12,
         include: {
           modelConfig: { select: { displayName: true, name: true } },
+          generatedAssets: { orderBy: { imageIndex: 'asc' } },
         },
       }),
       prisma.creditLedger.findMany({
@@ -868,6 +924,7 @@ router.get('/tasks', async (req, res, next) => {
         include: {
           user: { select: { email: true } },
           modelConfig: { select: { displayName: true, name: true } },
+          generatedAssets: { orderBy: { imageIndex: 'asc' } },
         },
       }),
       prisma.generationTask.count({ where }),
@@ -888,9 +945,10 @@ router.delete('/tasks/:id', async (req, res, next) => {
     if (!task) throw new HttpError(404, 'TASK_NOT_FOUND', '生成任务不存在')
     if (task.status === 'running') throw new HttpError(409, 'TASK_RUNNING', '运行中的任务不能清理')
 
+    const cleanup = await cleanupGeneratedAssetsForTasks([id])
     await prisma.generationTask.delete({ where: { id } })
-    await writeAudit(req, 'task.delete', id, { status: task.status })
-    sendOk(res, { deleted: true })
+    await writeAudit(req, 'task.delete', id, { status: task.status, cleanup })
+    sendOk(res, { deleted: true, cleanup })
   } catch (error) {
     next(error)
   }
@@ -908,15 +966,18 @@ router.post('/tasks/batch/delete', async (req, res, next) => {
       throw new HttpError(409, 'TASK_RUNNING', `有 ${runningIds.length} 个任务仍在运行，不能清理`)
     }
 
+    const targetIds = tasks.map((task) => task.id)
+    const cleanup = await cleanupGeneratedAssetsForTasks(targetIds)
     const result = await prisma.generationTask.deleteMany({
-      where: { id: { in: tasks.map((task) => task.id) } },
+      where: { id: { in: targetIds } },
     })
     await writeAudit(req, 'task.batch.delete', 'tasks', {
       requested: input.ids.length,
       affected: result.count,
-      ids: tasks.map((task) => task.id),
+      ids: targetIds,
+      cleanup,
     })
-    sendOk(res, { affected: result.count })
+    sendOk(res, { affected: result.count, cleanup })
   } catch (error) {
     next(error)
   }
@@ -1500,6 +1561,7 @@ const settingsSchema = z.object({
   generationEnabled: z.boolean().optional(),
   registerBonusCredits: z.number().int().min(0).max(100000).optional(),
   maintenanceMessage: z.string().max(500).optional(),
+  landingHeroSlidesJson: z.string().max(30000).optional(),
 })
 
 router.patch('/settings', async (req, res, next) => {
@@ -1531,7 +1593,7 @@ router.get('/upstreams', async (_req, res, next) => {
         _count: { select: { models: true } },
         models: {
           orderBy: [{ enabled: 'desc' }, { sortOrder: 'asc' }],
-          select: { id: true, displayName: true, name: true, enabled: true, costCredits: true },
+          select: { id: true, displayName: true, name: true, enabled: true, costCredits: true, costCredits2K: true, costCredits4K: true },
         },
       },
     })
@@ -1621,6 +1683,24 @@ router.post('/upstreams/:id/test', async (req, res, next) => {
       message: result.message,
     })
     sendOk(res, { result })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/upstreams/:id/models', async (req, res, next) => {
+  try {
+    const id = readParam(req.params.id)
+    const provider = await prisma.upstreamProvider.findUnique({ where: { id } })
+    if (!provider) throw new HttpError(404, 'UPSTREAM_NOT_FOUND', '上游渠道不存在')
+    const startedAt = Date.now()
+    const models = await fetchUpstreamModels(provider)
+    await writeAudit(req, 'upstream.models.list', id, { modelCount: models.length })
+    sendOk(res, {
+      models,
+      checkedAt: new Date().toISOString(),
+      latencyMs: Date.now() - startedAt,
+    })
   } catch (error) {
     next(error)
   }

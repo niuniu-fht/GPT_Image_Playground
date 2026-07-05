@@ -8,6 +8,19 @@ const MAX_PIXELS = 8_294_400
 
 export type SizeTier = '1K' | '2K' | '4K'
 
+const KNOWN_RATIOS = [
+  '1:1',
+  '16:9',
+  '9:16',
+  '4:3',
+  '3:4',
+  '3:2',
+  '2:3',
+  '5:4',
+  '4:5',
+  '21:9',
+] as const
+
 function roundToMultiple(value: number, multiple: number) {
   return Math.max(multiple, Math.round(value / multiple) * multiple)
 }
@@ -177,4 +190,27 @@ export function calculateImageSize(tier: SizeTier, ratio: string) {
     ? roundToMultiple(longSide * ratioHeight / ratioWidth, SIZE_MULTIPLE)
     : longSide
   return normalizeImageSize(`${width}x${height}`)
+}
+
+export function resolveImageSizeTier(size: string): SizeTier {
+  const normalized = normalizeImageSize(size)
+  if (!normalized || normalized === 'auto') return '1K'
+
+  const tiers: SizeTier[] = ['1K', '2K', '4K']
+  for (const tier of tiers) {
+    for (const ratio of KNOWN_RATIOS) {
+      if (calculateImageSize(tier, ratio) === normalized) return tier
+    }
+  }
+
+  const match = normalized.match(SIZE_PATTERN)
+  if (!match) return '1K'
+
+  const width = Number(match[1])
+  const height = Number(match[2])
+  const pixels = width * height
+  if (!Number.isFinite(pixels) || pixels <= 0) return '1K'
+  if (pixels >= 6_000_000) return '4K'
+  if (pixels >= 2_600_000) return '2K'
+  return '1K'
 }

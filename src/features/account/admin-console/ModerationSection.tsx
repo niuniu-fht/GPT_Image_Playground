@@ -1,5 +1,5 @@
 import type { ModerationRule } from '../../../types'
-import { EmptyState, formatTime, SectionShell, StatusBadge, type ModerationRuleDraft } from './shared'
+import { AdminTableShell, EmptyState, formatTime, SectionShell, StatusBadge, type ModerationRuleDraft } from './shared'
 
 type ModerationSectionProps = {
   rules: ModerationRule[]
@@ -57,10 +57,9 @@ export function ModerationSection({
         </select>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
-        <div className="overflow-x-auto">
-          <div className="min-w-[1040px]">
-            <div className="grid grid-cols-[1.2fr_0.8fr_1.5fr_1fr_0.8fr_0.9fr_1fr_1.1fr] gap-4 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.04]">
+      <AdminTableShell mobileHint="横向滑动查看更多风控字段和操作">
+        <div className="min-w-[1040px]">
+            <div className="sticky top-0 z-20 grid grid-cols-[1.2fr_0.8fr_1.5fr_1fr_0.8fr_0.9fr_1fr_1.1fr] gap-4 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
               <span>规则</span><span>类型</span><span>匹配内容</span><span>提示</span><span>优先级</span><span>命中</span><span>状态</span><span className="text-right">操作</span>
             </div>
             {rules.map((item) => (
@@ -80,9 +79,8 @@ export function ModerationSection({
               </div>
             ))}
             {!rules.length && <EmptyState text="暂无风控规则" />}
-          </div>
         </div>
-      </div>
+      </AdminTableShell>
     </SectionShell>
   )
 }

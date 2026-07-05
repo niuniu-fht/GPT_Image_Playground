@@ -94,6 +94,7 @@ export default function GalleryImageTile({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
+      onDragStart={(event) => event.preventDefault()}
     >
       <div
         className={`relative h-full overflow-hidden border bg-white/[0.74] shadow-[0_24px_50px_-34px_rgba(15,23,42,0.72)] transition-all duration-200 dark:bg-gray-950/[0.72] ${

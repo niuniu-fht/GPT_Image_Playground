@@ -2,7 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import type { AdminRedeemCode } from '../../../types'
 import { platformApi } from '../../../lib/platformApi'
 import { useStore } from '../../../store'
-import { EmptyState, formatTime, PaginationBar, SectionShell, StatusBadge, type RedeemCodeDraft } from './shared'
+import { AdminTableShell, EmptyState, formatTime, PaginationBar, SectionShell, StatusBadge, type RedeemCodeDraft } from './shared'
 
 type RedeemCodesSectionProps = {
   redeemCodes: AdminRedeemCode[]
@@ -134,10 +134,12 @@ export function RedeemCodesSection({
         </select>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
-        <div className="overflow-x-auto">
-          <div className="min-w-[1050px]">
-            <div className="grid grid-cols-[1.2fr_1.4fr_0.8fr_1fr_1fr_1.1fr_1.1fr_1.2fr] gap-4 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.04]">
+      <AdminTableShell
+        mobileHint="横向滑动查看更多兑换码字段和操作"
+        footer={<PaginationBar page={redeemCodePage} pageSize={20} total={redeemCodeTotal} onPageChange={setRedeemCodePage} />}
+      >
+        <div className="min-w-[1050px]">
+            <div className="sticky top-0 z-20 grid grid-cols-[1.2fr_1.4fr_0.8fr_1fr_1fr_1.1fr_1.1fr_1.2fr] gap-4 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
               <span>兑换码</span>
               <span>活动</span>
               <span className="text-right">积分</span>
@@ -191,10 +193,8 @@ export function RedeemCodesSection({
               )
             })}
             {!redeemCodes.length && <EmptyState text="暂无兑换码" />}
-          </div>
         </div>
-        <PaginationBar page={redeemCodePage} pageSize={20} total={redeemCodeTotal} onPageChange={setRedeemCodePage} />
-      </div>
+      </AdminTableShell>
 
       {batchOpen && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-gray-950/40 px-4 py-6 backdrop-blur-sm">

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { renderModelIcon } from '../../../../lib/modelIcon'
 import type { ModelConfig } from '../../../../types'
 
 interface ModelSelectorProps {
@@ -6,28 +7,6 @@ interface ModelSelectorProps {
   activeModelId: string | null
   compact: boolean
   onChange: (modelId: string) => void
-}
-
-function renderIcon(icon: string) {
-  if (icon === 'openai') {
-    return (
-      <span className="grid h-9 w-9 place-items-center rounded-xl bg-white text-lg shadow-sm ring-1 ring-gray-200">
-        ◎
-      </span>
-    )
-  }
-  if (icon === 'banana') {
-    return (
-      <span className="grid h-9 w-9 place-items-center rounded-xl bg-amber-50 text-xl shadow-sm ring-1 ring-amber-100">
-        🍌
-      </span>
-    )
-  }
-  return (
-    <span className="grid h-9 w-9 place-items-center rounded-xl bg-sky-50 text-lg shadow-sm ring-1 ring-sky-100">
-      ✨
-    </span>
-  )
 }
 
 export default function ModelSelector({
@@ -59,7 +38,7 @@ export default function ModelSelector({
           compact ? 'py-2.5' : 'py-3'
         }`}
       >
-        {activeModel ? renderIcon(activeModel.icon) : renderIcon('sparkles')}
+        {activeModel ? renderModelIcon(activeModel.icon) : renderModelIcon('sparkles')}
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
@@ -67,7 +46,7 @@ export default function ModelSelector({
             </span>
             {activeModel?.isNew && (
               <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
-                New
+                新
               </span>
             )}
           </span>
@@ -98,18 +77,18 @@ export default function ModelSelector({
                     : 'hover:bg-gray-50 dark:hover:bg-white/[0.05]'
                 }`}
               >
-                {renderIcon(model.icon)}
+                {renderModelIcon(model.icon)}
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
                     <span className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">
                       {model.displayName}
                     </span>
                     <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-400 dark:bg-white/[0.06]">
-                      ✨{model.costCredits}
+                      积分 {model.costCredits}
                     </span>
                     {model.isNew && (
                       <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
-                        New
+                        新
                       </span>
                     )}
                   </span>

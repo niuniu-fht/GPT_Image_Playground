@@ -25,6 +25,6 @@ export function sendError(res: Response, error: unknown) {
   res.status(500).json({
     ok: false,
     code: 'internal_error',
-    message: error instanceof Error ? error.message : '服务暂时不可用',
+    message: '服务暂时不可用，请稍后重试',
   })
 }

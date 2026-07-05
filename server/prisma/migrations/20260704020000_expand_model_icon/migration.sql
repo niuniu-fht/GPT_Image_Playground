@@ -1,0 +1,1 @@
+ALTER TABLE "ModelConfig" ALTER COLUMN "icon" TYPE TEXT;

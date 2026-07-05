@@ -125,6 +125,7 @@ function TaskCard({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
+      onDragStart={(event) => event.preventDefault()}
     >
       <div className="flex h-40">
         <TaskCardPreview

@@ -117,7 +117,7 @@ export default function ShareToSquareModal() {
 
   const submit = async () => {
     if (!isConfigured) {
-      setError('尚未配置广场 API 地址，请先设置 VITE_SQUARE_API_URL')
+      setError('尚未配置广场服务，请联系管理员在后台完成广场 API 与 R2 配置')
       return
     }
 

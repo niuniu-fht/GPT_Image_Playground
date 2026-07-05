@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useStore } from '../../../store'
 import { copyImageToClipboard } from '../../../lib/clipboardImage'
+import { fetchImageBlobWithFriendlyError, resolveRemoteImageAccessMessage } from '../../../lib/remoteImageAccess'
 
 export default function ImageContextMenu() {
   const [menuInfo, setMenuInfo] = useState<{ src: string; x: number; y: number } | null>(null)
@@ -68,7 +69,7 @@ export default function ImageContextMenu() {
       showToast('图片已复制', 'success')
     } catch (err) {
       console.error(err)
-      showToast('复制失败', 'error')
+      showToast(resolveRemoteImageAccessMessage(err, 'copy'), 'error')
     }
   }
 
@@ -76,8 +77,7 @@ export default function ImageContextMenu() {
     e.stopPropagation()
     setMenuInfo(null)
     try {
-      const res = await fetch(menuInfo.src)
-      const blob = await res.blob()
+      const blob = await fetchImageBlobWithFriendlyError(menuInfo.src)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -90,7 +90,8 @@ export default function ImageContextMenu() {
       showToast('开始下载', 'success')
     } catch (err) {
       console.error(err)
-      showToast('下载失败', 'error')
+      window.open(menuInfo.src, '_blank', 'noopener,noreferrer')
+      showToast(resolveRemoteImageAccessMessage(err, 'download'), 'error')
     }
   }
 

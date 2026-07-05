@@ -2,6 +2,7 @@ import type { FormEvent } from 'react'
 import type { AdminUserSummary } from '../../../types'
 import {
   adminPageSize,
+  AdminTableShell,
   cx,
   EmptyState,
   formatTime,
@@ -122,7 +123,10 @@ export function UsersSection({
         </div>
       }
     >
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
+      <AdminTableShell
+        className="max-h-[calc(100vh-310px)]"
+        footer={<PaginationBar page={usersPage} pageSize={adminPageSize} total={usersTotal} onPageChange={setUsersPage} />}
+      >
         <div className="border-b border-gray-100 bg-gray-50 px-4 py-3 dark:border-white/[0.06] dark:bg-white/[0.04]">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <label className="inline-flex items-center gap-2 text-xs font-semibold text-gray-500">
@@ -144,12 +148,8 @@ export function UsersSection({
             </div>
           </div>
         </div>
-        <div className="border-b border-gray-100 bg-white px-4 py-2 text-xs text-gray-400 dark:border-white/[0.06] dark:bg-transparent md:hidden">
-          横向滑动查看更多字段和操作
-        </div>
-        <div className="overflow-x-auto">
-          <div className="min-w-[1550px]">
-            <div className="grid grid-cols-[42px_1.45fr_130px_100px_100px_90px_110px_90px_150px_150px_320px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.04]">
+        <div className="min-w-[1550px]">
+            <div className="sticky top-0 z-20 grid grid-cols-[42px_1.45fr_130px_100px_100px_90px_110px_90px_150px_150px_320px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
               <span />
               <span>用户</span>
               <span>分层 / 备注</span>
@@ -193,10 +193,8 @@ export function UsersSection({
               )
             })}
             {!users.length && <EmptyState text="暂无用户" />}
-          </div>
         </div>
-        <PaginationBar page={usersPage} pageSize={adminPageSize} total={usersTotal} onPageChange={setUsersPage} />
-      </div>
+      </AdminTableShell>
     </SectionShell>
   )
 }

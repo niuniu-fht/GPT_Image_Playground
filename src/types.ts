@@ -26,7 +26,8 @@ export type ResponsesImageInputMode = 'auto' | 'file_id'
 export type ResponsesPromptRevisionMode = 'allow' | 'compat'
 export type TaskView = 'gallery' | 'trash'
 export type GalleryDisplayMode = 'standard' | 'image'
-export type AppView = 'local' | 'square'
+export type AppThemeMode = 'system' | 'light' | 'dark'
+export type AppView = 'home' | 'local' | 'square' | 'models' | 'assets'
 export type SquareShareKind = 'image' | 'task' | 'prompt'
 export type SquareShareStatus = 'published' | 'pending_review' | 'hidden' | 'deleted' | 'rejected'
 
@@ -134,6 +135,8 @@ export interface ModelConfig {
   description: string
   icon: string
   costCredits: number
+  costCredits2K: number
+  costCredits4K: number
   upstreamModel: string
   upstreamProviderId?: string | null
   apiProtocol: ApiProtocol
@@ -331,6 +334,8 @@ export interface AdminUpstreamProvider {
     name: string
     enabled: boolean
     costCredits: number
+    costCredits2K: number
+    costCredits4K: number
   }>
 }
 
@@ -371,6 +376,29 @@ export interface AdminGenerationTask {
   finishedAt?: string | null
   user?: { email: string }
   modelConfig?: { displayName: string; name: string }
+  generatedAssets?: AdminGeneratedAsset[]
+}
+
+export interface AdminGeneratedAsset {
+  id: string
+  taskId: string
+  userId: string
+  imageIndex: number
+  r2Key?: string | null
+  publicUrl: string
+  mimeType: string
+  byteSize?: number | null
+  width?: number | null
+  height?: number | null
+  uploadMode?: string | null
+  source: string
+  createdAt: string
+}
+
+export interface AdminGeneratedAssetCleanupResult {
+  assetRecords: number
+  r2Objects: number
+  skippedAssets: number
 }
 
 export interface AdminAuditLog {
@@ -466,9 +494,18 @@ export interface AdminUsageReport {
 
 export interface AdminSquareUsage {
   storage: {
+    enabled?: boolean
+    provider?: string
+    publicBaseUrl?: string
+    endpoint?: string
+    bucket?: string
     estimatedBytes: number
+    counterBytes?: number
+    originalBytes?: number
+    thumbnailBytes?: number
     assetCount: number
     maxBytes: number
+    cleanupTargetBytes?: number
     percentOfMax: number
   }
   shares: {
@@ -485,6 +522,48 @@ export interface AdminSquareUsage {
     maxStoredShares: number
     cleanupBatchLimit: number
   }
+}
+
+export interface AdminSquareConfig {
+  squareApiUrl: string
+  squareAdminTokenConfigured: boolean
+  r2Enabled: boolean
+  r2Endpoint: string
+  r2AccessKey: string
+  r2SecretKeyConfigured: boolean
+  r2Bucket: string
+  publicBaseUrl: string
+  autoUploadGeneratedImages: boolean
+}
+
+export interface AdminSquareR2TestResult {
+  ok: boolean
+  message: string
+  bucket: string
+  endpoint: string
+  publicBaseUrl: string
+  objectKey: string
+  publicUrl: string
+  byteSize: number
+  latencyMs: number
+  checkedAt: string
+}
+
+export interface AdminSquareCleanupResult {
+  mode?: 'local' | 'worker'
+  dryRun?: boolean
+  candidates?: {
+    shares: number
+    assets: number
+    r2Objects: number
+    estimatedBytes: number
+  }
+  deleted?: {
+    shares: number
+    assets: number
+    r2Objects: number
+  }
+  [key: string]: unknown
 }
 
 export interface AdminSquareShare {
@@ -508,6 +587,7 @@ export interface AdminPlatformSettings {
   generationEnabled: boolean
   registerBonusCredits: number
   maintenanceMessage: string
+  landingHeroSlidesJson: string
 }
 
 export interface CategoryConfig {
@@ -570,10 +650,29 @@ export interface AppliedTransportMeta {
   fallbackFromStream?: boolean | null
 }
 
+export type TaskImageResult =
+  | {
+      index: number
+      status: 'done'
+      mimeType?: string | null
+    }
+  | {
+      index: number
+      status: 'error'
+      error: string
+    }
+
 export interface TaskResponseMeta {
   appliedImageParams?: AppliedImageParams | null
+  imageResults?: TaskImageResult[] | null
   revisedPrompt?: string | null
   transport?: AppliedTransportMeta | null
+  squareUpload?: {
+    mode: 'square' | 'r2'
+    shareId?: string
+    assetUrls?: string[]
+  } | null
+  squareUploadError?: string | null
 }
 
 export interface TaskErrorDebugImageSummary {

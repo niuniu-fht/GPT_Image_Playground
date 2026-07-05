@@ -1,13 +1,18 @@
-export function createDialogSlice(set: any) {
+import type { AppState } from '../contracts'
+import type { StoreSet } from './sliceTypes'
+
+type DialogSliceState = Pick<AppState, 'toast' | 'showToast' | 'confirmDialog' | 'setConfirmDialog'>
+
+export function createDialogSlice(set: StoreSet): DialogSliceState {
   return {
-    toast: null as any,
+    toast: null,
     showToast(message: string, type: "info" | "success" | "error" = "info") {
       set({ toast: { message, type } })
       setTimeout(() => {
-        set((state: any) => (state.toast?.message === message ? { toast: null } : state))
+        set((state) => (state.toast?.message === message ? { toast: null } : state))
       }, 3000)
     },
-    confirmDialog: null as any,
-    setConfirmDialog(confirmDialog: any) { set({ confirmDialog }) },
+    confirmDialog: null,
+    setConfirmDialog(confirmDialog: AppState['confirmDialog']) { set({ confirmDialog }) },
   }
 }

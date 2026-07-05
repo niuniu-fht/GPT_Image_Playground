@@ -37,6 +37,11 @@ type CleanupCandidate = {
 
 export interface SquareUsage {
   storage: {
+    enabled: boolean
+    provider: string
+    publicBaseUrl: string
+    endpoint: string
+    bucket: string
     estimatedBytes: number
     counterBytes: number
     originalBytes: number
@@ -195,6 +200,11 @@ export async function getSquareUsage(env: Env): Promise<SquareUsage> {
 
   return {
     storage: {
+      enabled: true,
+      provider: 'Cloudflare R2',
+      publicBaseUrl: config.publicAssetBaseUrl,
+      endpoint: config.r2Endpoint,
+      bucket: config.r2Bucket,
       estimatedBytes: storage.totalBytes,
       counterBytes,
       originalBytes: storage.originalBytes,

@@ -1,19 +1,27 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 
-interface Option {
+type SelectValue = string | number
+
+interface Option<TValue extends SelectValue> {
   label: string
-  value: string | number
+  value: TValue
 }
 
-interface SelectProps {
-  value: string | number
-  onChange: (value: any) => void
-  options: Option[]
+interface SelectProps<TValue extends SelectValue> {
+  value: TValue
+  onChange: (value: TValue) => void
+  options: Option<TValue>[]
   disabled?: boolean
   className?: string
 }
 
-export default function Select({ value, onChange, options, disabled, className }: SelectProps) {
+export default function Select<TValue extends SelectValue>({
+  value,
+  onChange,
+  options,
+  disabled,
+  className,
+}: SelectProps<TValue>) {
   const [isOpen, setIsOpen] = useState(false)
   const [openUp, setOpenUp] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)

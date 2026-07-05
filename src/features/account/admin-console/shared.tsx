@@ -81,6 +81,8 @@ export const emptyModelDraft: ModelDraft = {
   description: '',
   icon: 'sparkles',
   costCredits: 1,
+  costCredits2K: 2,
+  costCredits4K: 4,
   upstreamModel: 'gpt-image-2',
   upstreamProviderId: null,
   apiProtocol: 'images',
@@ -152,6 +154,7 @@ export const defaultSettingsDraft: AdminPlatformSettings = {
   generationEnabled: true,
   registerBonusCredits: 100,
   maintenanceMessage: '',
+  landingHeroSlidesJson: '',
 }
 
 export const adminPageSize = 20
@@ -233,15 +236,17 @@ export function SectionShell({
   children: React.ReactNode
 }) {
   return (
-    <section className="min-h-0">
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+    <section className="flex h-full min-h-0 flex-col">
+      <div className="mb-5 flex flex-shrink-0 flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold tracking-tight text-gray-950 dark:text-gray-50">{title}</h2>
           <p className="mt-1 text-sm text-gray-500">{description}</p>
         </div>
         {action}
       </div>
-      {children}
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1 admin-scrollbar">
+        {children}
+      </div>
     </section>
   )
 }
@@ -305,6 +310,37 @@ export function PaginationBar({
           下一页
         </button>
       </div>
+    </div>
+  )
+}
+
+export function AdminTableShell({
+  children,
+  footer,
+  mobileHint = '横向滑动查看更多字段和操作',
+  className,
+  bodyClassName,
+}: {
+  children: React.ReactNode
+  footer?: React.ReactNode
+  mobileHint?: string
+  className?: string
+  bodyClassName?: string
+}) {
+  return (
+    <div className={cx(
+      'flex min-h-[280px] max-h-[calc(100vh-320px)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]',
+      className,
+    )}>
+      {mobileHint && (
+        <div className="flex-shrink-0 border-b border-gray-100 bg-white px-4 py-2 text-xs text-gray-400 dark:border-white/[0.06] dark:bg-transparent md:hidden">
+          {mobileHint}
+        </div>
+      )}
+      <div className={cx('min-h-0 flex-1 overflow-auto overscroll-contain admin-scrollbar', bodyClassName)}>
+        {children}
+      </div>
+      {footer && <div className="flex-shrink-0">{footer}</div>}
     </div>
   )
 }

@@ -194,7 +194,7 @@ export default function SquareTaskDetailModal({ share, onClose, onOpenImages }: 
               className="h-full w-full cursor-zoom-in p-4"
               title="查看大图"
             >
-              <img src={mainImageUrl} alt={title} className="mx-auto h-full max-h-[calc(92vh-2rem)] w-full object-contain" />
+              <img src={mainImageUrl} alt={title} draggable={false} className="mx-auto h-full max-h-[calc(92vh-2rem)] w-full select-none object-contain" />
             </button>
           ) : (
             <div className="text-sm text-gray-400">无输出图</div>
@@ -240,7 +240,7 @@ export default function SquareTaskDetailModal({ share, onClose, onOpenImages }: 
               className="mb-4 block aspect-[4/3] w-full overflow-hidden rounded-2xl bg-gray-100 md:hidden dark:bg-black/20"
               title="查看大图"
             >
-              <img src={mainImageUrl} alt={title} className="h-full w-full object-contain" />
+              <img src={mainImageUrl} alt={title} draggable={false} className="h-full w-full select-none object-contain" />
             </button>
           )}
 
@@ -270,7 +270,7 @@ export default function SquareTaskDetailModal({ share, onClose, onOpenImages }: 
                       onClick={() => onOpenImages([{ src: getAssetUrl(asset, 'original'), title: `参考图 ${index + 1}` }], 0)}
                       className="h-16 w-16 overflow-hidden rounded-lg border border-gray-200 bg-gray-100 dark:border-white/[0.08] dark:bg-white/[0.03]"
                     >
-                      <img src={src} alt="" className="h-full w-full object-cover" />
+                      <img src={src} alt="" draggable={false} className="h-full w-full select-none object-cover" />
                     </button>
                   ) : null
                 })}
@@ -319,7 +319,7 @@ export default function SquareTaskDetailModal({ share, onClose, onOpenImages }: 
                       }`}
                     >
                       <div className="aspect-[4/3] bg-gray-100 dark:bg-black/20">
-                        {previewUrl ? <img src={previewUrl} alt="" className="h-full w-full object-cover" /> : null}
+                        {previewUrl ? <img src={previewUrl} alt="" draggable={false} className="h-full w-full select-none object-cover" /> : null}
                       </div>
                       <div className="p-2">
                         <p className="line-clamp-2 text-xs leading-5 text-gray-700 dark:text-gray-200">
@@ -356,7 +356,7 @@ export default function SquareTaskDetailModal({ share, onClose, onOpenImages }: 
                   }`}
                 >
                   <div className="relative aspect-[4/3] bg-gray-100 dark:bg-black/20">
-                    {previewUrl ? <img src={previewUrl} alt="" className="h-full w-full object-cover" /> : null}
+                    {previewUrl ? <img src={previewUrl} alt="" draggable={false} className="h-full w-full select-none object-cover" /> : null}
                     <span className="absolute left-2 top-2 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur">
                       {node.localTaskId === entryTaskId ? '入口任务' : `上游 ${nodes.length - index - 1}`}
                     </span>

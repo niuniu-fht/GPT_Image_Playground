@@ -1,2 +1,2 @@
-export { default as SquarePage } from './components/SquarePage'
-export { default as ShareToSquareModal } from './components/ShareToSquareModal'
+export { SquarePageLazy as SquarePage } from './SquarePageLazy'
+export { ShareToSquareModalLazy as ShareToSquareModal } from './ShareToSquareModalLazy'

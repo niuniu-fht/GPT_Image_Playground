@@ -1,6 +1,13 @@
 import type { AdminAnnouncement, CurrentUser, ModelConfig } from '../../types'
+import type { AppState } from '../contracts'
 
-export function createAccountSlice(set: any) {
+type StoreSet = (
+  partial:
+    | Partial<AppState>
+    | ((state: AppState) => Partial<AppState>),
+) => void
+
+export function createAccountSlice(set: StoreSet) {
   return {
     currentUser: null as CurrentUser | null,
     authReady: false,
@@ -28,7 +35,7 @@ export function createAccountSlice(set: any) {
     },
 
     setModels(models: ModelConfig[]) {
-      set((state: any) => {
+      set((state) => {
         const activeStillExists = models.some((model) => model.id === state.activeModelId)
         return {
           models,

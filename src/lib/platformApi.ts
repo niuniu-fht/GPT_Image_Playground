@@ -2,11 +2,15 @@ import type {
   AdminAnnouncement,
   AdminAuditLog,
   AdminCreditLedger,
+  AdminGeneratedAssetCleanupResult,
   AdminGenerationTask,
   AdminLoginLog,
   AdminPlatformSettings,
   AdminRedeemCode,
+  AdminSquareCleanupResult,
   AdminSquareShare,
+  AdminSquareConfig,
+  AdminSquareR2TestResult,
   AdminSquareUsage,
   AdminUpstreamProvider,
   AdminUpstreamTestResult,
@@ -26,20 +30,101 @@ type ApiEnvelope<T> =
   | { ok: true; data: T }
   | { ok: false; code?: string; message?: string }
 
+export class PlatformApiError extends Error {
+  code: string
+  status: number
+
+  constructor(message: string, input: { code?: string; status?: number } = {}) {
+    super(message)
+    this.name = 'PlatformApiError'
+    this.code = input.code ?? 'request_failed'
+    this.status = input.status ?? 0
+  }
+}
+
+function resolveFallbackMessage(status: number, code?: string): string {
+  if (status === 401) return '登录状态已失效，请重新登录'
+  if (status === 403) return '当前账号没有权限执行这个操作'
+  if (status === 404) return '请求的内容不存在或已被删除'
+  if (status === 409) return '当前数据已发生变化，请刷新后重试'
+  if (status === 413) return '图片或请求内容太大，请压缩后再试'
+  if (status === 429) return '操作太频繁了，请稍后再试'
+  if (status >= 500) return '服务暂时不可用，请稍后重试'
+  if (code === 'network_error') return '网络连接异常，请检查网络后重试'
+  return '请求失败，请稍后重试'
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    credentials: 'include',
-    headers: {
-      ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      ...init.headers,
-    },
-  })
+  let response: Response
+  try {
+    response = await fetch(path, {
+      ...init,
+      credentials: 'include',
+      headers: {
+        ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        ...init.headers,
+      },
+    })
+  } catch (error) {
+    console.error('[api] network request failed', error)
+    throw new PlatformApiError(resolveFallbackMessage(0, 'network_error'), {
+      code: 'network_error',
+      status: 0,
+    })
+  }
+
   const payload = (await response.json().catch(() => null)) as ApiEnvelope<T> | null
   if (!response.ok || !payload?.ok) {
-    throw new Error(payload && !payload.ok ? payload.message || '请求失败' : '请求失败')
+    const code = payload && !payload.ok ? payload.code : undefined
+    const message = payload && !payload.ok && payload.message
+      ? payload.message
+      : resolveFallbackMessage(response.status, code)
+    throw new PlatformApiError(message, {
+      code,
+      status: response.status,
+    })
   }
   return payload.data
+}
+
+async function requestBlob(path: string, init: RequestInit = {}): Promise<Blob> {
+  let response: Response
+  try {
+    response = await fetch(path, {
+      ...init,
+      credentials: 'include',
+      headers: {
+        ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        ...init.headers,
+      },
+    })
+  } catch (error) {
+    console.error('[api] binary request failed', error)
+    throw new PlatformApiError(resolveFallbackMessage(0, 'network_error'), {
+      code: 'network_error',
+      status: 0,
+    })
+  }
+
+  if (response.ok) {
+    return response.blob()
+  }
+
+  const payload = (await response.json().catch(() => null)) as ApiEnvelope<unknown> | null
+  const code = payload && !payload.ok ? payload.code : undefined
+  const message = payload && !payload.ok && payload.message
+    ? payload.message
+    : resolveFallbackMessage(response.status, code)
+  throw new PlatformApiError(message, {
+    code,
+    status: response.status,
+  })
+}
+
+export function getUserFacingErrorMessage(error: unknown, fallback = '操作失败，请稍后重试'): string {
+  if (error instanceof PlatformApiError) return error.message || fallback
+  if (error instanceof Error && error.message) return error.message
+  return fallback
 }
 
 export interface GenerationInputImagePayload {
@@ -49,10 +134,18 @@ export interface GenerationInputImagePayload {
 
 export interface PlatformGenerationResult {
   taskId: string
+  status?: 'running' | 'done' | 'error'
   images: Array<{ dataUrl: string; mimeType: string }>
+  error?: string | null
   model: { id: string; displayName: string; costCredits: number }
-  user: CurrentUser
+  user: CurrentUser | null
   responseMeta?: unknown
+}
+
+export interface AdminUpstreamModelOption {
+  id: string
+  ownedBy?: string
+  created?: number
 }
 
 export const platformApi = {
@@ -74,8 +167,22 @@ export const platformApi = {
     })
   },
 
+  changePassword(input: { currentPassword: string; newPassword: string }) {
+    return request('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
   logout() {
     return request('/api/auth/logout', { method: 'POST' })
+  },
+
+  fetchRemoteImage(input: { url: string }) {
+    return requestBlob('/api/remote-images/fetch', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
   },
 
   listModels() {
@@ -87,6 +194,10 @@ export const platformApi = {
     if (params.placement) query.set('placement', params.placement)
     const suffix = query.toString() ? `?${query}` : ''
     return request<{ items: AdminAnnouncement[] }>(`/api/public/announcements${suffix}`)
+  },
+
+  getPublicLanding() {
+    return request<{ landingHeroSlidesJson: string }>('/api/public/landing')
   },
 
   listAdminModels() {
@@ -415,11 +526,14 @@ export const platformApi = {
   },
 
   deleteAdminTask(id: string) {
-    return request<{ deleted: boolean }>(`/api/admin/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    return request<{ deleted: boolean; cleanup: AdminGeneratedAssetCleanupResult }>(
+      `/api/admin/tasks/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    )
   },
 
   deleteAdminTasks(ids: string[]) {
-    return request<{ affected: number }>('/api/admin/tasks/batch/delete', {
+    return request<{ affected: number; cleanup: AdminGeneratedAssetCleanupResult }>('/api/admin/tasks/batch/delete', {
       method: 'POST',
       body: JSON.stringify({ ids }),
     })
@@ -486,6 +600,12 @@ export const platformApi = {
     })
   },
 
+  listAdminUpstreamModels(id: string) {
+    return request<{ models: AdminUpstreamModelOption[]; checkedAt: string; latencyMs: number }>(
+      `/api/admin/upstreams/${encodeURIComponent(id)}/models`,
+    )
+  },
+
   testAdminUpstreams(ids?: string[]) {
     return request<{
       results: Array<AdminUpstreamTestResult & { providerId: string; providerName: string }>
@@ -521,13 +641,15 @@ export const platformApi = {
     return request<AdminSquareUsage>('/api/admin/square/usage')
   },
 
-  listAdminSquareShares(params: { status?: string; kind?: string; q?: string; limit?: number } = {}) {
+  listAdminSquareShares(params: { status?: string; kind?: string; q?: string; page?: number; pageSize?: number; limit?: number } = {}) {
     const query = new URLSearchParams()
     if (params.status) query.set('status', params.status)
     if (params.kind) query.set('kind', params.kind)
     if (params.q) query.set('q', params.q)
+    if (params.page) query.set('page', String(params.page))
+    if (params.pageSize) query.set('pageSize', String(params.pageSize))
     if (params.limit) query.set('limit', String(params.limit))
-    return request<{ items: AdminSquareShare[] }>(`/api/admin/square/shares?${query}`)
+    return request<{ items: AdminSquareShare[]; total: number; page: number; pageSize: number }>(`/api/admin/square/shares?${query}`)
   },
 
   updateAdminSquareShareStatus(id: string, status: AdminSquareShare['status']) {
@@ -545,8 +667,28 @@ export const platformApi = {
   },
 
   cleanupAdminSquare(input: { dryRun?: boolean; limit?: number; prunePublished?: boolean } = {}) {
-    return request('/api/admin/square/cleanup', {
+    return request<AdminSquareCleanupResult>('/api/admin/square/cleanup', {
       method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
+  getAdminSquareConfig() {
+    return request<{ config: AdminSquareConfig }>('/api/admin/square/config')
+  },
+
+  testAdminSquareR2() {
+    return request<{ result: AdminSquareR2TestResult }>('/api/admin/square/test-r2', {
+      method: 'POST',
+    })
+  },
+
+  updateAdminSquareConfig(input: Partial<AdminSquareConfig> & {
+    squareAdminToken?: string
+    r2SecretKey?: string
+  }) {
+    return request<{ config: AdminSquareConfig }>('/api/admin/square/config', {
+      method: 'PATCH',
       body: JSON.stringify(input),
     })
   },
@@ -566,5 +708,9 @@ export const platformApi = {
       method: 'POST',
       body: JSON.stringify(input),
     })
+  },
+
+  getGenerationTask(taskId: string) {
+    return request<PlatformGenerationResult>(`/api/generations/${encodeURIComponent(taskId)}`)
   },
 }

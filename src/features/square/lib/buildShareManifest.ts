@@ -1,5 +1,6 @@
 import { getImageRecord } from '../../../lib/db'
 import { buildImageThumbnail } from '../../../lib/imagePreview'
+import { getUserFacingErrorMessage, platformApi } from '../../../lib/platformApi'
 import type { PromptLibraryItem, StoredImage, TaskParams, TaskRecord } from '../../../types'
 import { isTaskInRecycleBin, resolveTaskKind } from '../../../store/taskRecords'
 import { buildTaskLineage } from '../../../store/taskLineage'
@@ -132,11 +133,21 @@ async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
 }
 
 async function fetchRemoteImage(url: string): Promise<Blob> {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`读取远程图片失败：HTTP ${response.status}`)
+  try {
+    return await platformApi.fetchRemoteImage({ url })
+  } catch (proxyError) {
+    try {
+      const response = await fetch(url, { cache: 'no-store' })
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      return response.blob()
+    } catch (directError) {
+      const proxyMessage = getUserFacingErrorMessage(proxyError, '远程图片读取失败')
+      const directMessage = directError instanceof Error ? directError.message : String(directError)
+      throw new Error(`图片读取失败：${proxyMessage}。浏览器兜底读取错误：${directMessage}`)
+    }
   }
-  return response.blob()
 }
 
 async function readImageBlobForShare(record: StoredImage): Promise<Blob> {

@@ -34,8 +34,6 @@ services:
       DATABASE_URL: postgresql://gpt_image:gpt_image_password@postgres:5432/gpt_image_playground?schema=public
       PORT: "8787"
       FRONTEND_ORIGIN: http://localhost:8080,http://127.0.0.1:8080
-      SQUARE_API_URL: ${SQUARE_API_URL:-}
-      SQUARE_ADMIN_TOKEN: ${SQUARE_ADMIN_TOKEN:-}
     ports:
       - "8787:8787"
     volumes:

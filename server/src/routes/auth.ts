@@ -14,6 +14,11 @@ const credentialsSchema = z.object({
   password: z.string().min(8, '密码至少 8 位'),
 })
 
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, '请输入当前密码'),
+  newPassword: z.string().min(8, '新密码至少 8 位').max(128, '新密码最多 128 位'),
+})
+
 function publicUser(user: { id: string; email: string; role: string; status?: string; creditBalance: number }) {
   return {
     id: user.id,
@@ -110,6 +115,37 @@ router.post('/login', async (req, res, next) => {
     req.session.userId = loggedInUser.id
     await writeLoginLog(req, { email: loggedInUser.email, userId: loggedInUser.id, success: true, reason: 'login_success' })
     sendOk(res, { user: publicUser(loggedInUser) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/change-password', async (req, res, next) => {
+  try {
+    const sessionUser = await getSessionUser(req)
+    if (!sessionUser) throw new HttpError(401, 'unauthorized', '请先登录后再继续')
+
+    const input = changePasswordSchema.parse(req.body)
+    if (input.currentPassword === input.newPassword) {
+      throw new HttpError(400, 'same_password', '新密码不能和当前密码相同')
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: sessionUser.id },
+      select: { id: true, passwordHash: true },
+    })
+    if (!user) throw new HttpError(401, 'unauthorized', '请先登录后再继续')
+
+    const passwordMatched = await bcrypt.compare(input.currentPassword, user.passwordHash)
+    if (!passwordMatched) {
+      throw new HttpError(400, 'invalid_current_password', '当前密码不正确')
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await bcrypt.hash(input.newPassword, 12) },
+    })
+    sendOk(res)
   } catch (error) {
     next(error)
   }

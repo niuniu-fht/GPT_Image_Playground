@@ -6,8 +6,10 @@ import {
   shouldRetryImagesPlan,
   shouldRetryResponsesWithCompatibility,
 } from "../requestPlanner"
+import type { AppSettings } from "../../../types"
+import type { CallApiOptions, ResponsesInputImage } from "../types"
 
-function fakeSettings(overrides: Record<string, unknown> = {}) {
+function fakeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
   return {
     baseUrl: "https://api.example.com",
     apiKey: "sk-test",
@@ -20,16 +22,16 @@ function fakeSettings(overrides: Record<string, unknown> = {}) {
     apiProtocol: "responses",
     requestMode: "direct",
     ...overrides,
-  } as any
+  }
 }
 
-function fakeCallApiOptions(overrides: Record<string, unknown> = {}) {
+function fakeCallApiOptions(overrides: Partial<AppSettings> = {}): CallApiOptions {
   return {
     settings: fakeSettings(overrides),
     params: { n: 1, size: "1024x1024", quality: "high", output_format: "png", output_compression: null, moderation: "auto" },
     prompt: "test prompt",
-    editMaskDataUrl: null,
-  } as any
+    inputImageDataUrls: [],
+  }
 }
 
 describe("buildImagesRequestPlans", () => {
@@ -99,7 +101,8 @@ describe("shouldRetryResponsesWithCompatibility", () => {
 
 describe("buildResponsesRequestPlans", () => {
   it("generates plans without reference images", () => {
-    const plans = buildResponsesRequestPlans(fakeCallApiOptions(), [] as any)
+    const inputImages: ResponsesInputImage[] = []
+    const plans = buildResponsesRequestPlans(fakeCallApiOptions(), inputImages)
     expect(plans.length).toBeGreaterThan(0)
     expect(plans[0].id).toContain("official")
   })

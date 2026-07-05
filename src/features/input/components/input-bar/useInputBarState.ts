@@ -1,16 +1,14 @@
 import {
   type ClipboardEventHandler,
   useCallback,
-  useEffect,
   useState,
   type ChangeEventHandler,
-  type Dispatch,
   type DragEventHandler,
   type KeyboardEventHandler,
   type RefObject,
-  type SetStateAction,
 } from 'react'
-import { DEFAULT_PARAMS, openLightbox, resolveTaskParamSizeOrDefault, useStore, submitTask } from '../../../../store'
+import { openLightbox, resolveTaskParamSizeOrDefault, useStore, submitTask } from '../../../../store'
+import { resolveModelCostForSize } from '../../../../lib/modelCost'
 import {
   ALL_CATEGORY_FILTER,
   FAVORITES_CATEGORY_FILTER,
@@ -57,23 +55,13 @@ export interface ReferenceImagesSectionViewModel {
 }
 
 export interface ParamsSectionViewModel {
-  isMobile: boolean
-  mobileAdvancedParamsVisible: boolean
-  setMobileAdvancedParamsVisible: Dispatch<SetStateAction<boolean>>
   activeModelId: string | null
+  estimatedCost: number
   models: ModelConfig[]
   normalizedSize: string
   params: TaskParams
-  outputCompressionInput: string
-  nInput: string
-  selectClass: string
   onActiveModelChange: (modelId: string) => void
-  onOpenSizePicker: () => void
   onSetParams: (params: Partial<TaskParams>) => void
-  onOutputCompressionInputChange: (value: string) => void
-  onCommitOutputCompression: () => void
-  onNInputChange: (value: string) => void
-  onCommitN: () => void
 }
 
 export interface SubmitSectionViewModel {
@@ -112,15 +100,11 @@ export interface InputBarViewModel {
   isDragging: boolean
   atImageLimit: boolean
   mobileDrawerOpen: boolean
-  showSizePicker: boolean
-  sizePickerValue: string
   fileInputRef: RefObject<HTMLInputElement | null>
   inputContent: InputBarContentViewModel
   onOpenMobileDrawer: () => void
   onCloseMobileDrawer: () => void
   onFileUpload: ChangeEventHandler<HTMLInputElement>
-  onSelectSize: (size: string) => void
-  onCloseSizePicker: () => void
 }
 
 export function useInputBarState(): InputBarViewModel {
@@ -142,12 +126,6 @@ export function useInputBarState(): InputBarViewModel {
   const setConfirmDialog = useStore((state) => state.setConfirmDialog)
 
   // ===== Local state =====
-  const [mobileAdvancedParamsVisible, setMobileAdvancedParamsVisible] = useState(false)
-  const [showSizePicker, setShowSizePicker] = useState(false)
-  const [outputCompressionInput, setOutputCompressionInput] = useState(
-    params.output_compression == null ? '' : String(params.output_compression),
-  )
-  const [nInput, setNInput] = useState(String(params.n))
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
 
   // ===== Derived values =====
@@ -158,9 +136,9 @@ export function useInputBarState(): InputBarViewModel {
       ? '未分类'
       : resolveCategoryFilterName(activeCategoryFilter, categories)
   const promptHintText = isMobile
-    ? '先写主体需求，下面直接补充供应商、质量和尺寸'
+    ? '先写主体需求，下面选择比例和图片数量'
     : '桌面端支持 Ctrl+Enter 直接生成'
-  const estimatedCost = activeModel?.costCredits ?? 0
+  const estimatedCost = resolveModelCostForSize(activeModel, params.size) * Math.max(1, Math.floor(params.n))
   const creditBalance = currentUser?.creditBalance ?? 0
   const canSubmit =
     Boolean(prompt.trim() || inputImages.length) &&
@@ -176,48 +154,7 @@ export function useInputBarState(): InputBarViewModel {
   const promptPreview =
     normalizedPrompt.replace(/\s+/g, ' ').slice(0, 120) || '输入框已收起，点击展开继续编辑'
   const normalizedSize = resolveTaskParamSizeOrDefault(params.size)
-  const selectClass = `rounded-xl border border-gray-200/60 bg-white/50 px-3 text-[13px] transition-all duration-200 shadow-sm hover:bg-white dark:border-white/[0.08] dark:bg-white/[0.03] dark:hover:bg-white/[0.06] ${
-    isMobile ? 'py-2.5' : 'py-2'
-  }`
-
-  useEffect(() => {
-    setOutputCompressionInput(
-      params.output_compression == null ? '' : String(params.output_compression),
-    )
-  }, [params.output_compression])
-
-  useEffect(() => {
-    setNInput(String(params.n))
-  }, [params.n])
-
   // ===== Callbacks =====
-  const commitOutputCompression = useCallback(() => {
-    if (outputCompressionInput.trim() === '') {
-      setOutputCompressionInput('')
-      setParams({ output_compression: null })
-      return
-    }
-
-    const nextValue = Number(outputCompressionInput)
-    if (Number.isNaN(nextValue)) {
-      setOutputCompressionInput(
-        params.output_compression == null ? '' : String(params.output_compression),
-      )
-      return
-    }
-
-    setOutputCompressionInput(String(nextValue))
-    setParams({ output_compression: nextValue })
-  }, [outputCompressionInput, params.output_compression, setParams])
-
-  const commitN = useCallback(() => {
-    const nextValue = Number(nInput)
-    const normalizedValue =
-      nInput.trim() === '' ? DEFAULT_PARAMS.n : Number.isNaN(nextValue) ? params.n : nextValue
-    setNInput(String(normalizedValue))
-    setParams({ n: normalizedValue })
-  }, [nInput, params.n, setParams])
-
   const requestClearInputImages = useCallback(() => {
     setConfirmDialog({
       title: '清空参考图',
@@ -237,7 +174,6 @@ export function useInputBarState(): InputBarViewModel {
     normalizedPrompt,
     promptHintText,
     isMobile,
-    inputImageCount: inputImages.length,
     mobileDrawerOpen,
     onPromptChange: setPrompt,
   })
@@ -259,23 +195,13 @@ export function useInputBarState(): InputBarViewModel {
 
   // ===== Sub-ViewModel: ParamsSection =====
   const paramsSectionProps: ParamsSectionViewModel = {
-    isMobile,
-    mobileAdvancedParamsVisible,
-    setMobileAdvancedParamsVisible,
     activeModelId,
+    estimatedCost,
     models,
     normalizedSize,
     params,
-    outputCompressionInput,
-    nInput,
-    selectClass,
     onActiveModelChange: setActiveModelId,
-    onOpenSizePicker: () => setShowSizePicker(true),
     onSetParams: setParams,
-    onOutputCompressionInputChange: setOutputCompressionInput,
-    onCommitOutputCompression: commitOutputCompression,
-    onNInputChange: setNInput,
-    onCommitN: commitN,
   }
 
   // ===== Sub-ViewModel: SubmitSection =====
@@ -299,8 +225,6 @@ export function useInputBarState(): InputBarViewModel {
     isDragging,
     atImageLimit,
     mobileDrawerOpen,
-    showSizePicker,
-    sizePickerValue: params.size,
     fileInputRef,
     inputContent: {
       isMobile,
@@ -313,7 +237,5 @@ export function useInputBarState(): InputBarViewModel {
     onOpenMobileDrawer: () => setMobileDrawerOpen(true),
     onCloseMobileDrawer: () => setMobileDrawerOpen(false),
     onFileUpload,
-    onSelectSize: (size) => setParams({ size }),
-    onCloseSizePicker: () => setShowSizePicker(false),
   }
 }

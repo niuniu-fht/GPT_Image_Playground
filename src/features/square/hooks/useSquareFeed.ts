@@ -3,6 +3,7 @@ import type { SquareShareKind, SquareShareSummary } from '../../../types'
 import { isSquareApiConfigured, squareApiClient } from '../lib/squareApiClient'
 
 export type SquareFeedKind = SquareShareKind | 'mine'
+const SQUARE_FEED_PAGE_SIZE = 18
 
 interface UseSquareFeedOptions {
   kind: SquareFeedKind
@@ -34,12 +35,12 @@ export function useSquareFeed({ kind, query }: UseSquareFeedOptions) {
       const result = kind === 'mine'
         ? await squareApiClient.listMyShares({
             q: normalizedQuery,
-            limit: 30,
+            limit: SQUARE_FEED_PAGE_SIZE,
           })
         : await squareApiClient.listSquare({
             kind,
             q: normalizedQuery,
-            limit: 30,
+            limit: SQUARE_FEED_PAGE_SIZE,
           })
       setItems(result.items)
       setNextCursor(result.nextCursor)
@@ -62,13 +63,13 @@ export function useSquareFeed({ kind, query }: UseSquareFeedOptions) {
         ? await squareApiClient.listMyShares({
             q: normalizedQuery,
             cursor: nextCursor,
-            limit: 30,
+            limit: SQUARE_FEED_PAGE_SIZE,
           })
         : await squareApiClient.listSquare({
             kind,
             q: normalizedQuery,
             cursor: nextCursor,
-            limit: 30,
+            limit: SQUARE_FEED_PAGE_SIZE,
           })
       setItems((current) => [...current, ...result.items])
       setNextCursor(result.nextCursor)

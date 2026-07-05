@@ -1,24 +1,37 @@
+import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useStore } from '../../store'
 import { useCloseOnEscape } from '../../hooks/useCloseOnEscape'
 
 export default function ConfirmDialog() {
   const confirmDialog = useStore((s) => s.confirmDialog)
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
+  const [isConfirming, setIsConfirming] = useState(false)
+  const isConfirmingRef = useRef(false)
 
   const handleConfirm = async () => {
-    if (!confirmDialog) return
-    await confirmDialog.action()
-    setConfirmDialog(null)
+    if (!confirmDialog || isConfirmingRef.current) return
+    isConfirmingRef.current = true
+    setIsConfirming(true)
+    try {
+      await confirmDialog.action()
+      setConfirmDialog(null)
+    } finally {
+      isConfirmingRef.current = false
+      setIsConfirming(false)
+    }
   }
 
-  useCloseOnEscape(Boolean(confirmDialog), () => setConfirmDialog(null))
+  useCloseOnEscape(Boolean(confirmDialog) && !isConfirming, () => setConfirmDialog(null))
 
   if (!confirmDialog) return null
 
-  return (
+  const dialog = (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center p-4"
-      onClick={() => setConfirmDialog(null)}
+      className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
+      onClick={() => {
+        if (!isConfirming) setConfirmDialog(null)
+      }}
     >
       <div className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-md animate-overlay-in" />
       <div
@@ -32,6 +45,7 @@ export default function ConfirmDialog() {
         <div className="flex gap-2">
           <button
             onClick={() => setConfirmDialog(null)}
+            disabled={isConfirming}
             className="flex-1 py-2 rounded-lg border border-gray-200 dark:border-white/[0.08] text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/[0.06] transition"
           >
             取消
@@ -40,12 +54,15 @@ export default function ConfirmDialog() {
             onClick={() => {
               void handleConfirm()
             }}
-            className="flex-1 py-2 rounded-lg bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition"
+            disabled={isConfirming}
+            className="flex-1 py-2 rounded-lg bg-red-500 text-white text-sm font-medium hover:bg-red-600 transition disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {confirmDialog.confirmText || '确认'}
+            {isConfirming ? '处理中...' : confirmDialog.confirmText || '确认'}
           </button>
         </div>
       </div>
     </div>
   )
+
+  return createPortal(dialog, document.body)
 }

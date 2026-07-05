@@ -2,6 +2,7 @@ import { ApiError, badRequest, forbidden, unauthorized } from '../errors'
 import { getBearerToken } from '../request'
 import { jsonOk } from '../response'
 import { cleanupSquareStorage, getSquareUsage } from '../storage'
+import { buildAssetUrl } from '../assetUrls'
 import type { RequestContext, ShareKind, ShareStatus } from '../types'
 
 function assertAdmin(ctx: RequestContext): void {
@@ -46,6 +47,16 @@ function readLimitParam(value: string | null): number {
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || parsed <= 0) return 30
   return Math.min(Math.floor(parsed), 100)
+}
+
+function readPageParam(value: string | null): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return 1
+  return Math.floor(parsed)
+}
+
+function readPageSizeParam(searchParams: URLSearchParams): number {
+  return readLimitParam(searchParams.get('pageSize') ?? searchParams.get('limit'))
 }
 
 function readShareStatus(value: unknown): ShareStatus {
@@ -106,7 +117,9 @@ export async function handleRunAdminCleanup(ctx: RequestContext): Promise<Respon
 
 export async function handleListAdminShares(ctx: RequestContext, url: URL): Promise<Response> {
   assertAdmin(ctx)
-  const limit = readLimitParam(url.searchParams.get('limit'))
+  const page = readPageParam(url.searchParams.get('page'))
+  const pageSize = readPageSizeParam(url.searchParams)
+  const offset = (page - 1) * pageSize
   const status = url.searchParams.get('status')
   const kind = url.searchParams.get('kind')
   const q = url.searchParams.get('q')?.trim().toLowerCase() ?? ''
@@ -131,8 +144,15 @@ export async function handleListAdminShares(ctx: RequestContext, url: URL): Prom
     params.push(`%${q}%`, `%${q}%`, `%${q}%`)
   }
 
-  params.push(limit)
   const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  const totalRow = await ctx.env.DB.prepare(
+    `SELECT COUNT(*) AS total
+     FROM shares s
+     ${whereSql}`,
+  )
+    .bind(...params)
+    .first<{ total: number }>()
+
   const rows = await ctx.env.DB.prepare(
     `SELECT
        s.id,
@@ -148,15 +168,17 @@ export async function handleListAdminShares(ctx: RequestContext, url: URL): Prom
        s.created_at,
        s.updated_at,
        a.id AS cover_asset_id,
+       a.r2_key AS cover_r2_key,
+       a.thumb_r2_key AS cover_thumb_r2_key,
        a.width AS cover_width,
        a.height AS cover_height
      FROM shares s
      LEFT JOIN share_assets a ON a.id = s.cover_asset_id
      ${whereSql}
      ORDER BY s.updated_at DESC, s.created_at DESC
-     LIMIT ?`,
+     LIMIT ? OFFSET ?`,
   )
-    .bind(...params)
+    .bind(...params, pageSize, offset)
     .all<{
       id: string
       publisher_id: string
@@ -171,12 +193,17 @@ export async function handleListAdminShares(ctx: RequestContext, url: URL): Prom
       created_at: number
       updated_at: number
       cover_asset_id: string | null
+      cover_r2_key: string | null
+      cover_thumb_r2_key: string | null
       cover_width: number | null
       cover_height: number | null
     }>()
 
   return jsonOk(
     {
+      total: totalRow?.total ?? 0,
+      page,
+      pageSize,
       items: rows.results.map((row) => ({
         id: row.id,
         publisherId: row.publisher_id,
@@ -193,8 +220,8 @@ export async function handleListAdminShares(ctx: RequestContext, url: URL): Prom
         coverAsset: row.cover_asset_id
           ? {
               assetId: row.cover_asset_id,
-              thumbUrl: `/api/v1/assets/${row.cover_asset_id}?variant=thumb`,
-              originalUrl: `/api/v1/assets/${row.cover_asset_id}?variant=original`,
+              thumbUrl: buildAssetUrl(ctx.env, row.cover_asset_id, row.cover_thumb_r2_key ?? row.cover_r2_key, 'thumb'),
+              originalUrl: buildAssetUrl(ctx.env, row.cover_asset_id, row.cover_r2_key, 'original'),
               width: row.cover_width,
               height: row.cover_height,
             }

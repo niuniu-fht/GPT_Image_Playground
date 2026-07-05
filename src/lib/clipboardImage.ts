@@ -1,11 +1,4 @@
-async function fetchImageBlob(src: string): Promise<Blob> {
-  const response = await fetch(src)
-  if (!response.ok) {
-    throw new Error(`图片读取失败：HTTP ${response.status}`)
-  }
-
-  return response.blob()
-}
+import { fetchImageBlobWithFriendlyError } from './remoteImageAccess'
 
 function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -97,7 +90,7 @@ export async function copyImageToClipboard(src: string): Promise<void> {
     throw new Error('当前浏览器不支持复制图片到剪贴板')
   }
 
-  const sourceBlob = await fetchImageBlob(src)
+  const sourceBlob = await fetchImageBlobWithFriendlyError(src)
   const sourceMimeType = sourceBlob.type || 'application/octet-stream'
   const clipboardBlob =
     sourceMimeType === 'image/png' && canWriteClipboardImage(sourceMimeType)

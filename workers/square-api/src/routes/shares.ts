@@ -12,6 +12,7 @@ import {
 import { forbidden, notFound, validationFailed } from '../errors'
 import { getClientIp } from '../request'
 import { jsonOk } from '../response'
+import { buildAssetUrl } from '../assetUrls'
 import {
   assertSquareCapacityAvailable,
   getUploadedAssetsStorageBytes,
@@ -44,6 +45,47 @@ function getCoverAssetId(rows: StoredAssetRow[]): string | null {
 
 function buildR2Key(shareId: string, assetId: string, variant: 'original' | 'thumb'): string {
   return `shares/${shareId}/assets/${assetId}/${variant}`
+}
+
+function buildStoredAssetResponse(ctx: RequestContext, row: StoredAssetRow) {
+  return {
+    assetId: row.id,
+    clientAssetId: row.clientAssetId,
+    role: row.role,
+    thumbUrl: buildAssetUrl(ctx.env, row.id, row.thumbR2Key ?? row.r2Key, 'thumb'),
+    originalUrl: buildAssetUrl(ctx.env, row.id, row.r2Key, 'original'),
+    width: row.width,
+    height: row.height,
+  }
+}
+
+async function listStoredAssetResponses(ctx: RequestContext, shareId: string) {
+  const rows = await ctx.env.DB.prepare(
+    `SELECT id, client_asset_id, role, r2_key, thumb_r2_key, width, height
+     FROM share_assets
+     WHERE share_id = ?
+     ORDER BY created_at ASC`,
+  )
+    .bind(shareId)
+    .all<{
+      id: string
+      client_asset_id: string
+      role: 'output' | 'origin_input'
+      r2_key: string
+      thumb_r2_key: string | null
+      width: number | null
+      height: number | null
+    }>()
+
+  return rows.results.map((row) => ({
+    assetId: row.id,
+    clientAssetId: row.client_asset_id,
+    role: row.role,
+    thumbUrl: buildAssetUrl(ctx.env, row.id, row.thumb_r2_key ?? row.r2_key, 'thumb'),
+    originalUrl: buildAssetUrl(ctx.env, row.id, row.r2_key, 'original'),
+    width: row.width,
+    height: row.height,
+  }))
 }
 
 async function uploadAssets(
@@ -205,14 +247,17 @@ async function storeShare(
     manifest: ShareManifest
     assets: UploadedAsset[]
   },
-): Promise<string> {
+): Promise<{ id: string; assets: ReturnType<typeof buildStoredAssetResponse>[] }> {
   const existingShare = await findExistingShareByRequest(
     ctx.env,
     input.publisherId,
     input.manifest.clientRequestId,
   )
   if (existingShare) {
-    return existingShare.id
+    return {
+      id: existingShare.id,
+      assets: await listStoredAssetResponses(ctx, existingShare.id),
+    }
   }
 
   await assertQuotaAvailable(ctx.env, input.publisherId, input.manifest.kind)
@@ -242,7 +287,10 @@ async function storeShare(
         now,
       }),
     )
-    return shareId
+    return {
+      id: shareId,
+      assets: uploadedRows.map((row) => buildStoredAssetResponse(ctx, row)),
+    }
   } catch (error) {
     await deleteUploadedAssetsBestEffort(ctx, uploadedRows)
     if (quotaConsumed) {
@@ -274,13 +322,13 @@ export async function handleCreateShare(ctx: RequestContext): Promise<Response> 
 
   const { manifest, assets } = await readCreateShareRequest(ctx.env, ctx.request)
   await validateTurnstileIfNeeded(ctx, manifest.turnstileToken)
-  const shareId = await storeShare(ctx, {
+  const share = await storeShare(ctx, {
     publisherId: publisher.id,
     manifest,
     assets,
   })
 
-  return jsonOk({ id: shareId }, { status: 201 }, ctx.corsHeaders)
+  return jsonOk(share, { status: 201 }, ctx.corsHeaders)
 }
 
 export async function handleGetShare(ctx: RequestContext, shareId: string): Promise<Response> {
@@ -318,7 +366,7 @@ export async function handleGetShare(ctx: RequestContext, shareId: string): Prom
   }
 
   const assets = await ctx.env.DB.prepare(
-    `SELECT id, client_asset_id, role, width, height
+    `SELECT id, client_asset_id, role, r2_key, thumb_r2_key, width, height
      FROM share_assets
      WHERE share_id = ?
      ORDER BY created_at ASC`,
@@ -328,6 +376,8 @@ export async function handleGetShare(ctx: RequestContext, shareId: string): Prom
       id: string
       client_asset_id: string
       role: 'output' | 'origin_input'
+      r2_key: string
+      thumb_r2_key: string | null
       width: number | null
       height: number | null
     }>()
@@ -341,8 +391,8 @@ export async function handleGetShare(ctx: RequestContext, shareId: string): Prom
     assetId: asset.id,
     clientAssetId: asset.client_asset_id,
     role: asset.role,
-    thumbUrl: `/api/v1/assets/${asset.id}?variant=thumb`,
-    originalUrl: `/api/v1/assets/${asset.id}?variant=original`,
+    thumbUrl: buildAssetUrl(ctx.env, asset.id, asset.thumb_r2_key ?? asset.r2_key, 'thumb'),
+    originalUrl: buildAssetUrl(ctx.env, asset.id, asset.r2_key, 'original'),
     width: asset.width,
     height: asset.height,
   }))

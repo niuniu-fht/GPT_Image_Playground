@@ -1,4 +1,3 @@
-import SizePickerModal from '../size-picker/SizePickerModal'
 import DragOverlay from './DragOverlay'
 import InputPanelContent from './InputPanelContent'
 import MobilePromptDrawer from './MobilePromptDrawer'
@@ -12,15 +11,11 @@ export default function InputBar() {
     isDragging,
     atImageLimit,
     mobileDrawerOpen,
-    showSizePicker,
-    sizePickerValue,
     fileInputRef,
     inputContent,
     onOpenMobileDrawer,
     onCloseMobileDrawer,
     onFileUpload,
-    onSelectSize,
-    onCloseSizePicker,
   } = useInputBarState()
 
   return (
@@ -42,14 +37,6 @@ export default function InputBar() {
       </MobilePromptDrawer>
 
       <DragOverlay visible={isDragging} atImageLimit={atImageLimit} />
-
-      {showSizePicker && (
-        <SizePickerModal
-          currentSize={sizePickerValue}
-          onSelect={onSelectSize}
-          onClose={onCloseSizePicker}
-        />
-      )}
 
       <input
         ref={fileInputRef}

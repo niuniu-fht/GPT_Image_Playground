@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  AppThemeMode,
   AppView,
   CategoryConfig,
   GalleryDisplayMode,
@@ -19,6 +20,8 @@ import type {
 export interface AppState {
   appView: AppView
   setAppView: (view: AppView) => void
+  themeMode: AppThemeMode
+  setThemeMode: (mode: AppThemeMode) => void
 
   settings: AppSettings
   providers: ProviderConfig[]
@@ -120,6 +123,7 @@ export type PersistedAppStateSnapshot = Partial<
     | 'promptLibrary'
     | 'galleryDisplayMode'
     | 'appView'
+    | 'themeMode'
     | 'activeModelId'
   >
 > &

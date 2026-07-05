@@ -48,7 +48,7 @@ export default function TaskCardPreviewStatusLayer({
   if (isRunning) {
     return thumbSrc ? (
       <>
-        <img src={thumbSrc} className={`h-full w-full ${imageFitClass}`} loading="lazy" alt="" />
+        <img src={thumbSrc} className={`h-full w-full select-none ${imageFitClass}`} loading="lazy" draggable={false} alt="" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/[0.65] via-black/10 to-black/[0.35]" />
         <div className="absolute inset-0 bg-black/30 opacity-0 transition duration-150 group-hover/task-preview:opacity-100" />
         <div className={`absolute inset-x-0 bottom-2 flex flex-col items-center gap-1 px-2 text-white ${runningStatusContentClass}`}>
@@ -89,7 +89,7 @@ export default function TaskCardPreviewStatusLayer({
   if (isExceptional) {
     return hasGeneratedOutputs && thumbSrc ? (
       <>
-        <img src={thumbSrc} className={`h-full w-full ${imageFitClass}`} loading="lazy" alt="" />
+        <img src={thumbSrc} className={`h-full w-full select-none ${imageFitClass}`} loading="lazy" draggable={false} alt="" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/[0.15] to-black/[0.35]" />
         <div className="absolute inset-x-0 bottom-2 flex flex-col items-center gap-1 px-2 text-white">
           <span
@@ -141,7 +141,7 @@ export default function TaskCardPreviewStatusLayer({
   if (task.status === 'done' && thumbSrc) {
     return (
       <>
-        <img src={thumbSrc} className={`h-full w-full ${imageFitClass}`} loading="lazy" alt="" />
+        <img src={thumbSrc} className={`h-full w-full select-none ${imageFitClass}`} loading="lazy" draggable={false} alt="" />
         {task.outputImages.length > 1 && (
           <span className="absolute bottom-2 right-2 rounded-full bg-black/[0.65] px-2 py-0.5 text-[11px] font-medium text-white">
             {task.outputImages.length}

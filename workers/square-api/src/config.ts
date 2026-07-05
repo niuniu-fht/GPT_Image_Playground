@@ -23,6 +23,9 @@ export interface SquareConfig {
   cleanupHiddenRetentionDays: number
   cleanupPublishedMediaRetentionDays: number
   cleanupPrunePublished: boolean
+  publicAssetBaseUrl: string
+  r2Endpoint: string
+  r2Bucket: string
 }
 
 const SHARE_STATUSES = new Set<ShareStatus>([
@@ -86,5 +89,8 @@ export function getConfig(env: Env): SquareConfig {
     cleanupHiddenRetentionDays: readNumber(env.CLEANUP_HIDDEN_RETENTION_DAYS, 30, 0),
     cleanupPublishedMediaRetentionDays: readNumber(env.CLEANUP_PUBLISHED_MEDIA_RETENTION_DAYS, 90, 0),
     cleanupPrunePublished: readBoolean(env.CLEANUP_PRUNE_PUBLISHED, true),
+    publicAssetBaseUrl: (env.PUBLIC_ASSET_BASE_URL ?? '').trim().replace(/\/+$/, ''),
+    r2Endpoint: (env.R2_ENDPOINT ?? '').trim().replace(/\/+$/, ''),
+    r2Bucket: (env.R2_BUCKET ?? '').trim(),
   }
 }

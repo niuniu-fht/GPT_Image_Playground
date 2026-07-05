@@ -1,3 +1,3 @@
 export { default as AuthModal } from './AuthModal'
-export { default as AdminConsole } from './AdminConsole'
+export { AdminConsoleLazy as AdminConsole } from './AdminConsoleLazy'
 export { default as AnnouncementStrip } from './AnnouncementStrip'

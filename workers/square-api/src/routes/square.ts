@@ -1,6 +1,7 @@
 import { badRequest } from '../errors'
 import { getPublisherByRequest } from '../db'
 import { jsonOk } from '../response'
+import { buildAssetUrl } from '../assetUrls'
 import type { RequestContext, ShareKind } from '../types'
 
 const FEED_LIMIT_MAX = 60
@@ -73,6 +74,8 @@ export async function handleListSquare(ctx: RequestContext, url: URL): Promise<R
        s.created_at,
        s.view_count,
        a.id AS cover_asset_id,
+       a.r2_key AS cover_r2_key,
+       a.thumb_r2_key AS cover_thumb_r2_key,
        a.width AS cover_width,
        a.height AS cover_height
      FROM shares s
@@ -92,6 +95,8 @@ export async function handleListSquare(ctx: RequestContext, url: URL): Promise<R
       created_at: number
       view_count: number
       cover_asset_id: string | null
+      cover_r2_key: string | null
+      cover_thumb_r2_key: string | null
       cover_width: number | null
       cover_height: number | null
     }>()
@@ -110,8 +115,8 @@ export async function handleListSquare(ctx: RequestContext, url: URL): Promise<R
     coverAsset: row.cover_asset_id
       ? {
           assetId: row.cover_asset_id,
-          thumbUrl: `/api/v1/assets/${row.cover_asset_id}?variant=thumb`,
-          originalUrl: `/api/v1/assets/${row.cover_asset_id}?variant=original`,
+          thumbUrl: buildAssetUrl(ctx.env, row.cover_asset_id, row.cover_thumb_r2_key ?? row.cover_r2_key, 'thumb'),
+          originalUrl: buildAssetUrl(ctx.env, row.cover_asset_id, row.cover_r2_key, 'original'),
           width: row.cover_width,
           height: row.cover_height,
         }
@@ -158,6 +163,8 @@ export async function handleListMyShares(ctx: RequestContext, url: URL): Promise
        s.created_at,
        s.view_count,
        a.id AS cover_asset_id,
+       a.r2_key AS cover_r2_key,
+       a.thumb_r2_key AS cover_thumb_r2_key,
        a.width AS cover_width,
        a.height AS cover_height
      FROM shares s
@@ -177,6 +184,8 @@ export async function handleListMyShares(ctx: RequestContext, url: URL): Promise
       created_at: number
       view_count: number
       cover_asset_id: string | null
+      cover_r2_key: string | null
+      cover_thumb_r2_key: string | null
       cover_width: number | null
       cover_height: number | null
     }>()
@@ -195,8 +204,8 @@ export async function handleListMyShares(ctx: RequestContext, url: URL): Promise
     coverAsset: row.cover_asset_id
       ? {
           assetId: row.cover_asset_id,
-          thumbUrl: `/api/v1/assets/${row.cover_asset_id}?variant=thumb`,
-          originalUrl: `/api/v1/assets/${row.cover_asset_id}?variant=original`,
+          thumbUrl: buildAssetUrl(ctx.env, row.cover_asset_id, row.cover_thumb_r2_key ?? row.cover_r2_key, 'thumb'),
+          originalUrl: buildAssetUrl(ctx.env, row.cover_asset_id, row.cover_r2_key, 'original'),
           width: row.cover_width,
           height: row.cover_height,
         }

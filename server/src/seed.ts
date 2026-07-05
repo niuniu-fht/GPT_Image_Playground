@@ -1,11 +1,25 @@
 import bcrypt from 'bcryptjs'
 import { prisma } from './prisma.js'
-import { defaultPlatformSettings, upsertPlatformSettings } from './settings.js'
+import { defaultPlatformSettings, seedMissingPlatformSettings } from './settings.js'
+import { defaultSquareRuntimeConfig, seedMissingSquareRuntimeConfig } from './squareConfig.js'
 
 export async function seedDatabase() {
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com'
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin123456'
-  await upsertPlatformSettings(defaultPlatformSettings)
+  const [existingUsers, existingModels, existingSquareSettings] = await Promise.all([
+    prisma.user.count(),
+    prisma.modelConfig.count(),
+    prisma.platformSetting.count({ where: { key: { startsWith: 'square.' } } }),
+  ])
+
+  if (existingUsers === 0 && existingModels === 0 && existingSquareSettings === 0) {
+    console.log('[seed] empty database detected; initializing default admin, models, and square settings.')
+  } else {
+    console.log(`[seed] existing data detected: users=${existingUsers}, models=${existingModels}, squareSettings=${existingSquareSettings}. Defaults will not delete custom models or overwrite square settings.`)
+  }
+
+  await seedMissingPlatformSettings(defaultPlatformSettings)
+  await seedMissingSquareRuntimeConfig(defaultSquareRuntimeConfig)
 
   const upstream = await prisma.upstreamProvider.upsert({
     where: { id: 'default-openai' },
@@ -34,6 +48,8 @@ export async function seedDatabase() {
       description: '近乎完美的文本、4K、生产级图像生成。',
       icon: 'openai',
       costCredits: 3,
+      costCredits2K: 6,
+      costCredits4K: 12,
       upstreamModel: 'gpt-image-2',
       upstreamProviderId: upstream.id,
       apiProtocol: 'images',
@@ -52,6 +68,8 @@ export async function seedDatabase() {
       description: '快速且精准的图像编辑。',
       icon: 'banana',
       costCredits: 4,
+      costCredits2K: 8,
+      costCredits4K: 16,
       upstreamModel: 'gpt-image-2',
       upstreamProviderId: upstream.id,
       apiProtocol: 'images',
@@ -70,6 +88,8 @@ export async function seedDatabase() {
       description: '专业级文本图像生成。',
       icon: 'banana',
       costCredits: 15,
+      costCredits2K: 30,
+      costCredits4K: 60,
       upstreamModel: 'gpt-image-2',
       upstreamProviderId: upstream.id,
       apiProtocol: 'images',

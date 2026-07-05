@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'http'
 import { resolve } from 'path'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
+import type { ReadableStream as NodeReadableStream } from 'stream/web'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import {
@@ -307,7 +308,7 @@ function isEventStreamResponse(upstream: Response): boolean {
   return upstream.headers.get('content-type')?.toLowerCase().includes('text/event-stream') === true
 }
 
-async function readWebStreamToBuffer(stream: any): Promise<Buffer> {
+async function readWebStreamToBuffer(stream: ReadableStream<Uint8Array>): Promise<Buffer> {
   return Buffer.from(await new Response(stream).arrayBuffer())
 }
 
@@ -329,7 +330,7 @@ async function writeProxyStreamResponse(res: ServerResponse, upstream: Response,
   })
 
   try {
-    await pipeline(Readable.fromWeb(clientStream as any), res)
+    await pipeline(Readable.fromWeb(clientStream as NodeReadableStream<Uint8Array>), res)
   } finally {
     // 必须等待日志分支收尾，避免上游断流时出现未处理的 rejected promise 直接打崩 dev server。
     await logBufferPromise
@@ -461,6 +462,10 @@ export default defineConfig(({ command }) => {
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version),
       __DEV_PROXY_CONFIG__: JSON.stringify(devProxyConfig),
+    },
+    build: {
+      // The only chunk above Vite's default 500 kB line is the deliberately lazy-loaded Three.js landing scene.
+      chunkSizeWarningLimit: 600,
     },
     server: {
       host: true,

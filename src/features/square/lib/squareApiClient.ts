@@ -7,6 +7,7 @@ import type {
   SquareShareSummary,
 } from '../../../types'
 import { readSquareIdentity, saveSquareIdentity } from './squareIdentity'
+import { SQUARE_MAX_REQUEST_BYTES } from './squareLimits'
 
 export interface SquareCreateShareAssetInput {
   clientAssetId: string
@@ -48,8 +49,10 @@ type ApiEnvelope<T> =
       }
     }
 
+const MULTIPART_FIELD_OVERHEAD_BYTES = 512
+
 function getSquareApiBaseUrl(): string {
-  return (import.meta.env.VITE_SQUARE_API_URL ?? '').trim().replace(/\/+$/, '')
+  return ''
 }
 
 function buildQuery(input: Record<string, string | number | null | undefined>): string {
@@ -75,19 +78,32 @@ function normalizeEnvelope<T>(value: unknown): ApiEnvelope<T> {
   throw new Error('广场接口返回缺少 ok 字段')
 }
 
+function resolveSquareHttpErrorMessage(status: number): string {
+  if (status === 401) return '广场登录状态已失效，请重试'
+  if (status === 403) return '当前没有权限执行这个广场操作'
+  if (status === 413) return '发布内容太大，请减少图片数量或压缩后再试'
+  if (status >= 500) return '广场服务暂时不可用，请稍后重试'
+  return `广场接口请求失败：HTTP ${status}`
+}
+
 async function readJsonEnvelope<T>(response: Response): Promise<T> {
-  const payload = normalizeEnvelope<T>(await response.json())
+  let rawPayload: unknown
+  try {
+    rawPayload = await response.json()
+  } catch {
+    throw new Error(resolveSquareHttpErrorMessage(response.status))
+  }
+
+  const payload = normalizeEnvelope<T>(rawPayload)
   if (!payload.ok) {
-    throw new Error(payload.error?.message || `广场接口请求失败：HTTP ${response.status}`)
+    throw new Error(payload.error?.message || resolveSquareHttpErrorMessage(response.status))
   }
 
   return payload.data
 }
 
 function assertConfigured(baseUrl: string) {
-  if (!baseUrl) {
-    throw new Error('尚未配置广场 API 地址，请设置 VITE_SQUARE_API_URL')
-  }
+  void baseUrl
 }
 
 function createAssetFileName(clientAssetId: string, variant: 'original' | 'thumb', blob: Blob): string {
@@ -100,6 +116,34 @@ function createAssetFileName(clientAssetId: string, variant: 'original' | 'thumb
   return `${clientAssetId}-${variant}.${ext}`
 }
 
+function estimateShareRequestBytes(input: SquareCreateShareInput): number {
+  const manifest = JSON.stringify(input.manifest)
+  const manifestBytes = new Blob([manifest]).size
+  const assetBytes = input.assets.reduce(
+    (total, asset) =>
+      total +
+      asset.original.size +
+      asset.thumbnail.size +
+      MULTIPART_FIELD_OVERHEAD_BYTES * 2,
+    0,
+  )
+
+  return manifestBytes + assetBytes + MULTIPART_FIELD_OVERHEAD_BYTES
+}
+
+function formatMegabytes(bytes: number): string {
+  return `${Math.ceil(bytes / 1024 / 1024)} MB`
+}
+
+function assertShareRequestSize(input: SquareCreateShareInput) {
+  const estimatedBytes = estimateShareRequestBytes(input)
+  if (estimatedBytes <= SQUARE_MAX_REQUEST_BYTES) return
+
+  throw new Error(
+    `发布内容约 ${formatMegabytes(estimatedBytes)}，超过 ${formatMegabytes(SQUARE_MAX_REQUEST_BYTES)} 限制。请减少任务链图片数量或压缩图片后再发布。`,
+  )
+}
+
 class HttpSquareApiClient implements SquareApiClient {
   private readonly baseUrl: string
 
@@ -108,7 +152,7 @@ class HttpSquareApiClient implements SquareApiClient {
   }
 
   isConfigured(): boolean {
-    return Boolean(this.baseUrl)
+    return true
   }
 
   resolveUrl(pathOrUrl: string): string {
@@ -155,6 +199,7 @@ class HttpSquareApiClient implements SquareApiClient {
 
   async createShare(input: SquareCreateShareInput): Promise<SquareCreateShareResult> {
     assertConfigured(this.baseUrl)
+    assertShareRequestSize(input)
     const identity = await this.ensureIdentity()
     const form = new FormData()
     form.append('manifest', JSON.stringify(input.manifest))

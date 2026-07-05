@@ -1,5 +1,6 @@
 import type { AdminAuditLog } from '../../../types'
 import {
+  AdminTableShell,
   EmptyState,
   formatJson,
   formatTime,
@@ -123,13 +124,12 @@ export function AuditSection({
         <StatCard label="广场操作" value={squareActionCount} hint="当前页内容审核动作" />
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
-        <div className="border-b border-gray-100 bg-white px-4 py-2 text-xs text-gray-400 dark:border-white/[0.06] dark:bg-transparent md:hidden">
-          横向滑动查看更多审计字段和操作
-        </div>
-        <div className="overflow-x-auto">
-          <div className="min-w-[920px]">
-            <div className="grid grid-cols-[1.1fr_1.2fr_1fr_120px_150px_100px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.04]">
+      <AdminTableShell
+        mobileHint="横向滑动查看更多审计字段和操作"
+        footer={<PaginationBar page={auditPage} pageSize={pageSize} total={auditTotal} onPageChange={setAuditPage} />}
+      >
+        <div className="min-w-[920px]">
+            <div className="sticky top-0 z-20 grid grid-cols-[1.1fr_1.2fr_1fr_120px_150px_100px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
               <span>动作</span>
               <span>目标</span>
               <span>操作者</span>
@@ -156,10 +156,8 @@ export function AuditSection({
               </div>
             ))}
             {!auditLogs.length && <EmptyState text="暂无审计日志" />}
-          </div>
         </div>
-        <PaginationBar page={auditPage} pageSize={pageSize} total={auditTotal} onPageChange={setAuditPage} />
-      </div>
+      </AdminTableShell>
     </SectionShell>
   )
 }

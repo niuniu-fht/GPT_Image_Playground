@@ -23,6 +23,9 @@ export interface Env {
   CLEANUP_HIDDEN_RETENTION_DAYS?: string
   CLEANUP_PUBLISHED_MEDIA_RETENTION_DAYS?: string
   CLEANUP_PRUNE_PUBLISHED?: string
+  PUBLIC_ASSET_BASE_URL?: string
+  R2_ENDPOINT?: string
+  R2_BUCKET?: string
   TOKEN_HASH_SECRET?: string
   TURNSTILE_SECRET_KEY?: string
   ADMIN_TOKEN?: string

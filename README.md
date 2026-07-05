@@ -198,6 +198,7 @@ workers/square-api
 - 本地代理模式会把成功与失败请求分别记录到开发机的 `logs/proxy-success.jsonl` 与 `logs/proxy-error.jsonl`。
 - 支持静态部署。
 - 提供 `deploy/` 下的 Docker 与 Nginx 相关文件。
+- 图片发布可能携带多张原图，Docker 内置 Nginx 已配置 `client_max_body_size 300m;`；若前面还有宝塔、1Panel、云负载均衡或宿主机 Nginx，也需要在最外层同步放开请求体大小，否则会直接返回 `413 Request Entity Too Large`。
 - 提供 `manifest.webmanifest` 与 `sw.js`，具备基础 PWA 能力。
 
 ## 技术栈

@@ -44,6 +44,9 @@
 		"CLEANUP_DELETED_RETENTION_DAYS": "1",
 		"CLEANUP_HIDDEN_RETENTION_DAYS": "30",
 		"CLEANUP_PUBLISHED_MEDIA_RETENTION_DAYS": "90",
-		"CLEANUP_PRUNE_PUBLISHED": "true"
+		"CLEANUP_PRUNE_PUBLISHED": "true",
+		"PUBLIC_ASSET_BASE_URL": "https://assets.example.com",
+		"R2_ENDPOINT": "https://<account-id>.r2.cloudflarestorage.com",
+		"R2_BUCKET": "gpt-image-square-images"
 	}
 }
