@@ -139,7 +139,7 @@ export async function executeTask(taskId: string, requestSettings: AppSettings) 
 
     if (result.responseMeta?.squareUploadError) {
       console.warn('[square] generated image upload failed', result.responseMeta.squareUploadError)
-      useStore.getState().showToast('生成完成，但云端存储同步失败，请联系管理员检查 R2 配置', 'error')
+      useStore.getState().showToast('生成完成，但图片云端同步失败，原图已保留；请稍后重试或联系管理员', 'error')
       return
     }
 

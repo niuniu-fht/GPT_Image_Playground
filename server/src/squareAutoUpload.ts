@@ -1,5 +1,6 @@
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import sharp from 'sharp'
+import type { Metadata } from 'sharp'
 import { prisma } from './prisma.js'
 import { getSquareRuntimeConfig, type SquareRuntimeConfig } from './squareConfig.js'
 
@@ -83,7 +84,9 @@ function normalizeTitle(prompt: string): string {
 function mimeToExtension(mimeType: string): string {
   const normalized = mimeType.toLowerCase()
   if (normalized.includes('jpeg') || normalized.includes('jpg')) return 'jpg'
+  if (normalized.includes('avif')) return 'avif'
   if (normalized.includes('webp')) return 'webp'
+  if (normalized.includes('gif')) return 'gif'
   return 'png'
 }
 
@@ -130,8 +133,10 @@ async function imageToBuffer(image: GeneratedSquareImage): Promise<{ buffer: Buf
   if (/^data:/i.test(image.dataUrl)) {
     const response = await fetch(image.dataUrl)
     const arrayBuffer = await response.arrayBuffer()
-    const mimeType = image.mimeType || response.headers.get('content-type') || 'image/png'
-    return { buffer: Buffer.from(arrayBuffer), mimeType }
+    const dataUrlMime = image.dataUrl.match(/^data:([^;,]+)/i)?.[1]
+    const buffer = Buffer.from(arrayBuffer)
+    const mimeType = normalizeDownloadedMimeType(image.mimeType || dataUrlMime || response.headers.get('content-type'), buffer)
+    return { buffer, mimeType }
   }
 
   const response = await fetch(image.dataUrl)
@@ -139,9 +144,50 @@ async function imageToBuffer(image: GeneratedSquareImage): Promise<{ buffer: Buf
     throw new Error(`下载生成图片失败：HTTP ${response.status}`)
   }
   const arrayBuffer = await response.arrayBuffer()
+  const buffer = Buffer.from(arrayBuffer)
   return {
-    buffer: Buffer.from(arrayBuffer),
-    mimeType: image.mimeType || response.headers.get('content-type') || 'image/png',
+    buffer,
+    mimeType: normalizeDownloadedMimeType(image.mimeType || response.headers.get('content-type'), buffer),
+  }
+}
+
+function normalizeDownloadedMimeType(rawMimeType: string | null | undefined, buffer: Buffer): string {
+  const normalized = rawMimeType?.split(';')[0]?.trim().toLowerCase() || ''
+  const sniffed = sniffImageMimeType(buffer)
+  if (sniffed) return sniffed
+  if (normalized.startsWith('image/')) return normalized
+
+  const preview = buffer.subarray(0, 80).toString('utf8').replace(/\s+/g, ' ').trim()
+  throw new Error(`生成图片源不是可识别图片，content-type=${normalized || 'unknown'}${preview ? `，内容开头=${preview}` : ''}`)
+}
+
+function sniffImageMimeType(buffer: Buffer): string | null {
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return 'image/png'
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg'
+  }
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') {
+    return 'image/webp'
+  }
+  if (buffer.length >= 6) {
+    const header = buffer.subarray(0, 6).toString('ascii')
+    if (header === 'GIF87a' || header === 'GIF89a') return 'image/gif'
+  }
+  if (buffer.length >= 12 && buffer.subarray(4, 8).toString('ascii') === 'ftyp') {
+    const brand = buffer.subarray(8, 12).toString('ascii')
+    if (brand === 'avif' || brand === 'avis') return 'image/avif'
+  }
+  return null
+}
+
+async function readImageMetadata(buffer: Buffer): Promise<Metadata> {
+  try {
+    return await sharp(buffer).metadata()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`生成图片格式无法解析，无法同步到云端：${message}`)
   }
 }
 
@@ -189,7 +235,7 @@ async function uploadDirectlyToR2(
   for (const [index, image] of input.images.entries()) {
     const sourceIndex = typeof image.index === 'number' ? image.index : index
     const original = await imageToBuffer(image)
-    const metadata = await sharp(original.buffer).metadata()
+    const metadata = await readImageMetadata(original.buffer)
     const ext = mimeToExtension(original.mimeType)
     const key = `generated/${input.taskId}/${sourceIndex}.${ext}`
     await client.send(new PutObjectCommand({
@@ -237,7 +283,7 @@ async function uploadToSquareWorker(
   for (const [index, image] of input.images.entries()) {
     const sourceIndex = typeof image.index === 'number' ? image.index : index
     const original = await imageToBuffer(image)
-    const metadata = await sharp(original.buffer).metadata()
+    const metadata = await readImageMetadata(original.buffer)
     const thumbnail = await createThumbnail(original.buffer)
     const clientAssetId = `asset_output_${sourceIndex}_${input.taskId.slice(0, 24)}`
     outputAssetIds.push(clientAssetId)
