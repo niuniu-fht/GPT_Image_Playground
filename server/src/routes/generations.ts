@@ -184,22 +184,67 @@ function dataUrlToFile(dataUrl: string, filename: string): File {
   return new File([bytes], filename, { type: mimeType })
 }
 
-async function remoteImageUrlToDataUrl(url: string, fallbackMimeType: string): Promise<GeneratedImagePayload> {
-  const response = await fetch(url)
+function sniffImageMimeType(buffer: Buffer): string | null {
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return 'image/png'
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg'
+  }
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') {
+    return 'image/webp'
+  }
+  if (buffer.length >= 6) {
+    const header = buffer.subarray(0, 6).toString('ascii')
+    if (header === 'GIF87a' || header === 'GIF89a') return 'image/gif'
+  }
+  if (buffer.length >= 12 && buffer.subarray(4, 8).toString('ascii') === 'ftyp') {
+    const brand = buffer.subarray(8, 12).toString('ascii')
+    if (brand === 'avif' || brand === 'avis') return 'image/avif'
+  }
+  return null
+}
+
+function resolveUpstreamImageUrl(url: string, baseUrl: string): string {
+  const normalized = url.trim()
+  if (/^https?:\/\//i.test(normalized)) return normalized
+  if (normalized.startsWith('/')) return new URL(normalized, `${baseUrl.replace(/\/+$/, '')}/`).toString()
+  throw new HttpError(502, 'upstream_image_download_failed', '上游返回了无效图片地址')
+}
+
+async function remoteImageUrlToDataUrl(
+  url: string,
+  fallbackMimeType: string,
+  upstreamBaseUrl: string,
+): Promise<GeneratedImagePayload> {
+  const resolvedUrl = resolveUpstreamImageUrl(url, upstreamBaseUrl)
+  const response = await fetch(resolvedUrl)
   if (!response.ok) {
     throw new HttpError(response.status, 'upstream_image_download_failed', '上游图片下载失败，请稍后重试')
   }
 
   const arrayBuffer = await response.arrayBuffer()
-  const mimeType = response.headers.get('content-type')?.split(';')[0]?.trim() || fallbackMimeType
-  const base64 = Buffer.from(arrayBuffer).toString('base64')
+  const buffer = Buffer.from(arrayBuffer)
+  const responseMimeType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() || ''
+  const sniffedMimeType = sniffImageMimeType(buffer)
+  const mimeType = sniffedMimeType || (responseMimeType.startsWith('image/') ? responseMimeType : '')
+  if (!mimeType) {
+    const preview = buffer.subarray(0, 80).toString('utf8').replace(/\s+/g, ' ').trim()
+    console.warn('[generation] upstream image url returned non-image content', {
+      url: resolvedUrl,
+      contentType: responseMimeType || null,
+      preview,
+    })
+    throw new HttpError(502, 'upstream_image_download_failed', '上游返回的图片地址不是有效图片')
+  }
+  const base64 = buffer.toString('base64')
   return {
-    dataUrl: `data:${mimeType};base64,${base64}`,
-    mimeType,
+    dataUrl: `data:${mimeType || fallbackMimeType};base64,${base64}`,
+    mimeType: mimeType || fallbackMimeType,
   }
 }
 
-async function normalizeImageResponse(payload: unknown): Promise<GeneratedImagePayload[]> {
+async function normalizeImageResponse(payload: unknown, upstreamBaseUrl: string): Promise<GeneratedImagePayload[]> {
   const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
   const data = Array.isArray(record.data) ? record.data : []
   const images = data.flatMap((item) => {
@@ -211,13 +256,16 @@ async function normalizeImageResponse(payload: unknown): Promise<GeneratedImageP
     if (typeof image.url === 'string') {
       return [{ dataUrl: image.url, mimeType: 'image/png' }]
     }
+    if (typeof image.image_url === 'string') {
+      return [{ dataUrl: image.image_url, mimeType: 'image/png' }]
+    }
     return []
   })
 
   return Promise.all(
     images.map((image) => (
-      /^https?:\/\//i.test(image.dataUrl)
-        ? remoteImageUrlToDataUrl(image.dataUrl, image.mimeType)
+      /^(https?:\/\/|\/)/i.test(image.dataUrl)
+        ? remoteImageUrlToDataUrl(image.dataUrl, image.mimeType, upstreamBaseUrl)
         : image
     )),
   )
@@ -311,7 +359,7 @@ async function callImagesApiOnce(
         : '上游图像编辑请求失败'
       throw new HttpError(response.status, 'upstream_error', message)
     }
-    return normalizeImageResponse(payload)
+    return normalizeImageResponse(payload, baseUrl)
   }
 
   const body: Record<string, unknown> = {
@@ -342,7 +390,7 @@ async function callImagesApiOnce(
       : '上游图像生成请求失败'
     throw new HttpError(response.status, 'upstream_error', message)
   }
-  return normalizeImageResponse(payload)
+  return normalizeImageResponse(payload, baseUrl)
 }
 
 async function callSingleImageApi(
