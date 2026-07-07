@@ -9,7 +9,6 @@ interface HeaderAccountActionsProps {
   onLogin: () => void
   onLogout: () => void
   onRedeem: () => void
-  onTopup: () => void
 }
 
 export function HeaderAccountActions({
@@ -20,7 +19,6 @@ export function HeaderAccountActions({
   onLogin,
   onLogout,
   onRedeem,
-  onTopup,
 }: HeaderAccountActionsProps) {
   if (!currentUser) {
     return (
@@ -36,9 +34,14 @@ export function HeaderAccountActions({
 
   return (
     <div className="ml-1 flex items-center gap-1.5">
-      <span className="hidden rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 sm:inline-flex dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-200">
+      <button
+        type="button"
+        onClick={onRedeem}
+        className="hidden rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 transition hover:-translate-y-px hover:border-amber-300 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-300/50 sm:inline-flex dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-200 dark:hover:bg-amber-300/15 dark:focus:ring-amber-200/20"
+        title="点击输入兑换码"
+      >
         积分 {currentUser.creditBalance}
-      </span>
+      </button>
       <AccountMenu
         currentUser={currentUser}
         onAdmin={onAdmin}
@@ -46,7 +49,6 @@ export function HeaderAccountActions({
         onFeedback={onFeedback}
         onLogout={onLogout}
         onRedeem={onRedeem}
-        onTopup={onTopup}
       />
     </div>
   )

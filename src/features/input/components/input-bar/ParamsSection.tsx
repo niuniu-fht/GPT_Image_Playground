@@ -4,6 +4,7 @@ import ModelSelector from './ModelSelector'
 
 interface ParamsSectionProps {
   activeModelId: string | null
+  activeModel: ModelConfig | null
   estimatedCost: number
   models: ModelConfig[]
   normalizedSize: string
@@ -14,6 +15,7 @@ interface ParamsSectionProps {
 
 export default function ParamsSection({
   activeModelId,
+  activeModel,
   estimatedCost,
   models,
   normalizedSize,
@@ -33,6 +35,7 @@ export default function ParamsSection({
         />
       </label>
       <AspectQuantityPanel
+        activeModel={activeModel}
         estimatedCost={estimatedCost}
         normalizedSize={normalizedSize}
         params={params}

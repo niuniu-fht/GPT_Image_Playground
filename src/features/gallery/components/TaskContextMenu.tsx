@@ -196,7 +196,7 @@ export default function TaskContextMenu({
           </MenuItem>
           {showEditAction && (
             <MenuItem
-              label="编辑输出"
+              label="添加参考图"
               disabled={!canEditOutputs}
               onClick={() => {
                 onClose()

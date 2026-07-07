@@ -175,7 +175,12 @@ export function resolveTaskDisplayImageParam(
   task: Pick<TaskRecord, 'params' | 'responseMeta'>,
   key: DisplayTaskImageParamKey,
 ): string {
-  return resolveTaskAppliedImageParam(task, key) ?? task.params[key]
+  const value = resolveTaskAppliedImageParam(task, key) ?? task.params[key]
+  if (key !== 'quality') return value
+  if (value === 'low') return '低'
+  if (value === 'medium') return '中'
+  if (value === 'high') return '高'
+  return value
 }
 
 export function resolveTaskTransportMeta(
@@ -231,6 +236,18 @@ export function resolveTaskProviderName(
   }
 
   return UNKNOWN_TASK_PROVIDER_NAME
+}
+
+export function resolveTaskModelLabel(
+  task: Pick<TaskRecord, 'modelDisplayName' | 'modelName'>,
+): string {
+  const displayName = task.modelDisplayName?.trim()
+  if (displayName) return displayName
+
+  const modelName = task.modelName?.trim()
+  if (modelName) return modelName
+
+  return ''
 }
 
 export function resolveTaskCategoryName(

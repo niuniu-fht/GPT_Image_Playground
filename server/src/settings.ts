@@ -6,6 +6,7 @@ export interface PlatformSettings {
   generationEnabled: boolean
   registerBonusCredits: number
   maintenanceMessage: string
+  redeemDescription: string
   landingHeroSlidesJson: string
 }
 
@@ -52,6 +53,7 @@ export const defaultPlatformSettings: PlatformSettings = {
   generationEnabled: true,
   registerBonusCredits: env.registerBonusCredits,
   maintenanceMessage: '',
+  redeemDescription: '活动码和客服补偿码会立即到账，并写入积分流水。',
   landingHeroSlidesJson: JSON.stringify(defaultLandingHeroSlides, null, 2),
 }
 
@@ -73,6 +75,7 @@ export async function getPlatformSettings(): Promise<PlatformSettings> {
     generationEnabled: parseBoolean(map.get('generationEnabled'), defaultPlatformSettings.generationEnabled),
     registerBonusCredits: parseNumber(map.get('registerBonusCredits'), defaultPlatformSettings.registerBonusCredits),
     maintenanceMessage: map.get('maintenanceMessage') ?? defaultPlatformSettings.maintenanceMessage,
+    redeemDescription: map.get('redeemDescription') ?? defaultPlatformSettings.redeemDescription,
     landingHeroSlidesJson: map.get('landingHeroSlidesJson') ?? defaultPlatformSettings.landingHeroSlidesJson,
   }
 }
@@ -83,6 +86,7 @@ export async function upsertPlatformSettings(input: Partial<PlatformSettings>) {
   if (typeof input.generationEnabled === 'boolean') entries.push(['generationEnabled', String(input.generationEnabled)])
   if (typeof input.registerBonusCredits === 'number') entries.push(['registerBonusCredits', String(input.registerBonusCredits)])
   if (typeof input.maintenanceMessage === 'string') entries.push(['maintenanceMessage', input.maintenanceMessage])
+  if (typeof input.redeemDescription === 'string') entries.push(['redeemDescription', input.redeemDescription])
   if (typeof input.landingHeroSlidesJson === 'string') entries.push(['landingHeroSlidesJson', input.landingHeroSlidesJson])
 
   await prisma.$transaction(
@@ -103,6 +107,7 @@ export async function seedMissingPlatformSettings(input: PlatformSettings) {
     ['generationEnabled', String(input.generationEnabled)],
     ['registerBonusCredits', String(input.registerBonusCredits)],
     ['maintenanceMessage', input.maintenanceMessage],
+    ['redeemDescription', input.redeemDescription],
     ['landingHeroSlidesJson', input.landingHeroSlidesJson],
   ]
   const existingRows = await prisma.platformSetting.findMany({

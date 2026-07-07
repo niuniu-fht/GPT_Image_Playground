@@ -9,7 +9,6 @@ interface AccountMenuProps {
   onFeedback: () => void
   onLogout: () => void
   onRedeem: () => void
-  onTopup: () => void
 }
 
 interface MenuAction {
@@ -36,7 +35,6 @@ export function AccountMenu({
   onFeedback,
   onLogout,
   onRedeem,
-  onTopup,
 }: AccountMenuProps) {
   const [open, setOpen] = useState(false)
   const closeTimerRef = useRef<number | null>(null)
@@ -76,7 +74,6 @@ export function AccountMenu({
   }
 
   const primaryActions: MenuAction[] = [
-    { label: '充值积分', description: '选择套餐，提交充值订单', onClick: onTopup },
     { label: '兑换码', description: '输入兑换码增加余额', onClick: onRedeem },
     { label: '反馈与工单', description: '查看处理进度，提交问题', onClick: onFeedback },
     { label: '修改密码', description: '更新当前账号登录密码', onClick: onChangePassword },

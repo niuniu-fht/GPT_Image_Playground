@@ -37,4 +37,15 @@ router.get('/landing', async (_req, res, next) => {
   }
 })
 
+router.get('/settings', async (_req, res, next) => {
+  try {
+    const settings = await getPlatformSettings()
+    sendOk(res, {
+      redeemDescription: settings.redeemDescription,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
 export default router

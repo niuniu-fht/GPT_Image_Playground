@@ -49,8 +49,8 @@ export default function SearchFilters({
           type="text"
           placeholder={
             taskView === 'trash'
-              ? '搜索回收站里的提示词、参数、供应商、分类...'
-              : '搜索提示词、参数、供应商、分类...'
+              ? '搜索回收站里的提示词、参数、模型、分类...'
+              : '搜索提示词、参数、模型、分类...'
           }
           className="h-9 w-full rounded-xl border border-gray-200/90 bg-white pl-9 pr-9 text-[12px] text-gray-700 shadow-sm transition focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-200"
         />

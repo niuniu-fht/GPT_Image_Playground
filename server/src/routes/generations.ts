@@ -5,7 +5,7 @@ import { requireUser, resLocals } from '../auth.js'
 import { env } from '../env.js'
 import { replaceGeneratedAssetsForTask } from '../generatedAssets.js'
 import { HttpError, sendOk } from '../http.js'
-import { resolveModelCostForSize } from '../modelCost.js'
+import { isGptImage2Model, resolveModelCostForSize, supportsHighQualityPricing } from '../modelCost.js'
 import { prisma } from '../prisma.js'
 import { getPlatformSettings } from '../settings.js'
 import { autoUploadGeneratedImagesToSquare } from '../squareAutoUpload.js'
@@ -264,6 +264,13 @@ function withImageCount(input: GenerationInput, n: number): GenerationInput {
       n,
     },
   }
+}
+
+function resolveEffectiveQuality(model: GenerationModel, quality: string): string {
+  if (!isGptImage2Model(model)) return 'medium'
+  if (quality === 'low') return 'low'
+  if (quality === 'high' && supportsHighQualityPricing(model)) return 'high'
+  return 'medium'
 }
 
 async function callImagesApiOnce(
@@ -633,8 +640,15 @@ router.post('/', requireUser, async (req, res, next) => {
     }
     await checkModerationRules(input.prompt)
 
-    const requestedCount = clampImageCount(input.params.n)
-    const costCredits = resolveModelCostForSize(model, input.params.size) * requestedCount
+    const generationInput: GenerationInput = {
+      ...input,
+      params: {
+        ...input.params,
+        quality: resolveEffectiveQuality(model, input.params.quality),
+      },
+    }
+    const requestedCount = clampImageCount(generationInput.params.n)
+    const costCredits = resolveModelCostForSize(model, generationInput.params.size, generationInput.params.quality) * requestedCount
     const task = await prisma.$transaction(async (tx) => {
       const latestUser = await tx.user.findUnique({
         where: { id: user.id },
@@ -654,8 +668,8 @@ router.post('/', requireUser, async (req, res, next) => {
         data: {
           userId: user.id,
           modelConfigId: model.id,
-          prompt: input.prompt,
-          params: input.params,
+          prompt: generationInput.prompt,
+          params: generationInput.params,
           status: 'running',
           costCredits,
         },
@@ -690,9 +704,9 @@ router.post('/', requireUser, async (req, res, next) => {
       responseMeta: {
         pending: true,
         appliedImageParams: {
-          size: input.params.size,
-          quality: input.params.quality,
-          output_format: input.params.output_format,
+          size: generationInput.params.size,
+          quality: generationInput.params.quality,
+          output_format: generationInput.params.output_format,
         },
       },
     })
@@ -701,7 +715,7 @@ router.post('/', requireUser, async (req, res, next) => {
       void runGenerationTask({
         taskId: task.id,
         userId: user.id,
-        generationInput: input,
+        generationInput,
         model,
         costCredits,
       })

@@ -313,7 +313,6 @@ export default function DetailModal() {
             transportRequested={transportMeta?.requested ?? null}
             transportChipClass={transportChipClass}
             currentImageSize={currentImageSize}
-            providerName={providerName}
             categoryName={categoryName}
             displayQuality={displayQuality}
             displayOutputFormat={displayOutputFormat}

@@ -56,6 +56,7 @@ export interface ReferenceImagesSectionViewModel {
 
 export interface ParamsSectionViewModel {
   activeModelId: string | null
+  activeModel: ModelConfig | null
   estimatedCost: number
   models: ModelConfig[]
   normalizedSize: string
@@ -138,7 +139,7 @@ export function useInputBarState(): InputBarViewModel {
   const promptHintText = isMobile
     ? '先写主体需求，下面选择比例和图片数量'
     : '桌面端支持 Ctrl+Enter 直接生成'
-  const estimatedCost = resolveModelCostForSize(activeModel, params.size) * Math.max(1, Math.floor(params.n))
+  const estimatedCost = resolveModelCostForSize(activeModel, params.size, params.quality) * Math.max(1, Math.floor(params.n))
   const creditBalance = currentUser?.creditBalance ?? 0
   const canSubmit =
     Boolean(prompt.trim() || inputImages.length) &&
@@ -196,6 +197,7 @@ export function useInputBarState(): InputBarViewModel {
   // ===== Sub-ViewModel: ParamsSection =====
   const paramsSectionProps: ParamsSectionViewModel = {
     activeModelId,
+    activeModel,
     estimatedCost,
     models,
     normalizedSize,

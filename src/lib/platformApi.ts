@@ -200,6 +200,10 @@ export const platformApi = {
     return request<{ landingHeroSlidesJson: string }>('/api/public/landing')
   },
 
+  getPublicSettings() {
+    return request<{ redeemDescription: string }>('/api/public/settings')
+  },
+
   listAdminModels() {
     return request<{ models: ModelConfig[] }>('/api/admin/models')
   },

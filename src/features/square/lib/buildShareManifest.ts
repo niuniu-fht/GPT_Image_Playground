@@ -43,6 +43,8 @@ interface ManifestTaskNode {
   params: TaskParams
   responseMeta: TaskRecord['responseMeta']
   providerName: string | null
+  modelName: string | null
+  modelDisplayName: string | null
   categoryName: string | null
   createdAt: number
   finishedAt: number | null
@@ -305,6 +307,8 @@ export async function buildTaskShareInput(options: BuildTaskShareOptions): Promi
     params: task.params,
     responseMeta: task.responseMeta ?? null,
     providerName: task.providerName ?? null,
+    modelName: task.modelName ?? null,
+    modelDisplayName: task.modelDisplayName ?? null,
     categoryName: task.categoryName ?? null,
     createdAt: task.createdAt,
     finishedAt: task.finishedAt ?? null,

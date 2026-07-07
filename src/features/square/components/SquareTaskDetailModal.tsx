@@ -14,6 +14,8 @@ interface SquareTaskNode {
   params?: Partial<TaskParams>
   responseMeta?: TaskRecord['responseMeta']
   providerName?: string | null
+  modelName?: string | null
+  modelDisplayName?: string | null
   categoryName?: string | null
   createdAt?: number
   finishedAt?: number | null
@@ -39,6 +41,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+function qualityLabel(value: unknown): string | undefined {
+  if (value === 'low') return '低'
+  if (value === 'medium') return '中'
+  if (value === 'high') return '高'
+  return typeof value === 'string' ? value : undefined
+}
+
 function normalizeTaskNode(value: unknown): SquareTaskNode | null {
   if (!isRecord(value) || typeof value.localTaskId !== 'string') return null
 
@@ -56,6 +65,8 @@ function normalizeTaskNode(value: unknown): SquareTaskNode | null {
     params: isRecord(value.params) ? (value.params as Partial<TaskParams>) : {},
     responseMeta: isRecord(value.responseMeta) ? (value.responseMeta as TaskRecord['responseMeta']) : null,
     providerName: typeof value.providerName === 'string' ? value.providerName : null,
+    modelName: typeof value.modelName === 'string' ? value.modelName : null,
+    modelDisplayName: typeof value.modelDisplayName === 'string' ? value.modelDisplayName : null,
     categoryName: typeof value.categoryName === 'string' ? value.categoryName : null,
     createdAt: typeof value.createdAt === 'number' ? value.createdAt : undefined,
     finishedAt: typeof value.finishedAt === 'number' ? value.finishedAt : null,
@@ -177,6 +188,7 @@ export default function SquareTaskDetailModal({ share, onClose, onOpenImages }: 
   const transport = activeNode.responseMeta?.transport ?? null
   const prompt = activeNode.prompt?.trim() ?? ''
   const params = activeNode.params ?? {}
+  const modelLabel = activeNode.modelDisplayName?.trim() || activeNode.modelName?.trim() || ''
   const allOutputImages = outputAssets.map((asset, index) => ({
     src: getAssetUrl(asset, 'original'),
     title: `${title} ${index + 1}`,
@@ -281,11 +293,11 @@ export default function SquareTaskDetailModal({ share, onClose, onOpenImages }: 
           <h4 className="mb-2 text-xs font-medium text-gray-400 dark:text-gray-500">参数配置</h4>
           <div className="mb-4 grid grid-cols-2 gap-2">
             {renderInfoCard('分类', activeNode.categoryName || '未分类')}
-            {renderInfoCard('供应商', activeNode.providerName || '未知')}
+            {modelLabel ? renderInfoCard('模型', modelLabel) : null}
             {renderInfoCard('状态', resolveStatusLabel(activeNode))}
             {renderInfoCard('输出像素', imageSize || applied?.size || params.size)}
             {renderInfoCard('请求尺寸', params.size)}
-            {renderInfoCard('质量', applied?.quality || params.quality)}
+            {renderInfoCard('质量', qualityLabel(applied?.quality) || qualityLabel(params.quality))}
             {renderInfoCard('格式', applied?.output_format || params.output_format)}
             {renderInfoCard('传输', transport?.actual === 'stream' ? '流式' : transport?.actual)}
             {renderInfoCard('传输偏好', transport?.requested)}

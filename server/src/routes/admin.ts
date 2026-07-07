@@ -1561,6 +1561,7 @@ const settingsSchema = z.object({
   generationEnabled: z.boolean().optional(),
   registerBonusCredits: z.number().int().min(0).max(100000).optional(),
   maintenanceMessage: z.string().max(500).optional(),
+  redeemDescription: z.string().max(1000).optional(),
   landingHeroSlidesJson: z.string().max(30000).optional(),
 })
 
@@ -1593,7 +1594,22 @@ router.get('/upstreams', async (_req, res, next) => {
         _count: { select: { models: true } },
         models: {
           orderBy: [{ enabled: 'desc' }, { sortOrder: 'asc' }],
-          select: { id: true, displayName: true, name: true, enabled: true, costCredits: true, costCredits2K: true, costCredits4K: true },
+          select: {
+            id: true,
+            displayName: true,
+            name: true,
+            enabled: true,
+            costCredits: true,
+            costCredits2K: true,
+            costCredits4K: true,
+            lowQualityCostCredits: true,
+            lowQualityCostCredits2K: true,
+            lowQualityCostCredits4K: true,
+            highQualityEnabled: true,
+            highQualityCostCredits: true,
+            highQualityCostCredits2K: true,
+            highQualityCostCredits4K: true,
+          },
         },
       },
     })

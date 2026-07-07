@@ -1296,8 +1296,11 @@ export default function AdminConsole() {
       confirmText: '保存',
       action: async () => {
         try {
-          if (editingModelId) await platformApi.updateAdminModel(editingModelId, modelDraft)
-          else await platformApi.createAdminModel(modelDraft)
+          const nextDraft: ModelDraft = modelDraft.name === 'gpt-image-2'
+            ? modelDraft
+            : { ...modelDraft, highQualityEnabled: false }
+          if (editingModelId) await platformApi.updateAdminModel(editingModelId, nextDraft)
+          else await platformApi.createAdminModel(nextDraft)
           closeEditor()
           setModelDraft(emptyModelDraft)
           await loadAll('models')
@@ -2998,6 +3001,20 @@ export default function AdminConsole() {
                   className="mt-1.5 h-10 w-full max-w-xs rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
                 />
               </label>
+              <label className="mt-4 block text-xs font-semibold text-gray-500">
+                兑换码弹窗说明
+                <textarea
+                  value={settingsDraft.redeemDescription}
+                  onChange={(event) => setSettingsDraft((prev) => ({ ...prev, redeemDescription: event.target.value }))}
+                  rows={4}
+                  maxLength={1000}
+                  placeholder="例如：购买地址：https://example.com/buy，也可以填写客服说明、到账规则或活动备注。"
+                  className="mt-1.5 w-full resize-none rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm leading-6 text-gray-900 outline-none transition focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+                />
+                <span className="mt-1.5 block text-[11px] font-normal text-gray-400">
+                  支持换行和 http/https 链接，留空时前台不显示说明。
+                </span>
+              </label>
             </div>
 
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
@@ -3036,6 +3053,7 @@ export default function AdminConsole() {
               <div className="flex items-center justify-between"><span className="text-gray-500">注册</span><StatusBadge tone={settingsDraft.registerEnabled ? 'green' : 'red'}>{settingsDraft.registerEnabled ? '开放' : '关闭'}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">生成</span><StatusBadge tone={settingsDraft.generationEnabled ? 'green' : 'red'}>{settingsDraft.generationEnabled ? '开放' : '维护'}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">注册送分</span><span className="font-semibold text-amber-700">{settingsDraft.registerBonusCredits}</span></div>
+              <div className="flex items-center justify-between"><span className="text-gray-500">兑换说明</span><StatusBadge tone={settingsDraft.redeemDescription.trim() ? 'green' : 'gray'}>{settingsDraft.redeemDescription.trim() ? '已配置' : '不显示'}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">首页轮播</span><StatusBadge tone={settingsDraft.landingHeroSlidesJson.trim() ? 'blue' : 'amber'}>{settingsDraft.landingHeroSlidesJson.trim() ? '已配置' : '待配置'}</StatusBadge></div>
             </div>
             <button className="mt-5 h-10 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-gray-950">保存设置</button>

@@ -5,6 +5,7 @@ import {
   resolveTaskDisplayImageParam,
   resolveTaskImageProgress,
   resolveTaskKind,
+  resolveTaskModelLabel,
   resolveTaskTransportLabel,
   resolveTaskTransportMeta,
   resolveTaskRunOutcome,
@@ -19,7 +20,6 @@ import { useTaskCardState } from './useTaskCardState'
 function TaskCard({
   task,
   categoryName,
-  providerName,
   isInRecycleBin,
   isFavorite,
   selected,
@@ -39,6 +39,7 @@ function TaskCard({
 }: TaskCardProps) {
   const progress = resolveTaskImageProgress(task)
   const statusLabel = resolveTaskStatusLabel(task)
+  const modelLabel = resolveTaskModelLabel(task)
   const transportLabel = resolveTaskTransportLabel(task)
   const transportMeta = resolveTaskTransportMeta(task)
   const canEditOutputs = canEditTaskOutputs(task)
@@ -160,7 +161,7 @@ function TaskCard({
               isFavorite={isFavorite}
               taskKind={taskKind}
               categoryName={categoryName}
-              providerName={providerName}
+              modelLabel={modelLabel}
               statusLabel={statusLabel}
               statusChipClass={statusChipClass}
               progressCountLabel={progress.countLabel}

@@ -3,6 +3,7 @@ import type { CurrentUser } from '../../../types'
 
 interface RedeemCreditsDialogProps {
   currentUser: CurrentUser
+  description?: string
   redeemCode: string
   redeeming: boolean
   onChangeRedeemCode: (value: string) => void
@@ -10,14 +11,39 @@ interface RedeemCreditsDialogProps {
   onSubmit: (event: FormEvent) => void
 }
 
+const urlPattern = /(https?:\/\/[^\s]+)/gi
+
+function renderDescription(value: string) {
+  const parts = value.split(urlPattern)
+  return parts.map((part, index) => {
+    if (/^https?:\/\//i.test(part)) {
+      return (
+        <a
+          key={`${part}-${index}`}
+          href={part}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-amber-700 underline decoration-amber-300 underline-offset-4 transition hover:text-amber-800 dark:text-amber-200 dark:decoration-amber-300/50"
+        >
+          {part}
+        </a>
+      )
+    }
+    return <span key={`${part}-${index}`}>{part}</span>
+  })
+}
+
 export function RedeemCreditsDialog({
   currentUser,
+  description,
   redeemCode,
   redeeming,
   onChangeRedeemCode,
   onClose,
   onSubmit,
 }: RedeemCreditsDialogProps) {
+  const normalizedDescription = description?.trim() ?? ''
+
   return (
     <div className="fixed inset-0 z-[95] grid place-items-center bg-gray-950/35 px-4 backdrop-blur-sm">
       <form onSubmit={onSubmit} className="w-full max-w-md overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl shadow-gray-950/15 dark:border-white/[0.08] dark:bg-gray-900">
@@ -26,7 +52,11 @@ export function RedeemCreditsDialog({
             <div>
               <div className="text-sm font-semibold text-amber-600">积分兑换</div>
               <h2 className="mt-2 text-2xl font-semibold tracking-tight text-gray-950 dark:text-gray-50">输入兑换码领取积分</h2>
-              <p className="mt-2 text-sm leading-6 text-gray-500">活动码和客服补偿码会立即到账，并写入积分流水。</p>
+              {normalizedDescription && (
+                <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-gray-500">
+                  {renderDescription(normalizedDescription)}
+                </p>
+              )}
             </div>
             <button type="button" onClick={onClose} className="grid h-9 w-9 place-items-center rounded-full text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06]">×</button>
           </div>
@@ -56,4 +86,3 @@ export function RedeemCreditsDialog({
     </div>
   )
 }
-

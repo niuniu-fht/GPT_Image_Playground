@@ -6,7 +6,8 @@ import {
   resolveImageSizeTier,
   type SizeTier,
 } from '../../../../lib/size'
-import type { TaskParams } from '../../../../types'
+import { supportsHighQualityPricing, supportsQualitySelection } from '../../../../lib/modelCost'
+import type { ModelConfig, TaskParams } from '../../../../types'
 
 type AspectOption = {
   label: string
@@ -28,11 +29,18 @@ const ASPECT_OPTIONS: AspectOption[] = [
 
 const QUANTITY_OPTIONS = [1, 2, 3, 4] as const
 const SIZE_TIER_OPTIONS: SizeTier[] = ['1K', '2K', '4K']
+const QUALITY_OPTIONS = [
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+] as const
 const DEFAULT_RATIO = '1:1'
 const FLOATING_PANEL_GAP = 8
 const FLOATING_PANEL_WIDTH = 322
-const FLOATING_PANEL_ESTIMATED_HEIGHT = 326
+const FLOATING_PANEL_ESTIMATED_HEIGHT = 396
 const FLOATING_PANEL_SCREEN_PADDING = 12
+const FLOATING_PANEL_BOUNDARY_PADDING = 12
+const FLOATING_PANEL_MIN_WIDTH = 268
 
 interface FloatingPanelStyle {
   left: number
@@ -42,6 +50,7 @@ interface FloatingPanelStyle {
 }
 
 interface AspectQuantityPanelProps {
+  activeModel: ModelConfig | null
   estimatedCost: number
   normalizedSize: string
   params: TaskParams
@@ -124,6 +133,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export default function AspectQuantityPanel({
+  activeModel,
   estimatedCost,
   normalizedSize,
   params,
@@ -137,6 +147,12 @@ export default function AspectQuantityPanel({
   const activeTier = resolveImageSizeTier(params.size)
   const quantity = Math.min(Math.max(Math.round(params.n || 1), 1), 4)
   const summaryRatio = params.size === 'auto' || !activeRatio ? '自动' : activeRatio
+  const qualitySelectionAvailable = supportsQualitySelection(activeModel)
+  const highQualityAvailable = supportsHighQualityPricing(activeModel)
+  const activeQuality = qualitySelectionAvailable && ['low', 'medium', 'high'].includes(params.quality)
+    ? params.quality
+    : 'medium'
+  const summaryQualityLabel = activeQuality === 'low' ? '低' : activeQuality === 'high' ? '高' : '中'
 
   useLayoutEffect(() => {
     if (!open) return
@@ -144,21 +160,46 @@ export default function AspectQuantityPanel({
     const rect = summaryRef.current?.getBoundingClientRect()
     if (!rect) return
 
+    const boundaryRect = summaryRef.current
+      ?.closest('[data-input-panel]')
+      ?.getBoundingClientRect()
+    const boundaryLeft = boundaryRect
+      ? boundaryRect.left + FLOATING_PANEL_BOUNDARY_PADDING
+      : FLOATING_PANEL_SCREEN_PADDING
+    const boundaryRight = boundaryRect
+      ? boundaryRect.right - FLOATING_PANEL_BOUNDARY_PADDING
+      : window.innerWidth - FLOATING_PANEL_SCREEN_PADDING
+    const availableWidth = Math.max(0, boundaryRight - boundaryLeft)
     const width = Math.min(
-      window.innerWidth - FLOATING_PANEL_SCREEN_PADDING * 2,
-      Math.max(rect.width, FLOATING_PANEL_WIDTH),
+      availableWidth,
+      Math.max(
+        Math.min(rect.width, availableWidth),
+        Math.min(FLOATING_PANEL_MIN_WIDTH, FLOATING_PANEL_WIDTH, availableWidth),
+      ),
     )
+    const maxLeft = Math.max(boundaryLeft, boundaryRight - width)
     const left = clamp(
       rect.left,
-      FLOATING_PANEL_SCREEN_PADDING,
-      window.innerWidth - width - FLOATING_PANEL_SCREEN_PADDING,
+      boundaryLeft,
+      maxLeft,
     )
     const availableTop = rect.top - FLOATING_PANEL_GAP - FLOATING_PANEL_SCREEN_PADDING
-    const maxHeight = Math.max(220, Math.min(FLOATING_PANEL_ESTIMATED_HEIGHT, availableTop))
-    const top = Math.max(FLOATING_PANEL_SCREEN_PADDING, rect.top - FLOATING_PANEL_GAP - maxHeight)
+    const panelHeight = qualitySelectionAvailable ? FLOATING_PANEL_ESTIMATED_HEIGHT : 326
+    const maxHeight = panelHeight
+    const top = Math.max(FLOATING_PANEL_SCREEN_PADDING, rect.top - FLOATING_PANEL_GAP - Math.min(panelHeight, availableTop || panelHeight))
 
     setPanelStyle({ left, maxHeight, top, width })
-  }, [open])
+  }, [open, qualitySelectionAvailable])
+
+  useEffect(() => {
+    if (!qualitySelectionAvailable && params.quality !== 'medium') {
+      onSetParams({ quality: 'medium' })
+      return
+    }
+    if (params.quality === 'high' && !highQualityAvailable) {
+      onSetParams({ quality: 'medium' })
+    }
+  }, [highQualityAvailable, onSetParams, params.quality, qualitySelectionAvailable])
 
   useEffect(() => {
     if (!open) return
@@ -199,12 +240,12 @@ export default function AspectQuantityPanel({
           className="fixed z-[120] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_24px_70px_rgba(15,23,42,0.22)] ring-1 ring-black/[0.03] dark:border-white/[0.08] dark:bg-slate-950 dark:ring-white/[0.06]"
           style={{
             left: panelStyle.left,
-            maxHeight: panelStyle.maxHeight,
+            minHeight: panelStyle.maxHeight,
             top: panelStyle.top,
             width: panelStyle.width,
           }}
         >
-          <div className="max-h-[inherit] space-y-2.5 overflow-y-auto overscroll-contain p-3">
+          <div className="space-y-2.5 p-3">
             <div>
               <div className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-100">宽高比</div>
               <div className="grid grid-cols-4 gap-2">
@@ -264,6 +305,37 @@ export default function AspectQuantityPanel({
               </div>
             </div>
 
+            {qualitySelectionAvailable && (
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">图片质量</span>
+                  <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-600 dark:bg-blue-400/10 dark:text-blue-200">
+                    GPT Image 2
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {QUALITY_OPTIONS.map((option) => {
+                    const disabled = option.value === 'high' && !highQualityAvailable
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        disabled={disabled}
+                        title={disabled ? '后台未开启高质量' : undefined}
+                        onClick={() => onSetParams({ quality: option.value })}
+                        className={cx(
+                          buttonClass(activeQuality === option.value),
+                          disabled && 'cursor-not-allowed opacity-45 hover:border-slate-200 hover:bg-white dark:hover:bg-slate-900/60',
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:bg-amber-400/10 dark:text-amber-200">
               当前预计消耗 {estimatedCost} 积分
             </div>
@@ -280,18 +352,38 @@ export default function AspectQuantityPanel({
         ref={summaryRef}
         data-testid="aspect-quantity-summary"
         onClick={() => setOpen((value) => !value)}
-        className="grid h-9 w-full grid-cols-[1fr_auto_1fr_auto_1fr] items-center rounded-lg bg-slate-50 px-2 text-sm font-medium text-slate-900 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300 dark:bg-white/[0.04] dark:text-slate-100 dark:hover:bg-white/[0.08] dark:focus:ring-white/20"
+        className={cx(
+          'grid h-9 w-full items-center rounded-lg bg-slate-50 px-2 text-sm font-medium text-slate-900 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-300 dark:bg-white/[0.04] dark:text-slate-100 dark:hover:bg-white/[0.08] dark:focus:ring-white/20',
+          qualitySelectionAvailable ? 'grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr]' : 'grid-cols-[1fr_auto_1fr_auto_1fr]',
+        )}
         aria-expanded={open}
         aria-label="选择宽高比、图片数量和图像分辨率"
       >
-        <span className="text-center">{summaryRatio}</span>
-        <span className="h-6 w-px bg-slate-300 dark:bg-white/[0.14]" />
-        <span className="inline-flex items-center justify-center gap-1.5 text-center">
-          <ImageCountIcon />
-          {quantity}
-        </span>
-        <span className="h-6 w-px bg-slate-300 dark:bg-white/[0.14]" />
-        <span className="text-center">{activeTier}</span>
+        {qualitySelectionAvailable ? (
+          <>
+            <span className="text-center">{summaryRatio}</span>
+            <span className="h-6 w-px bg-slate-300 dark:bg-white/[0.14]" />
+            <span className="inline-flex items-center justify-center gap-1.5 text-center">
+              <ImageCountIcon />
+              {quantity}
+            </span>
+            <span className="h-6 w-px bg-slate-300 dark:bg-white/[0.14]" />
+            <span className="text-center">{activeTier}</span>
+            <span className="h-6 w-px bg-slate-300 dark:bg-white/[0.14]" />
+            <span className="text-center">{summaryQualityLabel}</span>
+          </>
+        ) : (
+          <>
+            <span className="text-center">{summaryRatio}</span>
+            <span className="h-6 w-px bg-slate-300 dark:bg-white/[0.14]" />
+            <span className="inline-flex items-center justify-center gap-1.5 text-center">
+              <ImageCountIcon />
+              {quantity}
+            </span>
+            <span className="h-6 w-px bg-slate-300 dark:bg-white/[0.14]" />
+            <span className="text-center">{activeTier}</span>
+          </>
+        )}
       </button>
       {panel}
     </section>

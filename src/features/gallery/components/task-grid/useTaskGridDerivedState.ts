@@ -1,12 +1,5 @@
 import { useMemo } from 'react'
 import {
-  isTaskInRecycleBin,
-  resolveTaskCategoryName,
-  resolveTaskProviderName,
-} from '../../../../store'
-import {
-  ALL_CATEGORY_FILTER,
-  FAVORITES_CATEGORY_FILTER,
   UNCATEGORIZED_CATEGORY_FILTER,
   type CategoryConfig,
   type ProviderConfig,
@@ -14,6 +7,7 @@ import {
   type TaskStatus,
   resolveCategoryFilterName,
 } from '../../../../types'
+import { resolveFilteredGalleryTasks, resolveGallerySourceTasks } from '../../lib/taskFiltering'
 import type { CategoryOption } from './shared'
 
 interface UseTaskGridDerivedStateOptions {
@@ -44,61 +38,30 @@ export function useTaskGridDerivedState(options: UseTaskGridDerivedStateOptions)
     [categories],
   )
   const sourceTasks = useMemo(
-    () =>
-      tasks.filter((task) =>
-        taskView === 'trash' ? isTaskInRecycleBin(task) : !isTaskInRecycleBin(task),
-      ),
+    () => resolveGallerySourceTasks(tasks, taskView),
     [taskView, tasks],
   )
 
-  const filteredTasks = useMemo(() => {
-    const sortedTasks = [...sourceTasks].sort((taskA, taskB) => {
-      const timeA = taskView === 'trash' ? taskA.deletedAt ?? taskA.createdAt : taskA.createdAt
-      const timeB = taskView === 'trash' ? taskB.deletedAt ?? taskB.createdAt : taskB.createdAt
-      return timeB - timeA
-    })
-    const normalizedQuery = searchQuery.trim().toLowerCase()
-
-    return sortedTasks.filter((task) => {
-      const matchCategory =
-        taskView !== 'gallery'
-          ? true
-          : activeCategoryFilter === ALL_CATEGORY_FILTER
-            ? true
-            : activeCategoryFilter === FAVORITES_CATEGORY_FILTER
-              ? Boolean(task.isFavorite)
-              : activeCategoryFilter === UNCATEGORIZED_CATEGORY_FILTER
-                ? !task.categoryId || !categoryIdSet.has(task.categoryId)
-                : task.categoryId === activeCategoryFilter
-
-      if (!matchCategory) return false
-
-      const matchStatus = filterStatus === 'all' || task.status === filterStatus
-      if (!matchStatus) return false
-      if (!normalizedQuery) return true
-
-      const prompt = (task.prompt || '').toLowerCase()
-      const paramsString = JSON.stringify(task.params).toLowerCase()
-      const providerName = resolveTaskProviderName(task, providers).toLowerCase()
-      const categoryName = resolveTaskCategoryName(task, categories).toLowerCase()
-
-      return (
-        prompt.includes(normalizedQuery) ||
-        paramsString.includes(normalizedQuery) ||
-        providerName.includes(normalizedQuery) ||
-        categoryName.includes(normalizedQuery)
-      )
-    })
-  }, [
-    activeCategoryFilter,
-    categories,
-    categoryIdSet,
-    filterStatus,
-    providers,
-    searchQuery,
-    sourceTasks,
-    taskView,
-  ])
+  const filteredTasks = useMemo(
+    () => resolveFilteredGalleryTasks({
+      activeCategoryFilter,
+      categories,
+      filterStatus,
+      providers,
+      searchQuery,
+      tasks,
+      taskView,
+    }),
+    [
+      activeCategoryFilter,
+      categories,
+      filterStatus,
+      providers,
+      searchQuery,
+      tasks,
+      taskView,
+    ],
+  )
 
   const selectedIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds])
   const visibleTaskIds = useMemo(() => filteredTasks.map((task) => task.id), [filteredTasks])

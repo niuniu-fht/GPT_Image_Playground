@@ -5,7 +5,7 @@ interface TaskCardMetaChipsProps {
   isFavorite: boolean
   taskKind: TaskKind
   categoryName: string
-  providerName: string
+  modelLabel: string
   statusLabel: string
   statusChipClass: string
   progressCountLabel: string | null
@@ -24,7 +24,7 @@ export default function TaskCardMetaChips({
   isFavorite,
   taskKind,
   categoryName,
-  providerName,
+  modelLabel,
   statusLabel,
   statusChipClass,
   progressCountLabel,
@@ -58,12 +58,14 @@ export default function TaskCardMetaChips({
         {categoryName}
       </span>
 
-      <span
-        className="max-w-[9rem] flex-shrink-0 truncate rounded-full bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-300"
-        title={providerName}
-      >
-        {providerName}
-      </span>
+      {modelLabel && (
+        <span
+          className="max-w-[9rem] flex-shrink-0 truncate rounded-full bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-300"
+          title={modelLabel}
+        >
+          {modelLabel}
+        </span>
+      )}
 
       <span className={`flex-shrink-0 rounded-full px-2 py-1 text-[11px] font-medium ${statusChipClass}`}>
         {statusLabel}

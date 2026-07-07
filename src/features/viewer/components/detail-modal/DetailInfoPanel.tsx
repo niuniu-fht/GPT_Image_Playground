@@ -20,7 +20,6 @@ interface DetailInfoPanelProps {
   transportRequested: string | null
   transportChipClass: string
   currentImageSize: string
-  providerName: string
   categoryName: string
   displayQuality: string
   displayOutputFormat: string
@@ -58,7 +57,6 @@ export default function DetailInfoPanel({
   transportRequested,
   transportChipClass,
   currentImageSize,
-  providerName,
   categoryName,
   displayQuality,
   displayOutputFormat,
@@ -117,7 +115,6 @@ export default function DetailInfoPanel({
           statusLabel={statusLabel}
           progressCountLabel={progressCountLabel}
           currentImageSize={currentImageSize}
-          providerName={providerName}
           displayQuality={displayQuality}
           displayOutputFormat={displayOutputFormat}
           appliedSize={appliedSize}

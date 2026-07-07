@@ -83,6 +83,13 @@ export const emptyModelDraft: ModelDraft = {
   costCredits: 1,
   costCredits2K: 2,
   costCredits4K: 4,
+  lowQualityCostCredits: 1,
+  lowQualityCostCredits2K: 2,
+  lowQualityCostCredits4K: 4,
+  highQualityEnabled: true,
+  highQualityCostCredits: 2,
+  highQualityCostCredits2K: 4,
+  highQualityCostCredits4K: 8,
   upstreamModel: 'gpt-image-2',
   upstreamProviderId: null,
   apiProtocol: 'images',
@@ -154,6 +161,7 @@ export const defaultSettingsDraft: AdminPlatformSettings = {
   generationEnabled: true,
   registerBonusCredits: 100,
   maintenanceMessage: '',
+  redeemDescription: '活动码和客服补偿码会立即到账，并写入积分流水。',
   landingHeroSlidesJson: '',
 }
 
@@ -205,9 +213,16 @@ export function downloadCsv(filename: string, rows: unknown[][]) {
 export function taskParamsSummary(value: unknown) {
   if (!value || typeof value !== 'object') return '-'
   const params = value as Record<string, unknown>
+  const qualityLabel = params.quality === 'low'
+    ? '低'
+    : params.quality === 'medium'
+      ? '中'
+      : params.quality === 'high'
+        ? '高'
+        : params.quality
   const parts = [
     typeof params.size === 'string' ? params.size : '',
-    typeof params.quality === 'string' ? `质量 ${params.quality}` : '',
+    typeof qualityLabel === 'string' ? `质量 ${qualityLabel}` : '',
     typeof params.output_format === 'string' ? params.output_format.toUpperCase() : '',
     typeof params.n === 'number' ? `${params.n} 张` : '',
   ].filter(Boolean)

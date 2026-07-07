@@ -5,7 +5,7 @@ import { submitTask } from './runtime'
 import { useStore } from './state'
 
 export async function editOutputs(task: TaskRecord, preferredImageId?: string) {
-  const { setImageEditSession, showToast } = useStore.getState()
+  const { inputImages, setInputImages, setAppView, showToast } = useStore.getState()
   const sourceImageId =
     preferredImageId && task.outputImages.includes(preferredImageId)
       ? preferredImageId
@@ -16,11 +16,40 @@ export async function editOutputs(task: TaskRecord, preferredImageId?: string) {
 
   const sourceImageDataUrl = await getImageView(sourceImageId).getRawDataUrl()
   if (!sourceImageDataUrl) {
-    showToast('输出图读取失败，无法进入编辑器', 'error')
+    showToast('输出图读取失败，无法添加到参考图', 'error')
     return
   }
 
-  setImageEditSession({
+  if (inputImages.some((image) => image.id === sourceImageId)) {
+    setAppView('local')
+    showToast('这张图片已在参考图中', 'info')
+    return
+  }
+
+  if (inputImages.length >= 16) {
+    showToast('参考图数量已达上限（16 张），请先移除部分参考图', 'error')
+    return
+  }
+
+  setInputImages([
+    ...inputImages,
+    {
+      id: sourceImageId,
+      dataUrl: sourceImageDataUrl,
+      maskDataUrl: null,
+      editSelection: null,
+      sourceTaskId: task.id,
+      sourceImageId,
+      lineageParentTaskId: task.id,
+      lineageParentImageId: sourceImageId,
+    },
+  ])
+  setAppView('local')
+  showToast('已添加到参考图', 'success')
+}
+
+export function openImageEditorForTask(task: TaskRecord, sourceImageId: string, sourceImageDataUrl: string) {
+  useStore.getState().setImageEditSession({
     taskId: task.id,
     providerId: task.providerId ?? null,
     sourceImageId,

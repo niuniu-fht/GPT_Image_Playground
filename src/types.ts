@@ -137,6 +137,13 @@ export interface ModelConfig {
   costCredits: number
   costCredits2K: number
   costCredits4K: number
+  lowQualityCostCredits: number
+  lowQualityCostCredits2K: number
+  lowQualityCostCredits4K: number
+  highQualityEnabled: boolean
+  highQualityCostCredits: number
+  highQualityCostCredits2K: number
+  highQualityCostCredits4K: number
   upstreamModel: string
   upstreamProviderId?: string | null
   apiProtocol: ApiProtocol
@@ -336,6 +343,13 @@ export interface AdminUpstreamProvider {
     costCredits: number
     costCredits2K: number
     costCredits4K: number
+    lowQualityCostCredits: number
+    lowQualityCostCredits2K: number
+    lowQualityCostCredits4K: number
+    highQualityEnabled: boolean
+    highQualityCostCredits: number
+    highQualityCostCredits2K: number
+    highQualityCostCredits4K: number
   }>
 }
 
@@ -587,6 +601,7 @@ export interface AdminPlatformSettings {
   generationEnabled: boolean
   registerBonusCredits: number
   maintenanceMessage: string
+  redeemDescription: string
   landingHeroSlidesJson: string
 }
 

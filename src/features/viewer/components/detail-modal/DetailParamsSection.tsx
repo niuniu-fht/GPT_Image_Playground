@@ -1,5 +1,5 @@
 import type { TaskRecord } from '../../../../types'
-import { resolveTaskKind } from '../../../../store'
+import { resolveTaskKind, resolveTaskModelLabel } from '../../../../store'
 
 interface DetailParamsSectionProps {
   task: TaskRecord
@@ -8,7 +8,6 @@ interface DetailParamsSectionProps {
   statusLabel: string
   progressCountLabel: string | null
   currentImageSize: string
-  providerName: string
   displayQuality: string
   displayOutputFormat: string
   appliedSize: string | null
@@ -63,7 +62,6 @@ export default function DetailParamsSection(props: DetailParamsSectionProps) {
     statusLabel,
     progressCountLabel,
     currentImageSize,
-    providerName,
     displayQuality,
     displayOutputFormat,
     appliedSize,
@@ -76,6 +74,7 @@ export default function DetailParamsSection(props: DetailParamsSectionProps) {
   } = props
   const taskKind = resolveTaskKind(task)
   const isImageTask = taskKind === 'image'
+  const modelLabel = resolveTaskModelLabel(task)
 
   return (
     <>
@@ -85,7 +84,7 @@ export default function DetailParamsSection(props: DetailParamsSectionProps) {
       <div className="mb-4 grid grid-cols-2 gap-2 text-xs">
         {renderValueCard('分类', categoryName)}
         {renderValueCard('收藏', isFavorite ? '已收藏' : '未收藏')}
-        {renderValueCard('供应商', providerName)}
+        {modelLabel ? renderValueCard('模型', modelLabel) : null}
         {renderValueCard('状态', statusLabel)}
         {isImageTask ? renderValueCard('任务类型', '单图任务') : null}
         {progressCountLabel ? renderValueCard('当前张数', progressCountLabel) : null}
