@@ -1134,6 +1134,29 @@ export default function AdminConsole() {
     })
   }
 
+  function readTaskAdminMeta(task: AdminGenerationTask): Record<string, unknown> {
+    const params = task.params && typeof task.params === 'object' && !Array.isArray(task.params)
+      ? task.params as Record<string, unknown>
+      : {}
+    const meta = params._admin
+    return meta && typeof meta === 'object' && !Array.isArray(meta) ? meta as Record<string, unknown> : {}
+  }
+
+  function taskOperationMeta(task: AdminGenerationTask): { label: string; tone: 'blue' | 'purple' | 'gray'; isEdit: boolean } {
+    const meta = readTaskAdminMeta(task)
+    const operation = typeof meta.operation === 'string' ? meta.operation : ''
+    if (operation === 'edit') return { label: '编辑', tone: 'purple', isEdit: true }
+    if (operation === 'generation') return { label: '生成', tone: 'blue', isEdit: false }
+    return { label: '生成', tone: 'blue', isEdit: false }
+  }
+
+  function taskReferenceImages(task: AdminGenerationTask): Array<Record<string, unknown>> {
+    const meta = readTaskAdminMeta(task)
+    return Array.isArray(meta.referenceImages)
+      ? meta.referenceImages.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+      : []
+  }
+
   async function updateSquareShareStatus(shareId: string, status: AdminSquareShare['status'], successMessage: string, closeAfter = false) {
     confirmAdminAction({
       title: '修改广场内容状态',
@@ -2603,8 +2626,8 @@ export default function AdminConsole() {
           mobileHint="横向滑动查看更多任务字段和操作"
           footer={<PaginationBar page={tasksPage} pageSize={adminPageSize} total={tasksTotal} onPageChange={setTasksPage} />}
         >
-          <div className="min-w-[1320px]">
-              <div className="sticky top-0 z-20 grid grid-cols-[34px_1.65fr_1.05fr_1fr_180px_110px_90px_150px_170px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
+          <div className="min-w-[1500px]">
+              <div className="sticky top-0 z-20 grid grid-cols-[34px_1.45fr_170px_1.05fr_1fr_180px_110px_90px_150px_170px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
                 <label className="flex items-center">
                   <input
                     type="checkbox"
@@ -2615,6 +2638,7 @@ export default function AdminConsole() {
                   />
                 </label>
                 <span>请求</span>
+                <span>类型 / 参考图</span>
                 <span>用户</span>
                 <span>模型</span>
                 <span>参数</span>
@@ -2625,8 +2649,10 @@ export default function AdminConsole() {
               </div>
               {tasks.map((task) => {
                 const checked = selectedTaskIds.includes(task.id)
+                const operation = taskOperationMeta(task)
+                const referenceImages = taskReferenceImages(task)
                 return (
-                  <div key={task.id} className={cx('grid grid-cols-[34px_1.65fr_1.05fr_1fr_180px_110px_90px_150px_170px] items-center gap-3 border-b border-gray-100 px-4 py-3 text-sm transition last:border-0 dark:border-white/[0.06]', checked ? 'bg-blue-50/70 dark:bg-blue-400/10' : 'hover:bg-gray-50 dark:hover:bg-white/[0.04]')}>
+                  <div key={task.id} className={cx('grid grid-cols-[34px_1.45fr_170px_1.05fr_1fr_180px_110px_90px_150px_170px] items-center gap-3 border-b border-gray-100 px-4 py-3 text-sm transition last:border-0 dark:border-white/[0.06]', checked ? 'bg-blue-50/70 dark:bg-blue-400/10' : 'hover:bg-gray-50 dark:hover:bg-white/[0.04]')}>
                     <label className="flex items-center">
                       <input
                         type="checkbox"
@@ -2641,6 +2667,46 @@ export default function AdminConsole() {
                       <div className="mt-1 truncate text-xs text-gray-400">
                         ID {task.id.slice(0, 12)} · 云端资产 {task.generatedAssets?.length ?? 0}
                       </div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <StatusBadge tone={operation.tone}>{operation.label}</StatusBadge>
+                        {operation.isEdit && (
+                          <span className="text-xs text-gray-400">{referenceImages.length} 张参考图</span>
+                        )}
+                      </div>
+                      {operation.isEdit && (
+                        <div className="mt-1.5 flex min-h-9 items-center gap-1.5">
+                          {referenceImages.length ? referenceImages.slice(0, 4).map((image, index) => {
+                            const previewDataUrl = typeof image.previewDataUrl === 'string' ? image.previewDataUrl : ''
+                            const title = [
+                              typeof image.id === 'string' ? `ID ${image.id}` : '',
+                              typeof image.mimeType === 'string' ? image.mimeType : '',
+                              typeof image.byteSize === 'number' ? `${Math.round(image.byteSize / 1024)}KB` : '',
+                            ].filter(Boolean).join(' · ')
+                            return previewDataUrl ? (
+                              <img
+                                key={`${task.id}-ref-${index}`}
+                                src={previewDataUrl}
+                                title={title || '参考图'}
+                                className="h-8 w-8 rounded-lg border border-gray-200 object-cover shadow-sm dark:border-white/[0.08]"
+                                alt="参考图"
+                              />
+                            ) : (
+                              <span
+                                key={`${task.id}-ref-${index}`}
+                                title={title || '参考图无预览'}
+                                className="grid h-8 w-8 place-items-center rounded-lg border border-dashed border-gray-200 text-[10px] text-gray-400 dark:border-white/[0.08]"
+                              >
+                                图
+                              </span>
+                            )
+                          }) : (
+                            <span className="text-xs text-gray-400">无预览</span>
+                          )}
+                          {referenceImages.length > 4 && <span className="text-xs text-gray-400">+{referenceImages.length - 4}</span>}
+                        </div>
+                      )}
                     </div>
                     <span className="truncate text-xs text-gray-500">{task.user?.email ?? '-'}</span>
                     <span className="truncate text-xs text-gray-500">{task.modelConfig?.displayName ?? '-'}</span>

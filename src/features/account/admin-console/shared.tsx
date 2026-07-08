@@ -274,10 +274,11 @@ export function EmptyState({ text }: { text: string }) {
   )
 }
 
-export function StatusBadge({ tone, children }: { tone: 'green' | 'blue' | 'amber' | 'red' | 'gray'; children: React.ReactNode }) {
+export function StatusBadge({ tone, children }: { tone: 'green' | 'blue' | 'purple' | 'amber' | 'red' | 'gray'; children: React.ReactNode }) {
   const styles = {
     green: 'bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-400/10 dark:text-emerald-300 dark:ring-emerald-400/20',
     blue: 'bg-blue-50 text-blue-700 ring-blue-100 dark:bg-blue-400/10 dark:text-blue-300 dark:ring-blue-400/20',
+    purple: 'bg-violet-50 text-violet-700 ring-violet-100 dark:bg-violet-400/10 dark:text-violet-300 dark:ring-violet-400/20',
     amber: 'bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-400/10 dark:text-amber-300 dark:ring-amber-400/20',
     red: 'bg-rose-50 text-rose-700 ring-rose-100 dark:bg-rose-400/10 dark:text-rose-300 dark:ring-rose-400/20',
     gray: 'bg-gray-100 text-gray-600 ring-gray-200 dark:bg-white/[0.06] dark:text-gray-300 dark:ring-white/[0.08]',

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import type { Prisma } from '@prisma/client'
 import crypto from 'node:crypto'
+import sharp from 'sharp'
 import { z } from 'zod'
 import { requireUser, resLocals } from '../auth.js'
 import { env } from '../env.js'
@@ -233,6 +234,51 @@ function summarizeMaskImage(mask: GenerationInput['editMask']): Record<string, u
       error: error instanceof Error ? error.message : String(error),
     }
   }
+}
+
+async function createReferenceImagePreview(
+  image: { id: string; dataUrl: string },
+  index: number,
+): Promise<Record<string, unknown>> {
+  const summary = summarizeReferenceImage(image, index)
+  if (summary.invalid) return summary
+
+  try {
+    const { bytes } = parseDataUrl(image.dataUrl)
+    const thumbnail = await sharp(Buffer.from(bytes))
+      .rotate()
+      .resize({ width: 96, height: 96, fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 62 })
+      .toBuffer()
+    return {
+      ...summary,
+      previewDataUrl: `data:image/webp;base64,${thumbnail.toString('base64')}`,
+    }
+  } catch (error) {
+    return {
+      ...summary,
+      previewError: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+async function createAdminTaskMeta(input: GenerationInput): Promise<Record<string, unknown>> {
+  const operation = input.inputImages.length > 0 ? 'edit' : 'generation'
+  const referenceImages = operation === 'edit'
+    ? await Promise.all(input.inputImages.map(createReferenceImagePreview))
+    : []
+
+  return {
+    operation,
+    operationLabel: operation === 'edit' ? '编辑' : '生成',
+    referenceImageCount: input.inputImages.length,
+    referenceImages,
+    mask: summarizeMaskImage(input.editMask),
+  }
+}
+
+function toPrismaJsonValue(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue
 }
 
 function sniffImageMimeType(buffer: Buffer): string | null {
@@ -843,6 +889,7 @@ router.post('/', requireUser, async (req, res, next) => {
         quality: resolveEffectiveQuality(model, input.params.quality),
       },
     }
+    const adminTaskMeta = await createAdminTaskMeta(generationInput)
     const requestedCount = clampImageCount(generationInput.params.n)
     const costCredits = resolveModelCostForSize(model, generationInput.params.size, generationInput.params.quality) * requestedCount
     const task = await prisma.$transaction(async (tx) => {
@@ -865,7 +912,10 @@ router.post('/', requireUser, async (req, res, next) => {
           userId: user.id,
           modelConfigId: model.id,
           prompt: generationInput.prompt,
-          params: generationInput.params,
+          params: toPrismaJsonValue({
+            ...generationInput.params,
+            _admin: adminTaskMeta,
+          }),
           status: 'running',
           costCredits,
         },
