@@ -2,7 +2,7 @@ import type { ModelConfig } from '../types'
 import { resolveImageSizeTier, type SizeTier } from './size'
 
 export function isGptImage2Model(model: Pick<ModelConfig, 'name' | 'upstreamModel'>): boolean {
-  return model.name === 'gpt-image-2'
+  return /^gpt-image-2(?:$|[-_:/.])/i.test(model.upstreamModel || '') || model.name === 'gpt-image-2'
 }
 
 export function supportsHighQualityPricing(model: ModelConfig | null): boolean {

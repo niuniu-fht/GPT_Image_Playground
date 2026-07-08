@@ -3,7 +3,7 @@ import type { TaskParams } from '../types'
 
 export const DEFAULT_PARAMS: TaskParams = {
   size: '1024x1024',
-  quality: 'medium',
+  quality: 'low',
   output_format: 'png',
   output_compression: null,
   moderation: 'auto',

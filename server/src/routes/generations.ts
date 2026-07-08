@@ -317,8 +317,65 @@ function withImageCount(input: GenerationInput, n: number): GenerationInput {
 function resolveEffectiveQuality(model: GenerationModel, quality: string): string {
   if (!isGptImage2Model(model)) return 'medium'
   if (quality === 'low') return 'low'
+  if (quality === 'medium') return 'medium'
   if (quality === 'high' && supportsHighQualityPricing(model)) return 'high'
-  return 'medium'
+  return 'low'
+}
+
+function sanitizeUpstreamPayload(value: unknown, depth = 0): unknown {
+  if (depth > 5) return '[depth-limit]'
+  if (typeof value === 'string') {
+    if (value.length > 300) return `[string length=${value.length} preview=${value.slice(0, 120)}]`
+    return value
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).map((item) => sanitizeUpstreamPayload(item, depth + 1))
+  }
+  if (!value || typeof value !== 'object') return value
+
+  const result: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (/b64|base64/i.test(key) && typeof item === 'string') {
+      result[key] = `[base64 length=${item.length}]`
+      continue
+    }
+    result[key] = sanitizeUpstreamPayload(item, depth + 1)
+  }
+  return result
+}
+
+async function readUpstreamJsonWithLog(response: Response, context: {
+  endpoint: string
+  request: Record<string, unknown>
+}): Promise<unknown> {
+  const contentType = response.headers.get('content-type') || ''
+  const text = await response.text().catch((error: unknown) => {
+    console.warn('[generation] failed to read upstream response body', {
+      endpoint: context.endpoint,
+      status: response.status,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return ''
+  })
+  let payload: unknown = {}
+  if (text) {
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      payload = { raw: text.slice(0, 1200) }
+    }
+  }
+
+  console.info('[generation] upstream response', {
+    endpoint: context.endpoint,
+    status: response.status,
+    ok: response.ok,
+    contentType,
+    request: context.request,
+    payload: sanitizeUpstreamPayload(payload),
+  })
+
+  return payload
 }
 
 async function callImagesApiOnce(
@@ -347,12 +404,24 @@ async function callImagesApiOnce(
       form.set('mask', dataUrlToFile(input.editMask.dataUrl, 'mask.png'))
     }
 
-    const response = await fetch(`${baseUrl}/v1/images/edits`, {
+    const endpoint = `${baseUrl}/v1/images/edits`
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers,
       body: form,
     })
-    const payload = await response.json().catch(() => ({}))
+    const payload = await readUpstreamJsonWithLog(response, {
+      endpoint: '/v1/images/edits',
+      request: {
+        model: upstream.model,
+        promptLength: input.prompt.length,
+        size: input.params.size,
+        quality: input.params.quality,
+        n: input.params.n,
+        inputImages: input.inputImages.length,
+        hasMask: Boolean(input.editMask?.dataUrl),
+      },
+    })
     if (!response.ok) {
       const message = typeof (payload as { error?: { message?: unknown } }).error?.message === 'string'
         ? (payload as { error: { message: string } }).error.message
@@ -375,7 +444,8 @@ async function callImagesApiOnce(
     body.output_compression = input.params.output_compression
   }
 
-  const response = await fetch(`${baseUrl}/v1/images/generations`, {
+  const endpoint = `${baseUrl}/v1/images/generations`
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       ...headers,
@@ -383,7 +453,10 @@ async function callImagesApiOnce(
     },
     body: JSON.stringify(body),
   })
-  const payload = await response.json().catch(() => ({}))
+  const payload = await readUpstreamJsonWithLog(response, {
+    endpoint: '/v1/images/generations',
+    request: body,
+  })
   if (!response.ok) {
     const message = typeof (payload as { error?: { message?: unknown } }).error?.message === 'string'
       ? (payload as { error: { message: string } }).error.message

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
+import { resolveModelCostForSize } from '../../../../lib/modelCost'
 import { renderModelIcon } from '../../../../lib/modelIcon'
-import type { ModelConfig } from '../../../../types'
+import type { ModelConfig, TaskParams } from '../../../../types'
 
 interface ModelSelectorProps {
   models: ModelConfig[]
   activeModelId: string | null
   compact: boolean
+  params: TaskParams
   onChange: (modelId: string) => void
 }
 
@@ -13,11 +15,15 @@ export default function ModelSelector({
   models,
   activeModelId,
   compact,
+  params,
   onChange,
 }: ModelSelectorProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const activeModel = models.find((model) => model.id === activeModelId) ?? models[0] ?? null
+  const activeModelCost = activeModel
+    ? resolveModelCostForSize(activeModel, params.size, params.quality)
+    : 0
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -51,7 +57,7 @@ export default function ModelSelector({
             )}
           </span>
           <span className="mt-0.5 block truncate text-xs text-gray-400 dark:text-gray-500">
-            {activeModel ? `${activeModel.costCredits} 积分 / 次 · ${activeModel.description}` : '请联系管理员配置模型'}
+            {activeModel ? `${activeModelCost} 积分 / 次 · ${activeModel.description}` : '请联系管理员配置模型'}
           </span>
         </span>
         <svg className={`h-4 w-4 text-gray-500 transition ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -63,6 +69,7 @@ export default function ModelSelector({
         <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-50 max-h-80 overflow-y-auto rounded-2xl border border-gray-200/90 bg-white p-2 shadow-2xl shadow-gray-900/12 dark:border-white/[0.08] dark:bg-gray-900">
           {models.map((model) => {
             const selected = model.id === activeModel?.id
+            const modelCost = resolveModelCostForSize(model, params.size, params.quality)
             return (
               <button
                 key={model.id}
@@ -84,7 +91,7 @@ export default function ModelSelector({
                       {model.displayName}
                     </span>
                     <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-400 dark:bg-white/[0.06]">
-                      积分 {model.costCredits}
+                      积分 {modelCost}
                     </span>
                     {model.isNew && (
                       <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">

@@ -31,6 +31,7 @@ export default function ParamsSection({
           models={models}
           activeModelId={activeModelId}
           compact={false}
+          params={params}
           onChange={onActiveModelChange}
         />
       </label>
