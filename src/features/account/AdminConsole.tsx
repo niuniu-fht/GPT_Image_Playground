@@ -1157,6 +1157,54 @@ export default function AdminConsole() {
       : []
   }
 
+  function taskRequestParams(task: AdminGenerationTask): unknown {
+    if (!task.params || typeof task.params !== 'object' || Array.isArray(task.params)) return task.params
+    const { _admin: _internal, ...requestParams } = task.params as Record<string, unknown>
+    return requestParams
+  }
+
+  function summarizeAdminOutputImages(value: unknown): unknown {
+    if (!Array.isArray(value)) return value ?? []
+    return value.map((item, index) => {
+      if (!item || typeof item !== 'object') return { index, value: item }
+      const image = item as Record<string, unknown>
+      const dataUrl = typeof image.dataUrl === 'string' ? image.dataUrl : ''
+      return {
+        index: typeof image.index === 'number' ? image.index : index,
+        status: image.status,
+        mimeType: image.mimeType,
+        error: image.error,
+        dataUrl: dataUrl
+          ? dataUrl.startsWith('data:')
+            ? `[data-url length=${dataUrl.length}]`
+            : dataUrl
+          : undefined,
+      }
+    })
+  }
+
+  function taskReturnParams(task: AdminGenerationTask): unknown {
+    const meta = readTaskAdminMeta(task)
+    const upstreamResponse = meta.upstreamResponse
+    if (upstreamResponse && typeof upstreamResponse === 'object') return upstreamResponse
+
+    return {
+      status: task.status,
+      error: task.error ?? null,
+      outputImages: summarizeAdminOutputImages(task.outputImages),
+      generatedAssets: (task.generatedAssets ?? []).map((asset) => ({
+        imageIndex: asset.imageIndex,
+        publicUrl: asset.publicUrl,
+        r2Key: asset.r2Key,
+        mimeType: asset.mimeType,
+        byteSize: asset.byteSize,
+        width: asset.width,
+        height: asset.height,
+        uploadMode: asset.uploadMode,
+      })),
+    }
+  }
+
   async function updateSquareShareStatus(shareId: string, status: AdminSquareShare['status'], successMessage: string, closeAfter = false) {
     confirmAdminAction({
       title: '修改广场内容状态',
@@ -3209,7 +3257,11 @@ export default function AdminConsole() {
             )}
             <div>
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">请求参数</div>
-              <pre className="max-h-56 overflow-auto rounded-xl border border-gray-100 bg-gray-950 p-3 text-xs leading-5 text-gray-100 dark:border-white/[0.08]">{formatJson(selected.params)}</pre>
+              <pre className="max-h-56 overflow-auto rounded-xl border border-gray-100 bg-gray-950 p-3 text-xs leading-5 text-gray-100 dark:border-white/[0.08]">{formatJson(taskRequestParams(selected))}</pre>
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">返回参数</div>
+              <pre className="max-h-72 overflow-auto rounded-xl border border-gray-100 bg-gray-950 p-3 text-xs leading-5 text-gray-100 dark:border-white/[0.08]">{formatJson(taskReturnParams(selected))}</pre>
             </div>
             <div>
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">云端图片资产</div>

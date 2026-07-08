@@ -42,9 +42,9 @@ const generationSchema = z.object({
 type GenerationInput = z.infer<typeof generationSchema>
 type GenerationModel = Prisma.ModelConfigGetPayload<{ include: { upstreamProvider: true } }>
 type GenerationUpstream = { model: string; baseUrl: string; apiKey: string }
-type GeneratedImagePayload = { dataUrl: string; index?: number; mimeType: string }
+type GeneratedImagePayload = { dataUrl: string; index?: number; mimeType: string; upstreamResponse?: unknown }
 type GenerationImageResult =
-  | { index: number; status: 'done'; mimeType: string }
+  | { index: number; status: 'done'; mimeType: string; upstreamResponse?: unknown }
   | { error: string; httpStatus?: number; index: number; status: 'error' }
 type StoredGenerationImageResult =
   | { dataUrl: string; index: number; mimeType: string; status: 'done' }
@@ -281,6 +281,32 @@ function toPrismaJsonValue(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue
 }
 
+function mergeAdminReturnParams(
+  currentParams: Prisma.JsonValue,
+  generationResult: Awaited<ReturnType<typeof callImagesApi>>,
+  squareUploadError: string | null,
+): Prisma.InputJsonValue {
+  const params = currentParams && typeof currentParams === 'object' && !Array.isArray(currentParams)
+    ? currentParams as Record<string, unknown>
+    : {}
+  const currentAdmin = params._admin && typeof params._admin === 'object' && !Array.isArray(params._admin)
+    ? params._admin as Record<string, unknown>
+    : {}
+
+  return toPrismaJsonValue({
+    ...params,
+    _admin: {
+      ...currentAdmin,
+      upstreamResponse: {
+        requestedCount: generationResult.requestedCount,
+        receivedCount: generationResult.images.length,
+        imageResults: generationResult.imageResults,
+        squareUploadError,
+      },
+    },
+  })
+}
+
 function sniffImageMimeType(buffer: Buffer): string | null {
   if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
     return 'image/png'
@@ -344,17 +370,18 @@ async function remoteImageUrlToDataUrl(
 async function normalizeImageResponse(payload: unknown, upstreamBaseUrl: string): Promise<GeneratedImagePayload[]> {
   const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
   const data = Array.isArray(record.data) ? record.data : []
+  const upstreamResponse = sanitizeUpstreamPayload(payload)
   const images = data.flatMap((item) => {
     if (!item || typeof item !== 'object') return []
     const image = item as Record<string, unknown>
     if (typeof image.b64_json === 'string') {
-      return [{ dataUrl: `data:image/png;base64,${image.b64_json}`, mimeType: 'image/png' }]
+      return [{ dataUrl: `data:image/png;base64,${image.b64_json}`, mimeType: 'image/png', upstreamResponse }]
     }
     if (typeof image.url === 'string') {
-      return [{ dataUrl: image.url, mimeType: 'image/png' }]
+      return [{ dataUrl: image.url, mimeType: 'image/png', upstreamResponse }]
     }
     if (typeof image.image_url === 'string') {
-      return [{ dataUrl: image.image_url, mimeType: 'image/png' }]
+      return [{ dataUrl: image.image_url, mimeType: 'image/png', upstreamResponse }]
     }
     return []
   })
@@ -362,7 +389,10 @@ async function normalizeImageResponse(payload: unknown, upstreamBaseUrl: string)
   return Promise.all(
     images.map((image) => (
       /^(https?:\/\/|\/)/i.test(image.dataUrl)
-        ? remoteImageUrlToDataUrl(image.dataUrl, image.mimeType, upstreamBaseUrl)
+        ? remoteImageUrlToDataUrl(image.dataUrl, image.mimeType, upstreamBaseUrl).then((nextImage) => ({
+            ...nextImage,
+            upstreamResponse: image.upstreamResponse,
+          }))
         : image
     )),
   )
@@ -638,6 +668,7 @@ async function callImagesApi(
         index,
         status: 'done',
         mimeType: result.value.image.mimeType,
+        upstreamResponse: result.value.image.upstreamResponse,
       })
       return
     }
@@ -755,6 +786,10 @@ async function runGenerationTask(input: {
     const chargedCredits = input.costCredits - refundCredits
 
     await prisma.$transaction(async (tx) => {
+      const currentTask = await tx.generationTask.findUnique({
+        where: { id: input.taskId },
+        select: { params: true },
+      })
       if (refundCredits > 0) {
         const latestUser = await tx.user.update({
           where: { id: input.userId },
@@ -777,6 +812,7 @@ async function runGenerationTask(input: {
           status: 'done',
           costCredits: chargedCredits,
           error: squareUploadError,
+          params: mergeAdminReturnParams(currentTask?.params ?? input.generationInput.params, generationResult, squareUploadError),
           outputImages,
           finishedAt: new Date(),
         },
