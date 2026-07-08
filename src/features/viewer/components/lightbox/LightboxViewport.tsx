@@ -19,6 +19,7 @@ interface LightboxViewportProps {
   onPointerMove: PointerEventHandler<HTMLDivElement>
   onPointerUp: PointerEventHandler<HTMLDivElement>
   onPointerCancel: PointerEventHandler<HTMLDivElement>
+  onDownload?: () => void
   onPrev: () => void
   onNext: () => void
 }
@@ -43,6 +44,7 @@ export default function LightboxViewport(props: LightboxViewportProps) {
     onPointerMove,
     onPointerUp,
     onPointerCancel,
+    onDownload,
     onPrev,
     onNext,
   } = props
@@ -88,6 +90,28 @@ export default function LightboxViewport(props: LightboxViewportProps) {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>
+      {onDownload && (
+        <button
+          type="button"
+          className="absolute right-16 top-4 z-20 inline-flex h-10 items-center gap-2 rounded-full border border-white/10 bg-black/45 px-3 text-xs font-semibold text-white/90 shadow-lg backdrop-blur-md transition hover:bg-black/60 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40 sm:right-[4.5rem] sm:top-5"
+          aria-label="下载图片"
+          title="下载图片"
+          onPointerDown={(event) => {
+            event.stopPropagation()
+          }}
+          onClick={(event) => {
+            event.stopPropagation()
+            onDownload()
+          }}
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <path d="M7 10l5 5 5-5" />
+            <path d="M12 15V3" />
+          </svg>
+          下载
+        </button>
+      )}
       {/* 图片容器 */}
       <div className="relative z-10 animate-zoom-in">
         <div

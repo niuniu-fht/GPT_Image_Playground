@@ -1,10 +1,14 @@
 import { useCloseOnEscape } from '../../../../hooks/useCloseOnEscape'
+import { downloadImageFromSrc } from '../../../../lib/downloadImage'
+import { resolveRemoteImageAccessMessage } from '../../../../lib/remoteImageAccess'
+import { useStore } from '../../../../store'
 import LightboxViewport from './LightboxViewport'
 import { useLightboxState } from './useLightboxState'
 import { useLightboxTransform } from './useLightboxTransform'
 
 export default function Lightbox() {
   const { lightboxImageId, src, close, showNav, currentIndex, total, goPrev, goNext } = useLightboxState()
+  const showToast = useStore((state) => state.showToast)
 
   useCloseOnEscape(Boolean(lightboxImageId), close)
 
@@ -29,6 +33,17 @@ export default function Lightbox() {
 
   if (!lightboxImageId || !src) return null
 
+  const handleDownload = async () => {
+    try {
+      await downloadImageFromSrc(src, `image-${currentIndex + 1}`)
+      showToast('开始下载', 'success')
+    } catch (error) {
+      console.error(error)
+      window.open(src, '_blank', 'noopener,noreferrer')
+      showToast(resolveRemoteImageAccessMessage(error, 'download'), 'error')
+    }
+  }
+
   return (
     <LightboxViewport
       src={src}
@@ -49,6 +64,7 @@ export default function Lightbox() {
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
+      onDownload={() => void handleDownload()}
       onPrev={goPrev}
       onNext={goNext}
     />

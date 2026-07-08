@@ -16,6 +16,7 @@ interface DetailImagePanelProps {
   durationLabel: string | null
   statusLabel: string
   onCopyError: () => void
+  onDownloadImage: () => void
   onMainImageLoad: () => void
   onOpenLightbox: () => void
   onPrevImage: () => void
@@ -36,6 +37,7 @@ export default function DetailImagePanel({
   durationLabel,
   statusLabel,
   onCopyError,
+  onDownloadImage,
   onMainImageLoad,
   onOpenLightbox,
   onPrevImage,
@@ -130,6 +132,23 @@ export default function DetailImagePanel({
                 </div>
               )}
             </div>
+          )}
+
+          {task.status === 'done' && currentOutputImageSrc && (
+            <button
+              type="button"
+              onClick={onDownloadImage}
+              className="absolute right-3 top-3 inline-flex h-9 items-center gap-1.5 rounded-full border border-white/15 bg-black/45 px-3 text-xs font-semibold text-white shadow-lg backdrop-blur-md transition hover:bg-black/65"
+              aria-label="下载当前图片"
+              title="下载当前图片"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <path d="M7 10l5 5 5-5" />
+                <path d="M12 15V3" />
+              </svg>
+              下载
+            </button>
           )}
 
           {outputLen > 1 && (

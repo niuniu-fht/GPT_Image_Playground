@@ -22,6 +22,8 @@ import {
 } from '../../../../store'
 import { useCloseOnEscape } from '../../../../hooks/useCloseOnEscape'
 import { copyImageToClipboard } from '../../../../lib/clipboardImage'
+import { downloadImageFromSrc } from '../../../../lib/downloadImage'
+import { resolveRemoteImageAccessMessage } from '../../../../lib/remoteImageAccess'
 import { buildTaskLineage } from '../../../../store/taskLineage'
 import DetailImagePanel from './DetailImagePanel'
 import DetailInfoPanel from './DetailInfoPanel'
@@ -257,6 +259,18 @@ export default function DetailModal() {
     }
   }
 
+  const handleDownloadCurrentImage = async () => {
+    if (!currentOutputImageSrc) return
+    try {
+      await downloadImageFromSrc(currentOutputImageSrc, `task-${task.id}-image-${imageIndex + 1}`)
+      showToast('开始下载', 'success')
+    } catch (error) {
+      console.error(error)
+      window.open(currentOutputImageSrc, '_blank', 'noopener,noreferrer')
+      showToast(resolveRemoteImageAccessMessage(error, 'download'), 'error')
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={closeModal}>
       <div className="absolute inset-0 animate-overlay-in bg-black/20 backdrop-blur-md dark:bg-black/40" />
@@ -294,6 +308,7 @@ export default function DetailModal() {
             durationLabel={durationLabel}
             statusLabel={statusLabel}
             onCopyError={handleCopyError}
+            onDownloadImage={() => void handleDownloadCurrentImage()}
             onMainImageLoad={updateImageLabelLeft}
             onOpenLightbox={() => openLightbox(task.outputImages[imageIndex], task.outputImages)}
             onPrevImage={() => setImageIndex((imageIndex - 1 + outputLen) % outputLen)}
