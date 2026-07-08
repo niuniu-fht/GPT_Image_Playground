@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import type { Prisma } from '@prisma/client'
+import crypto from 'node:crypto'
 import { z } from 'zod'
 import { requireUser, resLocals } from '../auth.js'
 import { env } from '../env.js'
@@ -173,7 +174,7 @@ function shouldFallbackRetryGeneration(error: unknown): boolean {
   return /fetch failed|network|timeout|timed out|abort|ECONN|ENOTFOUND|EAI_AGAIN|socket|TLS|certificate/i.test(message)
 }
 
-function dataUrlToFile(dataUrl: string, filename: string): File {
+function parseDataUrl(dataUrl: string): { mimeType: string; bytes: Uint8Array } {
   const match = /^data:([^;,]+)(?:;base64)?,(.*)$/s.exec(dataUrl)
   if (!match) throw new HttpError(400, 'invalid_image', '参考图格式无效')
   const mimeType = match[1] || 'image/png'
@@ -181,7 +182,57 @@ function dataUrlToFile(dataUrl: string, filename: string): File {
   const bytes = dataUrl.includes(';base64,')
     ? Uint8Array.from(atob(body), (char) => char.charCodeAt(0))
     : new TextEncoder().encode(decodeURIComponent(body))
-  return new File([bytes], filename, { type: mimeType })
+  return { mimeType, bytes }
+}
+
+function dataUrlToFile(dataUrl: string, filename: string): File {
+  const { mimeType, bytes } = parseDataUrl(dataUrl)
+  return new File([Buffer.from(bytes)], filename, { type: mimeType })
+}
+
+function summarizeReferenceImage(
+  image: { id: string; dataUrl: string },
+  index: number,
+): Record<string, unknown> {
+  try {
+    const { mimeType, bytes } = parseDataUrl(image.dataUrl)
+    const hash = crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 16)
+    return {
+      index,
+      id: image.id,
+      mimeType,
+      byteSize: bytes.byteLength,
+      sha256: hash,
+    }
+  } catch (error) {
+    return {
+      index,
+      id: image.id,
+      invalid: true,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+function summarizeMaskImage(mask: GenerationInput['editMask']): Record<string, unknown> | null {
+  if (!mask?.dataUrl) return null
+  try {
+    const { mimeType, bytes } = parseDataUrl(mask.dataUrl)
+    const hash = crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 16)
+    return {
+      sourceImageId: mask.sourceImageId ?? null,
+      mimeType,
+      byteSize: bytes.byteLength,
+      sha256: hash,
+      hasSelection: Boolean(mask.selection),
+    }
+  } catch (error) {
+    return {
+      sourceImageId: mask.sourceImageId ?? null,
+      invalid: true,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
 }
 
 function sniffImageMimeType(buffer: Buffer): string | null {
@@ -346,6 +397,7 @@ function sanitizeUpstreamPayload(value: unknown, depth = 0): unknown {
 
 async function readUpstreamJsonWithLog(response: Response, context: {
   endpoint: string
+  operation: 'generation' | 'edit'
   request: Record<string, unknown>
 }): Promise<unknown> {
   const contentType = response.headers.get('content-type') || ''
@@ -368,6 +420,7 @@ async function readUpstreamJsonWithLog(response: Response, context: {
 
   console.info('[generation] upstream response', {
     endpoint: context.endpoint,
+    operation: context.operation,
     status: response.status,
     ok: response.ok,
     contentType,
@@ -376,6 +429,14 @@ async function readUpstreamJsonWithLog(response: Response, context: {
   })
 
   return payload
+}
+
+function logUpstreamRequest(context: {
+  endpoint: string
+  operation: 'generation' | 'edit'
+  request: Record<string, unknown>
+}) {
+  console.info('[generation] upstream request', context)
 }
 
 async function callImagesApiOnce(
@@ -405,6 +466,21 @@ async function callImagesApiOnce(
     }
 
     const endpoint = `${baseUrl}/v1/images/edits`
+    const requestLog = {
+      model: upstream.model,
+      promptLength: input.prompt.length,
+      size: input.params.size,
+      quality: input.params.quality,
+      n: input.params.n,
+      referenceImageCount: input.inputImages.length,
+      referenceImages: input.inputImages.map(summarizeReferenceImage),
+      mask: summarizeMaskImage(input.editMask),
+    }
+    logUpstreamRequest({
+      endpoint: '/v1/images/edits',
+      operation: 'edit',
+      request: requestLog,
+    })
     const response = await fetch(endpoint, {
       method: 'POST',
       headers,
@@ -412,15 +488,8 @@ async function callImagesApiOnce(
     })
     const payload = await readUpstreamJsonWithLog(response, {
       endpoint: '/v1/images/edits',
-      request: {
-        model: upstream.model,
-        promptLength: input.prompt.length,
-        size: input.params.size,
-        quality: input.params.quality,
-        n: input.params.n,
-        inputImages: input.inputImages.length,
-        hasMask: Boolean(input.editMask?.dataUrl),
-      },
+      operation: 'edit',
+      request: requestLog,
     })
     if (!response.ok) {
       const message = typeof (payload as { error?: { message?: unknown } }).error?.message === 'string'
@@ -445,6 +514,11 @@ async function callImagesApiOnce(
   }
 
   const endpoint = `${baseUrl}/v1/images/generations`
+  logUpstreamRequest({
+    endpoint: '/v1/images/generations',
+    operation: 'generation',
+    request: body,
+  })
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
@@ -455,6 +529,7 @@ async function callImagesApiOnce(
   })
   const payload = await readUpstreamJsonWithLog(response, {
     endpoint: '/v1/images/generations',
+    operation: 'generation',
     request: body,
   })
   if (!response.ok) {
