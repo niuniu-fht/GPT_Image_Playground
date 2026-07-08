@@ -71,9 +71,7 @@ export async function getAllImageRecords(): Promise<StoredImage[]> {
 }
 
 export async function getImageIdsByKind(kind: StoredImage['kind']): Promise<string[]> {
-  const rawKeys = await dbTransaction<IDBValidKey[]>(STORE_IMAGES, 'readonly', (store) =>
-    store.index(IMAGE_INDEX_KIND).getAllKeys(IDBKeyRange.only(kind)),
-  )
+  const rawKeys = await getImageKeysByKindSafely(kind)
 
   return rawKeys.map((rawKey, index) => {
     if (typeof rawKey === 'string' && rawKey.length > 0) {
@@ -81,6 +79,47 @@ export async function getImageIdsByKind(kind: StoredImage['kind']): Promise<stri
     }
 
     throw new Error(`kind=${kind} 命中的图片主键[${index}] 不是合法字符串`)
+  })
+}
+
+async function getImageKeysByKindSafely(kind: StoredImage['kind']): Promise<IDBValidKey[]> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_IMAGES, 'readonly')
+    const store = tx.objectStore(STORE_IMAGES)
+    const request = store.indexNames.contains(IMAGE_INDEX_KIND)
+      ? store.index(IMAGE_INDEX_KIND).getAllKeys(IDBKeyRange.only(kind))
+      : store.getAll()
+
+    request.onerror = () => {
+      reject(request.error ?? new Error(`读取 kind=${kind} 图片索引失败`))
+      db.close()
+    }
+    request.onsuccess = () => {
+      if (store.indexNames.contains(IMAGE_INDEX_KIND)) {
+        resolve(request.result as IDBValidKey[])
+        return
+      }
+
+      const records = Array.isArray(request.result) ? request.result : []
+      resolve(records.flatMap((raw) => {
+        try {
+          const record = normalizeStoredImageRecord(raw, `kind=${kind} 降级扫描记录`)
+          return record.kind === kind ? [record.id] : []
+        } catch {
+          return []
+        }
+      }))
+    }
+    tx.oncomplete = () => db.close()
+    tx.onabort = () => {
+      reject(tx.error ?? new Error(`读取 kind=${kind} 图片记录事务已中止`))
+      db.close()
+    }
+    tx.onerror = () => {
+      reject(tx.error ?? new Error(`读取 kind=${kind} 图片记录事务失败`))
+      db.close()
+    }
   })
 }
 
@@ -508,9 +547,7 @@ async function finalizeMigratedLegacyImageRecord(
 
 async function findImageRecordByContentHash(contentHash: string): Promise<StoredImage | undefined> {
   const normalizedHash = readNonEmptyString(contentHash, 'contentHash')
-  const rawRecords = await dbTransaction<unknown[]>(STORE_IMAGES, 'readonly', (store) =>
-    store.index(IMAGE_INDEX_CONTENT_HASH).getAll(IDBKeyRange.only(normalizedHash)),
-  )
+  const rawRecords = await getImageRecordsByContentHashSafely(normalizedHash)
 
   const records = rawRecords.map((raw, index) =>
     normalizeStoredImageRecord(raw, `contentHash=${normalizedHash} 命中记录[${index}]`),
@@ -521,6 +558,46 @@ async function findImageRecordByContentHash(contentHash: string): Promise<Stored
     records.find((record) => record.kind === 'local_blob') ??
     records[0]
   )
+}
+
+async function getImageRecordsByContentHashSafely(normalizedHash: string): Promise<unknown[]> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_IMAGES, 'readonly')
+    const store = tx.objectStore(STORE_IMAGES)
+    const request = store.indexNames.contains(IMAGE_INDEX_CONTENT_HASH)
+      ? store.index(IMAGE_INDEX_CONTENT_HASH).getAll(IDBKeyRange.only(normalizedHash))
+      : store.getAll()
+
+    request.onerror = () => {
+      reject(request.error ?? new Error(`读取 contentHash=${normalizedHash} 图片索引失败`))
+      db.close()
+    }
+    request.onsuccess = () => {
+      if (store.indexNames.contains(IMAGE_INDEX_CONTENT_HASH)) {
+        resolve(Array.isArray(request.result) ? request.result : [])
+        return
+      }
+
+      const records = Array.isArray(request.result) ? request.result.filter((raw) => {
+        try {
+          return normalizeStoredImageRecord(raw, `contentHash=${normalizedHash} 降级扫描记录`).contentHash === normalizedHash
+        } catch {
+          return false
+        }
+      }) : []
+      resolve(records)
+    }
+    tx.oncomplete = () => db.close()
+    tx.onabort = () => {
+      reject(tx.error ?? new Error(`读取 contentHash=${normalizedHash} 图片记录事务已中止`))
+      db.close()
+    }
+    tx.onerror = () => {
+      reject(tx.error ?? new Error(`读取 contentHash=${normalizedHash} 图片记录事务失败`))
+      db.close()
+    }
+  })
 }
 
 function normalizeStoredImageRecord(value: unknown, context: string): StoredImage {

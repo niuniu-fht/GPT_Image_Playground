@@ -21,13 +21,10 @@ export async function seedDatabase() {
   await seedMissingPlatformSettings(defaultPlatformSettings)
   await seedMissingSquareRuntimeConfig(defaultSquareRuntimeConfig)
 
-  const upstream = await prisma.upstreamProvider.upsert({
+  const upstream = await prisma.upstreamProvider.findUnique({
     where: { id: 'default-openai' },
-    update: {
-      baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com',
-      apiKey: process.env.OPENAI_API_KEY || '',
-    },
-    create: {
+  }) ?? await prisma.upstreamProvider.create({
+    data: {
       id: 'default-openai',
       name: 'OpenAI 官方接口',
       baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com',

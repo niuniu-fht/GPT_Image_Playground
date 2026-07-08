@@ -1,5 +1,5 @@
 export const DB_NAME = 'gpt-image-playground'
-export const DB_VERSION = 3
+export const DB_VERSION = 4
 export const STORE_TASKS = 'tasks'
 export const STORE_IMAGES = 'images'
 export const IMAGE_INDEX_KIND = 'kind'
