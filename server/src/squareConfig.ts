@@ -50,7 +50,7 @@ export const defaultSquareRuntimeConfig: SquareRuntimeConfig = {
   r2SecretKey: env.r2SecretKey,
   r2Bucket: env.r2Bucket || DEFAULT_R2_BUCKET,
   publicBaseUrl: env.r2PublicBaseUrl || DEFAULT_PUBLIC_BASE_URL,
-  autoUploadGeneratedImages: true,
+  autoUploadGeneratedImages: false,
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -165,7 +165,12 @@ export async function seedMissingSquareRuntimeConfig(input: SquareRuntimeConfig)
     if (currentValue === undefined) {
       return [prisma.platformSetting.create({ data: { key: settingKey, value } })]
     }
-    if (currentValue === '' && value !== '') {
+    const shouldBackfillEmptyString =
+      key !== 'r2Enabled' &&
+      key !== 'autoUploadGeneratedImages' &&
+      currentValue === '' &&
+      value !== ''
+    if (shouldBackfillEmptyString) {
       return [prisma.platformSetting.update({ where: { key: settingKey }, data: { value } })]
     }
     return []

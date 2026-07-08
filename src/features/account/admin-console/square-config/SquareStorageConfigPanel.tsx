@@ -125,7 +125,7 @@ export function SquareStorageConfigPanel({
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             <ToggleField label="启用 R2 存储" checked={draft.r2Enabled} onChange={(value) => setDraft((prev) => ({ ...prev, r2Enabled: value }))} />
-            <ToggleField label="生成后自动同步到广场存储" checked={draft.autoUploadGeneratedImages} onChange={(value) => setDraft((prev) => ({ ...prev, autoUploadGeneratedImages: value }))} />
+            <ToggleField label="生成完成后自动上传 R2（默认关闭，发布广场时仍会上传）" checked={draft.autoUploadGeneratedImages} onChange={(value) => setDraft((prev) => ({ ...prev, autoUploadGeneratedImages: value }))} />
           </div>
           <div className="flex justify-end gap-2 border-t border-gray-100 pt-3 dark:border-white/[0.08]">
             <button type="button" onClick={() => setEditing(false)} className="h-10 rounded-xl border border-gray-200 px-4 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-200 dark:hover:bg-white/[0.06]">
