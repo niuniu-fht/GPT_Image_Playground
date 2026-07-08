@@ -188,17 +188,17 @@ export default function SquarePage() {
       </section>
 
       {promptShare && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4 backdrop-blur-md" onClick={() => setPromptShare(null)}>
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 px-4 backdrop-blur-md dark:bg-black/70" onClick={() => setPromptShare(null)}>
           <div
-            className="w-full max-w-2xl rounded-[28px] border border-white/12 bg-[#111] p-5 shadow-2xl"
+            className="w-full max-w-2xl rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-2xl shadow-slate-950/20 dark:border-white/15 dark:bg-[#111] dark:shadow-black/40"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-semibold text-white/78">提示词</div>
+              <div className="text-sm font-semibold text-slate-700 dark:text-white/80">提示词</div>
               <button
                 type="button"
                 onClick={() => setPromptShare(null)}
-                className="grid h-9 w-9 place-items-center rounded-full text-white/55 transition hover:bg-white/10 hover:text-white"
+                className="grid h-9 w-9 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:text-white/55 dark:hover:bg-white/10 dark:hover:text-white"
                 aria-label="关闭"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -206,7 +206,7 @@ export default function SquarePage() {
                 </svg>
               </button>
             </div>
-            <p className="mt-4 max-h-[46vh] overflow-y-auto whitespace-pre-wrap break-words text-base leading-8 text-white/88">
+            <p className="mt-4 max-h-[46vh] overflow-y-auto whitespace-pre-wrap break-words text-base font-medium leading-8 text-slate-950 dark:text-white/90">
               {promptShare.prompt.trim() || '这个作品没有保存提示词。'}
             </p>
             {promptShare.prompt.trim() && (
@@ -215,7 +215,7 @@ export default function SquarePage() {
                 onClick={() => {
                   void handleCopyPrompt()
                 }}
-                className="mt-5 h-10 rounded-full bg-white px-5 text-sm font-semibold text-black transition hover:bg-zinc-200"
+                className="mt-5 h-10 rounded-full bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
               >
                 复制提示词
               </button>
