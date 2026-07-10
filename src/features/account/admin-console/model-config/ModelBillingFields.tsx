@@ -40,7 +40,7 @@ function normalizeCost(value: string): number {
 }
 
 function isGptImage2Draft(draft: ModelDraft): boolean {
-  return draft.name === 'gpt-image-2'
+  return /^gpt-image(?:$|[-_:/.])/i.test(draft.name) || /^gpt-image(?:$|[-_:/.])/i.test(draft.upstreamModel)
 }
 
 function CostInput({
@@ -61,16 +61,31 @@ function CostInput({
 
 function CostRow({
   draft,
+  enabled,
   fields,
   label,
+  onEnabledChange,
   setDraft,
 }: ModelConfigDraftProps & {
+  enabled?: boolean
   fields: Array<{ field: CostField; label: string }>
   label: ReactNode
+  onEnabledChange?: (enabled: boolean) => void
 }) {
   return (
     <div className="grid grid-cols-[88px_repeat(3,1fr)] items-center gap-2 border-b border-amber-100 p-2 last:border-b-0 dark:border-amber-400/15">
-      <div className="px-1 text-xs font-semibold text-gray-600 dark:text-gray-300">{label}</div>
+      <div className="px-1 text-xs font-semibold text-gray-600 dark:text-gray-300">
+        {typeof enabled === 'boolean' && onEnabledChange ? (
+          <label className="flex items-center gap-1.5">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(event) => onEnabledChange(event.target.checked)}
+            />
+            {label}
+          </label>
+        ) : label}
+      </div>
       {fields.map((item) => (
         <CostInput key={item.field} draft={draft} field={item.field} setDraft={setDraft} />
       ))}
@@ -103,21 +118,28 @@ export function ModelBillingFields({ draft, setDraft }: ModelConfigDraftProps) {
 
         {highQualityApplicable ? (
           <>
-            <CostRow draft={draft} setDraft={setDraft} label="低" fields={LOW_COST_FIELDS} />
-            <CostRow draft={draft} setDraft={setDraft} label="中" fields={MEDIUM_COST_FIELDS} />
             <CostRow
               draft={draft}
               setDraft={setDraft}
-              label={(
-                <label className="flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
-                    checked={draft.highQualityEnabled}
-                    onChange={(event) => setDraft((prev) => ({ ...prev, highQualityEnabled: event.target.checked }))}
-                  />
-                  高
-                </label>
-              )}
+              label="低"
+              enabled={draft.lowQualityEnabled}
+              onEnabledChange={(value) => setDraft((prev) => ({ ...prev, lowQualityEnabled: value }))}
+              fields={LOW_COST_FIELDS}
+            />
+            <CostRow
+              draft={draft}
+              setDraft={setDraft}
+              label="中"
+              enabled={draft.mediumQualityEnabled}
+              onEnabledChange={(value) => setDraft((prev) => ({ ...prev, mediumQualityEnabled: value }))}
+              fields={MEDIUM_COST_FIELDS}
+            />
+            <CostRow
+              draft={draft}
+              setDraft={setDraft}
+              label="高"
+              enabled={draft.highQualityEnabled}
+              onEnabledChange={(value) => setDraft((prev) => ({ ...prev, highQualityEnabled: value }))}
               fields={HIGH_COST_FIELDS}
             />
           </>
@@ -125,7 +147,7 @@ export function ModelBillingFields({ draft, setDraft }: ModelConfigDraftProps) {
           <>
             <CostRow draft={draft} setDraft={setDraft} label="中" fields={MEDIUM_COST_FIELDS} />
             <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
-              低 / 中 / 高质量选择仅对模型标识为 gpt-image-2 的模型开放，其它模型仅按“中”质量计费。
+              低 / 中 / 高质量选择仅对模型标识或上游模型以 gpt-image 开头的模型开放，其它模型仅按“中”质量计费。
             </div>
           </>
         )}

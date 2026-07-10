@@ -87,9 +87,11 @@ model ModelConfig {
   costCredits   Int
   costCredits2K Int              @default(0)
   costCredits4K Int              @default(0)
+  lowQualityEnabled Boolean      @default(true)
   lowQualityCostCredits Int      @default(0)
   lowQualityCostCredits2K Int    @default(0)
   lowQualityCostCredits4K Int    @default(0)
+  mediumQualityEnabled Boolean   @default(true)
   highQualityEnabled Boolean     @default(false)
   highQualityCostCredits Int     @default(0)
   highQualityCostCredits2K Int   @default(0)

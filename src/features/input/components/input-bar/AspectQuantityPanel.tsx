@@ -6,7 +6,7 @@ import {
   resolveImageSizeTier,
   type SizeTier,
 } from '../../../../lib/size'
-import { supportsHighQualityPricing, supportsQualitySelection } from '../../../../lib/modelCost'
+import { isQualityEnabled, resolveAvailableQualities, resolveFallbackQuality, supportsQualitySelection } from '../../../../lib/modelCost'
 import type { ModelConfig, TaskParams } from '../../../../types'
 
 type AspectOption = {
@@ -148,7 +148,7 @@ export default function AspectQuantityPanel({
   const quantity = Math.min(Math.max(Math.round(params.n || 1), 1), 4)
   const summaryRatio = params.size === 'auto' || !activeRatio ? '自动' : activeRatio
   const qualitySelectionAvailable = supportsQualitySelection(activeModel)
-  const highQualityAvailable = supportsHighQualityPricing(activeModel)
+  const availableQualities = resolveAvailableQualities(activeModel)
   const activeQuality = qualitySelectionAvailable && ['low', 'medium', 'high'].includes(params.quality)
     ? params.quality
     : 'medium'
@@ -192,14 +192,15 @@ export default function AspectQuantityPanel({
   }, [open, qualitySelectionAvailable])
 
   useEffect(() => {
-    if (!qualitySelectionAvailable && params.quality !== 'medium') {
-      onSetParams({ quality: 'medium' })
+    const fallbackQuality = resolveFallbackQuality(activeModel)
+    if (!qualitySelectionAvailable && params.quality !== fallbackQuality) {
+      onSetParams({ quality: fallbackQuality })
       return
     }
-    if (params.quality === 'high' && !highQualityAvailable) {
-      onSetParams({ quality: 'medium' })
+    if (qualitySelectionAvailable && !isQualityEnabled(activeModel, params.quality)) {
+      onSetParams({ quality: fallbackQuality })
     }
-  }, [highQualityAvailable, onSetParams, params.quality, qualitySelectionAvailable])
+  }, [activeModel, onSetParams, params.quality, qualitySelectionAvailable])
 
   useEffect(() => {
     if (!open) return
@@ -310,18 +311,18 @@ export default function AspectQuantityPanel({
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">图片质量</span>
                   <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-600 dark:bg-blue-400/10 dark:text-blue-200">
-                    GPT Image 2
+                    GPT Image
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                  {QUALITY_OPTIONS.map((option) => {
-                    const disabled = option.value === 'high' && !highQualityAvailable
+                  {QUALITY_OPTIONS.filter((option) => availableQualities.includes(option.value)).map((option) => {
+                    const disabled = false
                     return (
                       <button
                         key={option.value}
                         type="button"
                         disabled={disabled}
-                        title={disabled ? '后台未开启高质量' : undefined}
+                        title={disabled ? '后台未开启该质量' : undefined}
                         onClick={() => onSetParams({ quality: option.value })}
                         className={cx(
                           buttonClass(activeQuality === option.value),

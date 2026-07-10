@@ -37,6 +37,10 @@ type ModelsSectionProps = {
   deleteModelById: (modelId: string) => void
 }
 
+function isGptImageConfig(model: Pick<ModelConfig, 'name' | 'upstreamModel'>): boolean {
+  return /^gpt-image(?:$|[-_:/.])/i.test(model.name) || /^gpt-image(?:$|[-_:/.])/i.test(model.upstreamModel)
+}
+
 export function ModelsSection({
   models,
   filteredModels,
@@ -179,13 +183,15 @@ export function ModelsSection({
                   <div className="truncate text-xs text-gray-500">{model.upstreamModel}</div>
                   <StatusBadge tone="gray">{modelProtocolLabel(model.apiProtocol)}</StatusBadge>
                   <div className="space-y-1 text-xs font-semibold text-amber-700">
-                    {model.name === 'gpt-image-2' && (
-                      <div className="text-emerald-700 dark:text-emerald-300">
-                        低：1K {model.lowQualityCostCredits} / 2K {model.lowQualityCostCredits2K} / 4K {model.lowQualityCostCredits4K}
+                    {isGptImageConfig(model) && (
+                      <div className={model.lowQualityEnabled ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-400'}>
+                        低{model.lowQualityEnabled ? '' : '（关）'}：1K {model.lowQualityCostCredits} / 2K {model.lowQualityCostCredits2K} / 4K {model.lowQualityCostCredits4K}
                       </div>
                     )}
-                    <div>中：1K {model.costCredits} / 2K {model.costCredits2K} / 4K {model.costCredits4K}</div>
-                    {model.name === 'gpt-image-2' && (
+                    <div className={!isGptImageConfig(model) || model.mediumQualityEnabled ? '' : 'text-gray-400'}>
+                      中{isGptImageConfig(model) && !model.mediumQualityEnabled ? '（关）' : ''}：1K {model.costCredits} / 2K {model.costCredits2K} / 4K {model.costCredits4K}
+                    </div>
+                    {isGptImageConfig(model) && (
                       <div className={model.highQualityEnabled ? 'text-blue-700 dark:text-blue-300' : 'text-gray-400'}>
                         高{model.highQualityEnabled ? '' : '（关）'}：1K {model.highQualityCostCredits} / 2K {model.highQualityCostCredits2K} / 4K {model.highQualityCostCredits4K}
                       </div>

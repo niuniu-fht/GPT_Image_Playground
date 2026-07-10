@@ -443,10 +443,13 @@ function withImageCount(input: GenerationInput, n: number): GenerationInput {
 
 function resolveEffectiveQuality(model: GenerationModel, quality: string): string {
   if (!isGptImage2Model(model)) return 'medium'
-  if (quality === 'low') return 'low'
-  if (quality === 'medium') return 'medium'
+  if (quality === 'low' && model.lowQualityEnabled !== false) return 'low'
+  if (quality === 'medium' && model.mediumQualityEnabled !== false) return 'medium'
   if (quality === 'high' && supportsHighQualityPricing(model)) return 'high'
-  return 'low'
+  if (model.lowQualityEnabled !== false) return 'low'
+  if (model.mediumQualityEnabled !== false) return 'medium'
+  if (supportsHighQualityPricing(model)) return 'high'
+  return 'medium'
 }
 
 function sanitizeUpstreamPayload(value: unknown, depth = 0): unknown {

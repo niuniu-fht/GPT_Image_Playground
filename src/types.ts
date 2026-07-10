@@ -137,9 +137,11 @@ export interface ModelConfig {
   costCredits: number
   costCredits2K: number
   costCredits4K: number
+  lowQualityEnabled: boolean
   lowQualityCostCredits: number
   lowQualityCostCredits2K: number
   lowQualityCostCredits4K: number
+  mediumQualityEnabled: boolean
   highQualityEnabled: boolean
   highQualityCostCredits: number
   highQualityCostCredits2K: number
@@ -343,9 +345,11 @@ export interface AdminUpstreamProvider {
     costCredits: number
     costCredits2K: number
     costCredits4K: number
+    lowQualityEnabled: boolean
     lowQualityCostCredits: number
     lowQualityCostCredits2K: number
     lowQualityCostCredits4K: number
+    mediumQualityEnabled: boolean
     highQualityEnabled: boolean
     highQualityCostCredits: number
     highQualityCostCredits2K: number

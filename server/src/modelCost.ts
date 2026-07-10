@@ -8,6 +8,8 @@ export interface ModelResolutionPricing {
   lowQualityCostCredits?: number
   lowQualityCostCredits2K?: number
   lowQualityCostCredits4K?: number
+  lowQualityEnabled?: boolean
+  mediumQualityEnabled?: boolean
   highQualityCostCredits?: number
   highQualityCostCredits2K?: number
   highQualityCostCredits4K?: number
@@ -30,13 +32,12 @@ export function resolveResolutionTier(size: string): ResolutionTier {
   return '1K'
 }
 
-export function isGptImage2Model(model: Pick<ModelResolutionPricing, 'name' | 'upstreamModel'>): boolean {
-  if (model.name) return model.name === 'gpt-image-2'
-  return /^gpt-image-2(?:$|[-_:/.])/i.test(model.upstreamModel || '')
+export function isGptImageModel(model: Pick<ModelResolutionPricing, 'name' | 'upstreamModel'>): boolean {
+  return /^gpt-image(?:$|[-_:/.])/i.test(model.upstreamModel || '') || /^gpt-image(?:$|[-_:/.])/i.test(model.name || '')
 }
 
 export function supportsHighQualityPricing(model: ModelResolutionPricing): boolean {
-  return Boolean(model.highQualityEnabled && isGptImage2Model(model))
+  return Boolean(model.highQualityEnabled && isGptImageModel(model))
 }
 
 function resolveMediumTierCost(model: ModelResolutionPricing, tier: ResolutionTier): number {
@@ -65,8 +66,10 @@ export function resolveModelCostForSize(
   quality = 'medium',
 ): number {
   const tier = resolveResolutionTier(size)
-  if (!isGptImage2Model(model)) return resolveMediumTierCost(model, tier)
-  if (quality === 'low') return resolveLowTierCost(model, tier)
+  if (!isGptImageModel(model)) return resolveMediumTierCost(model, tier)
+  if (quality === 'low' && model.lowQualityEnabled !== false) return resolveLowTierCost(model, tier)
   if (quality === 'high' && supportsHighQualityPricing(model)) return resolveHighTierCost(model, tier)
   return resolveMediumTierCost(model, tier)
 }
+
+export { isGptImageModel as isGptImage2Model }

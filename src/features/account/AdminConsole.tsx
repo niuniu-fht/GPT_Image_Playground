@@ -1367,11 +1367,8 @@ export default function AdminConsole() {
       confirmText: '保存',
       action: async () => {
         try {
-          const nextDraft: ModelDraft = modelDraft.name === 'gpt-image-2'
-            ? modelDraft
-            : { ...modelDraft, highQualityEnabled: false }
-          if (editingModelId) await platformApi.updateAdminModel(editingModelId, nextDraft)
-          else await platformApi.createAdminModel(nextDraft)
+          if (editingModelId) await platformApi.updateAdminModel(editingModelId, modelDraft)
+          else await platformApi.createAdminModel(modelDraft)
           closeEditor()
           setModelDraft(emptyModelDraft)
           await loadAll('models')

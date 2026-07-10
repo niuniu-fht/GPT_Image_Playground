@@ -1,16 +1,32 @@
 import type { ModelConfig } from '../types'
 import { resolveImageSizeTier, type SizeTier } from './size'
 
-export function isGptImage2Model(model: Pick<ModelConfig, 'name' | 'upstreamModel'>): boolean {
-  return /^gpt-image-2(?:$|[-_:/.])/i.test(model.upstreamModel || '') || model.name === 'gpt-image-2'
+export function isGptImageModel(model: Pick<ModelConfig, 'name' | 'upstreamModel'>): boolean {
+  return /^gpt-image(?:$|[-_:/.])/i.test(model.upstreamModel || '') || /^gpt-image(?:$|[-_:/.])/i.test(model.name || '')
 }
 
 export function supportsHighQualityPricing(model: ModelConfig | null): boolean {
-  return Boolean(model?.highQualityEnabled && isGptImage2Model(model))
+  return Boolean(model?.highQualityEnabled && model && isGptImageModel(model))
 }
 
 export function supportsQualitySelection(model: ModelConfig | null): boolean {
-  return Boolean(model && isGptImage2Model(model))
+  return Boolean(model && isGptImageModel(model))
+}
+
+export function isQualityEnabled(model: ModelConfig | null, quality: string): boolean {
+  if (!model || !supportsQualitySelection(model)) return quality === 'medium'
+  if (quality === 'low') return model.lowQualityEnabled !== false
+  if (quality === 'high') return Boolean(model.highQualityEnabled)
+  return model.mediumQualityEnabled !== false
+}
+
+export function resolveAvailableQualities(model: ModelConfig | null): Array<'low' | 'medium' | 'high'> {
+  if (!supportsQualitySelection(model)) return ['medium']
+  return (['low', 'medium', 'high'] as const).filter((quality) => isQualityEnabled(model, quality))
+}
+
+export function resolveFallbackQuality(model: ModelConfig | null): 'low' | 'medium' | 'high' {
+  return resolveAvailableQualities(model)[0] ?? 'medium'
 }
 
 function resolveMediumCostByTier(model: ModelConfig, tier: SizeTier): number {
@@ -34,8 +50,8 @@ function resolveHighCostByTier(model: ModelConfig, tier: SizeTier): number {
 }
 
 export function resolveModelCostByTier(model: ModelConfig, tier: SizeTier, quality = 'medium'): number {
-  if (!isGptImage2Model(model)) return resolveMediumCostByTier(model, tier)
-  if (quality === 'low') return resolveLowCostByTier(model, tier)
+  if (!isGptImageModel(model)) return resolveMediumCostByTier(model, tier)
+  if (quality === 'low' && isQualityEnabled(model, 'low')) return resolveLowCostByTier(model, tier)
   if (quality === 'high' && supportsHighQualityPricing(model)) return resolveHighCostByTier(model, tier)
   return resolveMediumCostByTier(model, tier)
 }
@@ -44,3 +60,5 @@ export function resolveModelCostForSize(model: ModelConfig | null, size: string,
   if (!model) return 0
   return resolveModelCostByTier(model, resolveImageSizeTier(size), quality)
 }
+
+export { isGptImageModel as isGptImage2Model }
