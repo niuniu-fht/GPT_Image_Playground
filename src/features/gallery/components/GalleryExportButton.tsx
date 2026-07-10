@@ -98,7 +98,7 @@ export default function GalleryExportButton() {
         return
       }
       if (!result.exportedImageCount && result.failedImageCount > 0) {
-        showToast(`没有图片成功导出，${result.failedImageCount} 张因跨域或读取失败未导出；已生成失败清单`, 'error')
+        showToast(`没有图片成功导出，${result.failedImageCount} 张因跨域或读取失败未导出`, 'error')
         return
       }
       if (result.failedImageCount > 0) {

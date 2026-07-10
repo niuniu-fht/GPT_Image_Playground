@@ -1,29 +1,9 @@
-import { strToU8, zipSync } from 'fflate'
+import { zipSync } from 'fflate'
 import { getImageRecord } from '../../../lib/db'
 import { getImageExtensionFromMimeType } from '../../../lib/imageMime'
 import type { StoredImage, TaskRecord } from '../../../types'
 
 type ZipFileEntry = Uint8Array | [Uint8Array, { mtime: Date }]
-
-interface ExportedImageManifest {
-  byteSize?: number | null
-  error?: string
-  filePath?: string
-  imageId: string
-  imageIndex: number
-  mimeType?: string | null
-  status: 'exported' | 'failed'
-}
-
-interface ExportedTaskManifest {
-  createdAt: string
-  id: string
-  images: ExportedImageManifest[]
-  modelDisplayName?: string | null
-  modelName?: string | null
-  params: TaskRecord['params']
-  prompt: string
-}
 
 export interface GalleryImageExportResult {
   exportedImageCount: number
@@ -41,13 +21,28 @@ function sanitizePathSegment(value: string, fallback: string): string {
   return normalized || fallback
 }
 
-function taskFolderName(task: TaskRecord, taskIndex: number): string {
+function buildFlatImageFileName(
+  task: TaskRecord,
+  taskIndex: number,
+  imageIndex: number,
+  extension: string,
+  usedFileNames: Set<string>,
+): string {
   const serial = String(taskIndex + 1).padStart(3, '0')
   const title = sanitizePathSegment(
     task.prompt || task.modelDisplayName || task.modelName || task.id,
     'untitled',
   )
-  return `${serial}-${title}`
+  const imageSerial = String(imageIndex + 1).padStart(2, '0')
+  const baseName = `${serial}-${title}-${imageSerial}`
+  let fileName = `${baseName}.${extension}`
+  let dedupeIndex = 2
+  while (usedFileNames.has(fileName)) {
+    fileName = `${baseName}-${dedupeIndex}.${extension}`
+    dedupeIndex += 1
+  }
+  usedFileNames.add(fileName)
+  return fileName
 }
 
 function blobToBytes(blob: Blob): Promise<Uint8Array> {
@@ -101,7 +96,7 @@ export function countTaskOutputImages(tasks: TaskRecord[]): number {
 export async function exportGalleryImagesZip(tasks: TaskRecord[]): Promise<GalleryImageExportResult> {
   const exportedAt = Date.now()
   const zipFiles: Record<string, ZipFileEntry> = {}
-  const manifestTasks: ExportedTaskManifest[] = []
+  const usedFileNames = new Set<string>()
   let exportedImageCount = 0
   let failedImageCount = 0
   let skippedTaskCount = 0
@@ -111,17 +106,6 @@ export async function exportGalleryImagesZip(tasks: TaskRecord[]): Promise<Galle
     if (!task.outputImages.length) {
       skippedTaskCount += 1
       continue
-    }
-
-    const folder = taskFolderName(task, taskIndex)
-    const taskManifest: ExportedTaskManifest = {
-      id: task.id,
-      prompt: task.prompt,
-      modelName: task.modelName,
-      modelDisplayName: task.modelDisplayName,
-      params: task.params,
-      createdAt: new Date(task.createdAt).toISOString(),
-      images: [],
     }
 
     for (let imageIndex = 0; imageIndex < task.outputImages.length; imageIndex += 1) {
@@ -136,32 +120,22 @@ export async function exportGalleryImagesZip(tasks: TaskRecord[]): Promise<Galle
         const blob = await readStoredImageAsBlob(record)
         const mimeType = resolveRecordMimeType(record, blob)
         const extension = getImageExtensionFromMimeType(mimeType)
-        const filePath = `images/${folder}/${String(imageIndex + 1).padStart(2, '0')}.${extension}`
+        const filePath = buildFlatImageFileName(task, taskIndex, imageIndex, extension, usedFileNames)
         zipFiles[filePath] = [
           await blobToBytes(blob),
           { mtime: new Date(record.createdAt ?? task.createdAt ?? exportedAt) },
         ]
         exportedImageCount += 1
-        taskManifest.images.push({
-          imageId,
-          imageIndex,
-          status: 'exported',
-          filePath,
-          mimeType,
-          byteSize: blob.size || record.byteSize || null,
-        })
       } catch (error) {
-        failedImageCount += 1
-        taskManifest.images.push({
+        console.warn('[gallery-export] image export failed', {
+          taskId: task.id,
           imageId,
           imageIndex,
-          status: 'failed',
           error: buildFailureMessage(error),
         })
+        failedImageCount += 1
       }
     }
-
-    manifestTasks.push(taskManifest)
   }
 
   if (!exportedImageCount && !failedImageCount) {
@@ -172,20 +146,6 @@ export async function exportGalleryImagesZip(tasks: TaskRecord[]): Promise<Galle
       taskCount: tasks.length,
     }
   }
-
-  const manifest = {
-    version: 1,
-    exportedAt: new Date(exportedAt).toISOString(),
-    taskCount: tasks.length,
-    exportedImageCount,
-    failedImageCount,
-    skippedTaskCount,
-    tasks: manifestTasks,
-  }
-  zipFiles['manifest.json'] = [
-    strToU8(JSON.stringify(manifest, null, 2)),
-    { mtime: new Date(exportedAt) },
-  ]
 
   const zipped = zipSync(zipFiles, { level: 6 })
   const blob = new Blob([zipped.buffer as ArrayBuffer], { type: 'application/zip' })
