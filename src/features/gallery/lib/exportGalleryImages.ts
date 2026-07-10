@@ -12,29 +12,14 @@ export interface GalleryImageExportResult {
   taskCount: number
 }
 
-function sanitizePathSegment(value: string, fallback: string): string {
-  const normalized = value
-    .replace(/[\\/:*?"<>|\u0000-\u001F]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 48)
-  return normalized || fallback
-}
-
 function buildFlatImageFileName(
-  task: TaskRecord,
-  taskIndex: number,
+  exportId: string,
   imageIndex: number,
   extension: string,
   usedFileNames: Set<string>,
 ): string {
-  const serial = String(taskIndex + 1).padStart(3, '0')
-  const title = sanitizePathSegment(
-    task.prompt || task.modelDisplayName || task.modelName || task.id,
-    'untitled',
-  )
   const imageSerial = String(imageIndex + 1).padStart(2, '0')
-  const baseName = `${serial}-${title}-${imageSerial}`
+  const baseName = `${exportId}-${imageSerial}`
   let fileName = `${baseName}.${extension}`
   let dedupeIndex = 2
   while (usedFileNames.has(fileName)) {
@@ -95,6 +80,7 @@ export function countTaskOutputImages(tasks: TaskRecord[]): number {
 
 export async function exportGalleryImagesZip(tasks: TaskRecord[]): Promise<GalleryImageExportResult> {
   const exportedAt = Date.now()
+  const exportId = `img-${exportedAt.toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   const zipFiles: Record<string, ZipFileEntry> = {}
   const usedFileNames = new Set<string>()
   let exportedImageCount = 0
@@ -120,7 +106,7 @@ export async function exportGalleryImagesZip(tasks: TaskRecord[]): Promise<Galle
         const blob = await readStoredImageAsBlob(record)
         const mimeType = resolveRecordMimeType(record, blob)
         const extension = getImageExtensionFromMimeType(mimeType)
-        const filePath = buildFlatImageFileName(task, taskIndex, imageIndex, extension, usedFileNames)
+        const filePath = buildFlatImageFileName(exportId, exportedImageCount, extension, usedFileNames)
         zipFiles[filePath] = [
           await blobToBytes(blob),
           { mtime: new Date(record.createdAt ?? task.createdAt ?? exportedAt) },
