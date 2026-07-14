@@ -4,6 +4,8 @@ import { writeAudit } from '../audit.js'
 import { requireUser, resLocals } from '../auth.js'
 import { HttpError, sendOk } from '../http.js'
 import { prisma } from '../prisma.js'
+import { getPlatformSettings } from '../settings.js'
+import { consumeSub2ApiRedeemCode } from '../sub2apiRedeem.js'
 
 const router = Router()
 
@@ -101,6 +103,7 @@ router.post('/redeem', requireUser, async (req, res, next) => {
     const input = redeemSchema.parse(req.body)
     const code = input.code.trim().toUpperCase()
     const now = new Date()
+    const settings = await getPlatformSettings()
 
     const result = await prisma.$transaction(async (tx) => {
       const redeemCode = await tx.redeemCode.findUnique({ where: { code } })
@@ -116,6 +119,13 @@ router.post('/redeem', requireUser, async (req, res, next) => {
       if (userUsedCount >= redeemCode.perUserLimit) {
         throw new HttpError(409, 'REDEEM_CODE_USER_LIMIT', '你已经兑换过这个兑换码')
       }
+
+      await consumeSub2ApiRedeemCode({
+        code: redeemCode.code,
+        settings,
+        userId: user.id,
+        email: user.email,
+      })
 
       const updatedUser = await tx.user.update({
         where: { id: user.id },

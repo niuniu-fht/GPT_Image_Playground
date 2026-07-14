@@ -3,11 +3,12 @@ import { randomBytes } from 'node:crypto'
 import { Router } from 'express'
 import { z } from 'zod'
 import { writeAudit } from '../audit.js'
-import { requireAdmin } from '../auth.js'
+import { requireAdmin, resLocals } from '../auth.js'
 import { cleanupGeneratedAssetsForTasks } from '../generatedAssetCleanup.js'
 import { HttpError, sendOk } from '../http.js'
 import { prisma } from '../prisma.js'
-import { getPlatformSettings, upsertPlatformSettings } from '../settings.js'
+import { getPlatformSettings, toAdminPlatformSettingsView, upsertPlatformSettings } from '../settings.js'
+import { consumeSub2ApiRedeemCode } from '../sub2apiRedeem.js'
 
 const router = Router()
 router.use(requireAdmin)
@@ -791,6 +792,12 @@ const redeemCodeBatchSchema = redeemCodeSchema.omit({ code: true }).extend({
   codeLength: z.number().int().min(8).max(32).default(12),
 })
 
+const redeemCodeManualBatchSchema = redeemCodeSchema.omit({ code: true }).extend({
+  codes: z.array(
+    z.string().min(3).max(80).regex(/^[A-Za-z0-9_-]+$/, '兑换码只能包含字母、数字、下划线和短横线'),
+  ).min(1).max(500),
+})
+
 const creditPackageSchema = z.object({
   name: z.string().min(1).max(80),
   description: z.string().max(500).default(''),
@@ -848,6 +855,15 @@ function normalizeRedeemCodeInput(input: z.infer<typeof redeemCodeSchema>) {
     ...input,
     code: input.code.trim().toUpperCase(),
   }
+}
+
+function normalizeManualRedeemCodes(codes: string[]) {
+  const normalizedCodes = codes.map((code) => code.trim().toUpperCase()).filter(Boolean)
+  const uniqueCodes = new Set(normalizedCodes)
+  if (uniqueCodes.size !== normalizedCodes.length) {
+    throw new HttpError(409, 'REDEEM_CODE_DUPLICATED_IN_BATCH', '批量兑换码中存在重复项，请检查后重试')
+  }
+  return [...uniqueCodes]
 }
 
 const redeemCodeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -1401,6 +1417,52 @@ router.post('/redeem-codes/batch', async (req, res, next) => {
   }
 })
 
+router.post('/redeem-codes/import', async (req, res, next) => {
+  try {
+    const input = redeemCodeManualBatchSchema.parse(req.body)
+    const codes = normalizeManualRedeemCodes(input.codes)
+    const existing = await prisma.redeemCode.findMany({
+      where: { code: { in: codes } },
+      select: { code: true },
+    })
+    if (existing.length > 0) {
+      throw new HttpError(
+        409,
+        'REDEEM_CODE_ALREADY_EXISTS',
+        `以下兑换码已存在：${existing.map((item) => item.code).slice(0, 10).join('、')}${existing.length > 10 ? '…' : ''}`,
+      )
+    }
+
+    const baseData = {
+      name: input.name,
+      credits: input.credits,
+      maxRedemptions: input.maxRedemptions,
+      perUserLimit: input.perUserLimit,
+      status: input.status,
+      startsAt: input.startsAt,
+      endsAt: input.endsAt,
+      note: input.note,
+    }
+    await prisma.redeemCode.createMany({
+      data: codes.map((code) => ({ ...baseData, code })),
+    })
+
+    const redeemCodes = await prisma.redeemCode.findMany({
+      where: { code: { in: codes } },
+      orderBy: { createdAt: 'desc' },
+    })
+    await writeAudit(req, 'redeem-code.batch-import', 'redeem-codes', {
+      count: redeemCodes.length,
+      name: input.name,
+      credits: input.credits,
+      maxRedemptions: input.maxRedemptions,
+    })
+    sendOk(res, { redeemCodes, codes: redeemCodes.map((item) => item.code) })
+  } catch (error) {
+    next(error)
+  }
+})
+
 router.patch('/redeem-codes/:id', async (req, res, next) => {
   try {
     const id = readParam(req.params.id)
@@ -1550,7 +1612,7 @@ router.get('/login-logs', async (req, res, next) => {
 router.get('/settings', async (_req, res, next) => {
   try {
     const settings = await getPlatformSettings()
-    sendOk(res, { settings })
+    sendOk(res, { settings: toAdminPlatformSettingsView(settings) })
   } catch (error) {
     next(error)
   }
@@ -1563,14 +1625,62 @@ const settingsSchema = z.object({
   maintenanceMessage: z.string().max(500).optional(),
   redeemDescription: z.string().max(1000).optional(),
   landingHeroSlidesJson: z.string().max(30000).optional(),
+  sub2apiRedeemEnabled: z.boolean().optional(),
+  sub2apiRedeemBaseUrl: z.string().url().optional().or(z.literal('')),
+  sub2apiRedeemToken: z.string().max(4000).optional(),
+})
+
+const sub2apiRedeemTestSchema = z.object({
+  code: z.string().min(3).max(80),
 })
 
 router.patch('/settings', async (req, res, next) => {
   try {
-    const input = settingsSchema.parse(req.body)
-    const settings = await upsertPlatformSettings(input)
-    await writeAudit(req, 'platform.settings.update', 'platform', input)
-    sendOk(res, { settings })
+    const parsed = settingsSchema.parse(req.body)
+    const { sub2apiRedeemToken, ...input } = parsed
+    const updateInput = {
+      ...input,
+      ...(typeof sub2apiRedeemToken === 'string' && sub2apiRedeemToken.trim()
+        ? { sub2apiRedeemToken: sub2apiRedeemToken.trim() }
+        : {}),
+    }
+    const settings = await upsertPlatformSettings(updateInput)
+    await writeAudit(req, 'platform.settings.update', 'platform', {
+      ...input,
+      ...(typeof sub2apiRedeemToken === 'string' && sub2apiRedeemToken.trim()
+        ? { sub2apiRedeemToken: '***configured***' }
+        : {}),
+    })
+    sendOk(res, { settings: toAdminPlatformSettingsView(settings) })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/settings/sub2api-redeem/test', async (req, res, next) => {
+  try {
+    const user = resLocals(req).user!
+    const input = sub2apiRedeemTestSchema.parse(req.body)
+    const settings = await getPlatformSettings()
+    if (!settings.sub2apiRedeemEnabled || !settings.sub2apiRedeemBaseUrl.trim()) {
+      throw new HttpError(400, 'SUB2API_REDEEM_NOT_CONFIGURED', '请先启用并配置 sub2api 地址前缀')
+    }
+
+    const code = input.code.trim()
+    const result = await consumeSub2ApiRedeemCode({
+      code,
+      settings,
+      userId: user.id,
+      email: user.email,
+    })
+    await writeAudit(req, 'platform.sub2api-redeem.test', 'platform', {
+      code,
+    })
+    sendOk(res, {
+      ok: true,
+      result,
+      message: 'sub2api 兑换码校验成功，已标记为已使用',
+    })
   } catch (error) {
     next(error)
   }

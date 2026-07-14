@@ -606,6 +606,10 @@ export interface AdminPlatformSettings {
   maintenanceMessage: string
   redeemDescription: string
   landingHeroSlidesJson: string
+  sub2apiRedeemEnabled: boolean
+  sub2apiRedeemBaseUrl: string
+  sub2apiRedeemTokenConfigured: boolean
+  sub2apiRedeemToken?: string
 }
 
 export interface CategoryConfig {

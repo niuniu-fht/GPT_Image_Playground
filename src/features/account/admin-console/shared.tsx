@@ -165,6 +165,10 @@ export const defaultSettingsDraft: AdminPlatformSettings = {
   maintenanceMessage: '',
   redeemDescription: '活动码和客服补偿码会立即到账，并写入积分流水。',
   landingHeroSlidesJson: '',
+  sub2apiRedeemEnabled: false,
+  sub2apiRedeemBaseUrl: '',
+  sub2apiRedeemTokenConfigured: false,
+  sub2apiRedeemToken: '',
 }
 
 export const adminPageSize = 20

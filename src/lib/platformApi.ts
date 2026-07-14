@@ -427,6 +427,15 @@ export const platformApi = {
     })
   },
 
+  importAdminRedeemCodes(input: Omit<AdminRedeemCode, 'id' | 'code' | 'createdAt' | 'updatedAt' | 'usedCount' | '_count' | 'redemptions'> & {
+    codes: string[]
+  }) {
+    return request<{ redeemCodes: AdminRedeemCode[]; codes: string[] }>('/api/admin/redeem-codes/import', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
   updateAdminRedeemCode(id: string, input: Partial<Omit<AdminRedeemCode, 'id' | 'createdAt' | 'updatedAt' | 'usedCount' | '_count' | 'redemptions'>>) {
     return request<{ redeemCode: AdminRedeemCode }>(`/api/admin/redeem-codes/${encodeURIComponent(id)}`, {
       method: 'PATCH',
@@ -579,6 +588,13 @@ export const platformApi = {
   updateAdminSettings(input: Partial<AdminPlatformSettings>) {
     return request<{ settings: AdminPlatformSettings }>('/api/admin/settings', {
       method: 'PATCH',
+      body: JSON.stringify(input),
+    })
+  },
+
+  testAdminSub2ApiRedeem(input: { code: string }) {
+    return request<{ ok: boolean; message: string }>('/api/admin/settings/sub2api-redeem/test', {
+      method: 'POST',
       body: JSON.stringify(input),
     })
   },

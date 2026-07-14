@@ -240,6 +240,8 @@ export default function AdminConsole() {
   const [selectedAnnouncementId, setSelectedAnnouncementId] = useState<string | null>(null)
   const [announcementBatchOperating, setAnnouncementBatchOperating] = useState(false)
   const [settingsDraft, setSettingsDraft] = useState<AdminPlatformSettings>(defaultSettingsDraft)
+  const [sub2apiRedeemTestCode, setSub2apiRedeemTestCode] = useState('')
+  const [sub2apiRedeemTesting, setSub2apiRedeemTesting] = useState(false)
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([])
   const [auditPage, setAuditPage] = useState(1)
   const [auditTotal, setAuditTotal] = useState(0)
@@ -1860,14 +1862,35 @@ export default function AdminConsole() {
       confirmText: '保存设置',
       action: async () => {
         try {
-          const result = await platformApi.updateAdminSettings(settingsDraft)
-          setSettingsDraft(result.settings)
+          const settingsPayload: Partial<AdminPlatformSettings> = {
+            ...settingsDraft,
+            sub2apiRedeemToken: settingsDraft.sub2apiRedeemToken?.trim() || undefined,
+          }
+          const result = await platformApi.updateAdminSettings(settingsPayload)
+          setSettingsDraft({ ...result.settings, sub2apiRedeemToken: '' })
           showToast('平台设置已保存', 'success')
         } catch (error) {
           showToast(error instanceof Error ? error.message : '平台设置保存失败', 'error')
         }
       },
     })
+  }
+
+  async function testSub2apiRedeemCode() {
+    const code = sub2apiRedeemTestCode.trim()
+    if (!code) {
+      showToast('请输入要测试的兑换码', 'error')
+      return
+    }
+    setSub2apiRedeemTesting(true)
+    try {
+      const result = await platformApi.testAdminSub2ApiRedeem({ code })
+      showToast(result.message || 'sub2api 兑换码测试成功', 'success')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'sub2api 兑换码测试失败', 'error')
+    } finally {
+      setSub2apiRedeemTesting(false)
+    }
   }
 
   async function exportUsers() {
@@ -3130,6 +3153,64 @@ export default function AdminConsole() {
 
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
               <div className="mb-4">
+                <div className="text-base font-semibold text-gray-950 dark:text-gray-50">sub2api 兑换校验</div>
+                <div className="mt-1 text-sm text-gray-500">用于防止同一兑换码在 sub2api 和生图站重复使用；测试会真实标记 sub2api 兑换码为已使用。</div>
+              </div>
+              <label className="flex items-center justify-between rounded-2xl border border-gray-200 px-4 py-3 dark:border-white/[0.08]">
+                <span>
+                  <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">启用 sub2api 校验</span>
+                  <span className="mt-0.5 block text-xs text-gray-400">启用后，用户兑换前会先查询 sub2api 状态，未使用则自动核销</span>
+                </span>
+                <input type="checkbox" checked={settingsDraft.sub2apiRedeemEnabled} onChange={(event) => setSettingsDraft((prev) => ({ ...prev, sub2apiRedeemEnabled: event.target.checked }))} />
+              </label>
+              <label className="mt-4 block text-xs font-semibold text-gray-500">
+                sub2api 地址前缀
+                <input
+                  value={settingsDraft.sub2apiRedeemBaseUrl}
+                  onChange={(event) => setSettingsDraft((prev) => ({ ...prev, sub2apiRedeemBaseUrl: event.target.value }))}
+                  placeholder="https://code2alita.com"
+                  className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+                />
+                <span className="mt-1.5 block text-[11px] font-normal text-gray-400">
+                  只填域名前缀即可，系统会自动使用 /api/v1/admin/redeem-codes 官方接口。
+                </span>
+              </label>
+              <label className="mt-4 block text-xs font-semibold text-gray-500">
+                Admin API Key
+                <input
+                  type="password"
+                  value={settingsDraft.sub2apiRedeemToken ?? ''}
+                  onChange={(event) => setSettingsDraft((prev) => ({ ...prev, sub2apiRedeemToken: event.target.value }))}
+                  placeholder={settingsDraft.sub2apiRedeemTokenConfigured ? '已配置，留空则保持不变' : 'admin-...'}
+                  className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+                />
+                <span className="mt-1.5 block text-[11px] font-normal text-gray-400">
+                  {settingsDraft.sub2apiRedeemTokenConfigured ? 'Admin API Key 已配置；输入新值后保存会覆盖旧值。' : '当前未配置 Admin API Key。'}
+                </span>
+              </label>
+              <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/70 p-3 dark:border-blue-400/20 dark:bg-blue-400/10">
+                <div className="text-xs font-semibold text-blue-700 dark:text-blue-200">测试兑换码</div>
+                <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    value={sub2apiRedeemTestCode}
+                    onChange={(event) => setSub2apiRedeemTestCode(event.target.value.trim())}
+                    placeholder="输入要测试的兑换码"
+                    className="h-10 min-w-0 flex-1 rounded-xl border border-blue-200 bg-white px-3 font-mono text-sm font-semibold text-gray-900 outline-none focus:border-blue-400 dark:border-blue-400/20 dark:bg-gray-950 dark:text-gray-100"
+                  />
+                  <button
+                    type="button"
+                    disabled={sub2apiRedeemTesting || !sub2apiRedeemTestCode.trim()}
+                    onClick={() => void testSub2apiRedeemCode()}
+                    className="h-10 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {sub2apiRedeemTesting ? '测试中...' : '测试并标记使用'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
+              <div className="mb-4">
                 <div className="text-base font-semibold text-gray-950 dark:text-gray-50">维护提示</div>
                 <div className="mt-1 text-sm text-gray-500">关闭生成时，用户会看到这段中文提示。</div>
               </div>
@@ -3165,6 +3246,8 @@ export default function AdminConsole() {
               <div className="flex items-center justify-between"><span className="text-gray-500">生成</span><StatusBadge tone={settingsDraft.generationEnabled ? 'green' : 'red'}>{settingsDraft.generationEnabled ? '开放' : '维护'}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">注册送分</span><span className="font-semibold text-amber-700">{settingsDraft.registerBonusCredits}</span></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">兑换说明</span><StatusBadge tone={settingsDraft.redeemDescription.trim() ? 'green' : 'gray'}>{settingsDraft.redeemDescription.trim() ? '已配置' : '不显示'}</StatusBadge></div>
+              <div className="flex items-center justify-between"><span className="text-gray-500">sub2api 校验</span><StatusBadge tone={settingsDraft.sub2apiRedeemEnabled ? 'blue' : 'gray'}>{settingsDraft.sub2apiRedeemEnabled ? '启用' : '关闭'}</StatusBadge></div>
+              <div className="flex items-center justify-between"><span className="text-gray-500">sub2api Admin Key</span><StatusBadge tone={settingsDraft.sub2apiRedeemTokenConfigured ? 'green' : 'gray'}>{settingsDraft.sub2apiRedeemTokenConfigured ? '已配置' : '未配置'}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">首页轮播</span><StatusBadge tone={settingsDraft.landingHeroSlidesJson.trim() ? 'blue' : 'amber'}>{settingsDraft.landingHeroSlidesJson.trim() ? '已配置' : '待配置'}</StatusBadge></div>
             </div>
             <button className="mt-5 h-10 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-gray-950">保存设置</button>
