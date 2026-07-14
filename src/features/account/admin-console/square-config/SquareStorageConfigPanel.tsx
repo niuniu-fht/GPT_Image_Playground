@@ -28,7 +28,6 @@ function createDraft(config: AdminSquareConfig | null): SquareConfigDraft {
     r2SecretKey: '',
     r2Bucket: config?.r2Bucket ?? '',
     publicBaseUrl: config?.publicBaseUrl ?? '',
-    autoUploadGeneratedImages: config?.autoUploadGeneratedImages ?? false,
   }
 }
 
@@ -58,7 +57,6 @@ export function SquareStorageConfigPanel({
       r2SecretKey: draft.r2SecretKey,
       r2Bucket: draft.r2Bucket,
       publicBaseUrl: draft.publicBaseUrl,
-      autoUploadGeneratedImages: draft.autoUploadGeneratedImages,
     })
     setEditing(false)
   }
@@ -125,7 +123,9 @@ export function SquareStorageConfigPanel({
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             <ToggleField label="启用 R2 存储" checked={draft.r2Enabled} onChange={(value) => setDraft((prev) => ({ ...prev, r2Enabled: value }))} />
-            <ToggleField label="生成完成后自动上传 R2（默认关闭，发布广场时仍会上传）" checked={draft.autoUploadGeneratedImages} onChange={(value) => setDraft((prev) => ({ ...prev, autoUploadGeneratedImages: value }))} />
+            <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-300">
+              生成完成后只保存在本地；仅当用户主动分享到广场时，图片才会上传到 Cloudflare R2。
+            </div>
           </div>
           <div className="flex justify-end gap-2 border-t border-gray-100 pt-3 dark:border-white/[0.08]">
             <button type="button" onClick={() => setEditing(false)} className="h-10 rounded-xl border border-gray-200 px-4 text-sm font-medium text-gray-600 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-200 dark:hover:bg-white/[0.06]">

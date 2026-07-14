@@ -7,7 +7,15 @@ import {
   RECYCLE_BIN_POLL_INTERVAL_MS,
   RECYCLE_BIN_RETENTION_MS,
 } from './constants'
-import { removeImage, listImages, startLegacyImageAssetMigrationSweep } from './imageAssets'
+import {
+  listImages,
+  removeImage,
+  startLegacyImageAssetMigrationSweep,
+} from './imageAssets'
+import {
+  seedGeneratedImagePersistenceRetriesFromTasks,
+  startGeneratedImagePersistenceRetryWorker,
+} from './generatedImagePersistenceRetry'
 import { applyTaskPurgePlan } from './taskPurgeApply'
 import { planOrphanImageCleanup, planTaskPurge } from './taskPurgePlanner'
 import { useStore } from './state'
@@ -113,12 +121,17 @@ export async function initStore() {
   useStore.getState().setTasks(tasks)
   repairCategoryStateFromTasks(tasks)
   ensureErrorLogJanitorStarted()
+  startGeneratedImagePersistenceRetryWorker()
 
   window.setTimeout(() => {
     void cleanupOrphanImages(tasks).finally(() => {
       startLegacyImageAssetMigrationSweep()
     })
   }, 1000)
+
+  window.setTimeout(() => {
+    void seedGeneratedImagePersistenceRetriesFromTasks(tasks)
+  }, 300)
 }
 
 export async function cleanupExpiredRecycleBinTasks() {

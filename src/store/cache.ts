@@ -1,6 +1,7 @@
 import * as imageDb from '../lib/db'
 
 export type CachedImageVariant = 'original' | 'thumbnail'
+export const IMAGE_ASSET_CACHE_UPDATED_EVENT = 'image-asset-cache-updated'
 
 export interface CachedImageMetadata {
   width: number
@@ -147,7 +148,17 @@ function setCacheEntry(id: string, entry: CachedImageEntry, variant: CachedImage
 
   touchCacheEntry(cache, id, entry)
   trimCache(cache, variant)
+  emitImageAssetCacheUpdated(id, variant)
   return entry.src
+}
+
+function emitImageAssetCacheUpdated(id: string, variant: CachedImageVariant) {
+  window.dispatchEvent(new CustomEvent(IMAGE_ASSET_CACHE_UPDATED_EVENT, {
+    detail: {
+      imageId: id,
+      variant,
+    },
+  }))
 }
 
 function cacheRecordMetadata(id: string, record: StoredImageRecordCompat) {

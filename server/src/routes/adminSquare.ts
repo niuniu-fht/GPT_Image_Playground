@@ -406,7 +406,6 @@ const configSchema = z.object({
   r2SecretKey: z.string().max(4000).optional(),
   r2Bucket: z.string().max(120).optional(),
   publicBaseUrl: z.string().url().optional().or(z.literal('')),
-  autoUploadGeneratedImages: z.boolean().optional(),
 })
 
 router.patch('/config', async (req, res, next) => {

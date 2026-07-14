@@ -551,7 +551,6 @@ export interface AdminSquareConfig {
   r2SecretKeyConfigured: boolean
   r2Bucket: string
   publicBaseUrl: string
-  autoUploadGeneratedImages: boolean
 }
 
 export interface AdminSquareR2TestResult {
@@ -682,6 +681,7 @@ export type TaskImageResult =
     }
 
 export interface TaskResponseMeta {
+  generationTaskId?: string | null
   appliedImageParams?: AppliedImageParams | null
   imageResults?: TaskImageResult[] | null
   revisedPrompt?: string | null

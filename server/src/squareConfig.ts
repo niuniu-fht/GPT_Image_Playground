@@ -10,7 +10,6 @@ export interface SquareRuntimeConfig {
   r2SecretKey: string
   r2Bucket: string
   publicBaseUrl: string
-  autoUploadGeneratedImages: boolean
 }
 
 export interface SquareAdminConfigView {
@@ -22,7 +21,6 @@ export interface SquareAdminConfigView {
   r2SecretKeyConfigured: boolean
   r2Bucket: string
   publicBaseUrl: string
-  autoUploadGeneratedImages: boolean
 }
 
 export interface SquareAdminConfigInput {
@@ -34,7 +32,6 @@ export interface SquareAdminConfigInput {
   r2SecretKey?: string
   r2Bucket?: string
   publicBaseUrl?: string
-  autoUploadGeneratedImages?: boolean
 }
 
 const DEFAULT_PUBLIC_BASE_URL = 'https://assets.code2alita.com'
@@ -50,7 +47,6 @@ export const defaultSquareRuntimeConfig: SquareRuntimeConfig = {
   r2SecretKey: env.r2SecretKey,
   r2Bucket: env.r2Bucket || DEFAULT_R2_BUCKET,
   publicBaseUrl: env.r2PublicBaseUrl || DEFAULT_PUBLIC_BASE_URL,
-  autoUploadGeneratedImages: false,
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -82,10 +78,6 @@ export async function getSquareRuntimeConfig(): Promise<SquareRuntimeConfig> {
     r2SecretKey: readString(map, 'r2SecretKey'),
     r2Bucket: readString(map, 'r2Bucket'),
     publicBaseUrl: readString(map, 'publicBaseUrl').replace(/\/+$/, ''),
-    autoUploadGeneratedImages: parseBoolean(
-      map.get('square.autoUploadGeneratedImages'),
-      defaultSquareRuntimeConfig.autoUploadGeneratedImages,
-    ),
   }
 }
 
@@ -99,7 +91,6 @@ export function toSquareAdminConfigView(config: SquareRuntimeConfig): SquareAdmi
     r2SecretKeyConfigured: Boolean(config.r2SecretKey),
     r2Bucket: config.r2Bucket,
     publicBaseUrl: config.publicBaseUrl,
-    autoUploadGeneratedImages: config.autoUploadGeneratedImages,
   }
 }
 
@@ -126,7 +117,6 @@ export async function upsertSquareRuntimeConfig(input: SquareAdminConfigInput): 
     ['r2SecretKey', next.r2SecretKey],
     ['r2Bucket', next.r2Bucket],
     ['publicBaseUrl', next.publicBaseUrl],
-    ['autoUploadGeneratedImages', String(next.autoUploadGeneratedImages)],
   ]
 
   await prisma.$transaction(
@@ -152,7 +142,6 @@ export async function seedMissingSquareRuntimeConfig(input: SquareRuntimeConfig)
     ['r2SecretKey', input.r2SecretKey],
     ['r2Bucket', input.r2Bucket],
     ['publicBaseUrl', input.publicBaseUrl],
-    ['autoUploadGeneratedImages', String(input.autoUploadGeneratedImages)],
   ]
 
   const rows = await prisma.platformSetting.findMany({
@@ -166,10 +155,7 @@ export async function seedMissingSquareRuntimeConfig(input: SquareRuntimeConfig)
       return [prisma.platformSetting.create({ data: { key: settingKey, value } })]
     }
     const shouldBackfillEmptyString =
-      key !== 'r2Enabled' &&
-      key !== 'autoUploadGeneratedImages' &&
-      currentValue === '' &&
-      value !== ''
+      key !== 'r2Enabled' && currentValue === '' && value !== ''
     if (shouldBackfillEmptyString) {
       return [prisma.platformSetting.update({ where: { key: settingKey }, data: { value } })]
     }

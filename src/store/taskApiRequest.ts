@@ -1,16 +1,25 @@
 import type { ApiInputImage, ApiImageAsset, CallApiResult } from '../lib/api'
 import { isRemoteImageUrl } from '../lib/imageUrl'
 import { platformApi } from '../lib/platformApi'
-import type { AppSettings, TaskRecord } from '../types'
+import type { AppSettings, TaskRecord, TaskResponseMeta } from '../types'
 import { getImageView } from './imageAssets'
 import { useStore } from './state'
 
+interface TaskApiOutputImageMeta {
+  generationTaskId?: string
+  outputIndex?: number
+}
+
 export type TaskApiOutputImageAsset =
-  | ApiImageAsset
-  | {
+  | (ApiImageAsset & TaskApiOutputImageMeta)
+  | ({
       remoteUrl: string
       mimeType: string
-    }
+    } & TaskApiOutputImageMeta)
+  | ({
+      dataUrl: string
+      mimeType: string
+    } & TaskApiOutputImageMeta)
 
 interface TaskPlatformApiResult {
   images: TaskApiOutputImageAsset[]
@@ -18,7 +27,7 @@ interface TaskPlatformApiResult {
 }
 
 const GENERATION_POLL_INTERVAL_MS = 1800
-const GENERATION_POLL_TIMEOUT_MS = 1000 * 60 * 20
+const GENERATION_POLL_TIMEOUT_MS = 1000 * 300
 
 export interface TaskApiRequestHandlers {
   onFinalImages?: (images: TaskApiOutputImageAsset[]) => void | Promise<void>
@@ -97,7 +106,43 @@ async function waitForGenerationResult(
     }
   }
 
-  throw new Error('生成等待超时，请稍后在作品记录中查看结果')
+  throwIfAborted?.()
+  const latestResult = await platformApi.getGenerationTask(taskId)
+  if (latestResult.user) {
+    useStore.getState().setCurrentUser(latestResult.user)
+  }
+  if (latestResult.status === 'done') {
+    return latestResult
+  }
+  if (latestResult.status === 'error') {
+    throw new Error(latestResult.error || '生成失败，请稍后重试')
+  }
+
+  const timeoutResult = await platformApi.timeoutGenerationTask(taskId)
+  if (timeoutResult.user) {
+    useStore.getState().setCurrentUser(timeoutResult.user)
+  }
+  if (timeoutResult.status === 'done') {
+    const completedResult = await platformApi.getGenerationTask(taskId)
+    if (completedResult.status === 'done') {
+      return completedResult
+    }
+  }
+  throw new Error(timeoutResult.error || '生成等待超时，积分已退回')
+}
+
+function mergeGenerationResponseMeta(
+  responseMeta: unknown,
+  generationTaskId: string,
+): TaskResponseMeta {
+  const baseMeta = responseMeta && typeof responseMeta === 'object' && !Array.isArray(responseMeta)
+    ? responseMeta as TaskResponseMeta
+    : {}
+
+  return {
+    ...baseMeta,
+    generationTaskId,
+  }
 }
 
 export async function callTaskImageApi(
@@ -137,18 +182,36 @@ export async function callTaskImageApi(
     : result
 
   const images: TaskApiOutputImageAsset[] = await Promise.all(
-    completedResult.images.map(async (image) => {
-      if (isRemoteImageUrl(image.dataUrl)) {
+    completedResult.images.map(async (image, index) => {
+      const outputUrl = image.dataUrl.trim()
+      const outputMeta = {
+        generationTaskId: completedResult.taskId,
+        outputIndex: index,
+      }
+      if (isRemoteImageUrl(outputUrl)) {
         return {
-          remoteUrl: image.dataUrl,
+          remoteUrl: outputUrl,
           mimeType: image.mimeType || 'image/png',
+          ...outputMeta,
         }
       }
-      const response = await fetch(image.dataUrl)
+      if (/^data:[^,]+,.+/i.test(outputUrl)) {
+        return {
+          dataUrl: outputUrl,
+          mimeType: image.mimeType || outputUrl.match(/^data:([^;,]+)/i)?.[1] || 'image/png',
+          ...outputMeta,
+        }
+      }
+
+      const response = await fetch(outputUrl)
+      if (!response.ok) {
+        throw new Error(`图片读取失败：HTTP ${response.status}`)
+      }
       const blob = await response.blob()
       return {
         blob,
         mimeType: image.mimeType || blob.type || 'image/png',
+        ...outputMeta,
       }
     }),
   )
@@ -160,6 +223,6 @@ export async function callTaskImageApi(
 
   return {
     images,
-    responseMeta: (completedResult.responseMeta as CallApiResult['responseMeta']) ?? undefined,
+    responseMeta: mergeGenerationResponseMeta(completedResult.responseMeta, completedResult.taskId),
   }
 }

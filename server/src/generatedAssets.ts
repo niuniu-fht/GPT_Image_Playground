@@ -1,5 +1,14 @@
 import type { Prisma } from '@prisma/client'
-import type { UploadedGeneratedAsset } from './squareAutoUpload.js'
+
+interface UploadedGeneratedAsset {
+  imageIndex: number
+  r2Key?: string | null
+  publicUrl: string
+  mimeType: string
+  byteSize: number
+  width?: number | null
+  height?: number | null
+}
 
 interface PersistGeneratedAssetsInput {
   taskId: string

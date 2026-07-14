@@ -5,12 +5,10 @@ import sharp from 'sharp'
 import { z } from 'zod'
 import { requireUser, resLocals } from '../auth.js'
 import { env } from '../env.js'
-import { replaceGeneratedAssetsForTask } from '../generatedAssets.js'
 import { HttpError, sendOk } from '../http.js'
 import { isGptImage2Model, resolveModelCostForSize, supportsHighQualityPricing } from '../modelCost.js'
 import { prisma } from '../prisma.js'
 import { getPlatformSettings } from '../settings.js'
-import { autoUploadGeneratedImagesToSquare } from '../squareAutoUpload.js'
 
 const router = Router()
 const MAX_UPSTREAM_IMAGE_COUNT = 10
@@ -284,7 +282,6 @@ function toPrismaJsonValue(value: unknown): Prisma.InputJsonValue {
 function mergeAdminReturnParams(
   currentParams: Prisma.JsonValue,
   generationResult: Awaited<ReturnType<typeof callImagesApi>>,
-  squareUploadError: string | null,
 ): Prisma.InputJsonValue {
   const params = currentParams && typeof currentParams === 'object' && !Array.isArray(currentParams)
     ? currentParams as Record<string, unknown>
@@ -301,7 +298,6 @@ function mergeAdminReturnParams(
         requestedCount: generationResult.requestedCount,
         receivedCount: generationResult.images.length,
         imageResults: generationResult.imageResults,
-        squareUploadError,
       },
     },
   })
@@ -716,6 +712,14 @@ async function refundFailedGeneration(input: {
   userId: string
 }) {
   await prisma.$transaction(async (tx) => {
+    const currentTask = await tx.generationTask.findFirst({
+      where: { id: input.taskId, userId: input.userId },
+      select: { status: true },
+    })
+    if (!currentTask || currentTask.status !== 'running') {
+      return
+    }
+
     const latestUser = await tx.user.update({
       where: { id: input.userId },
       data: { creditBalance: { increment: input.costCredits } },
@@ -741,6 +745,49 @@ async function refundFailedGeneration(input: {
   })
 }
 
+async function timeoutGenerationTaskAndRefund(input: {
+  taskId: string
+  userId: string
+}) {
+  return prisma.$transaction(async (tx) => {
+    const task = await tx.generationTask.findFirst({
+      where: { id: input.taskId, userId: input.userId },
+      select: { id: true, status: true, costCredits: true },
+    })
+    if (!task) {
+      throw new HttpError(404, 'task_not_found', '生成任务不存在或已被清理')
+    }
+    if (task.status !== 'running') {
+      return { refunded: false }
+    }
+
+    const latestUser = await tx.user.update({
+      where: { id: input.userId },
+      data: { creditBalance: { increment: task.costCredits } },
+      select: { creditBalance: true },
+    })
+    await tx.creditLedger.create({
+      data: {
+        userId: input.userId,
+        delta: task.costCredits,
+        reason: '生成等待超时退回积分',
+        taskId: input.taskId,
+        balanceAfter: latestUser.creditBalance,
+      },
+    })
+    await tx.generationTask.update({
+      where: { id: input.taskId },
+      data: {
+        status: 'error',
+        error: '生成等待超时，积分已退回',
+        finishedAt: new Date(),
+      },
+    })
+
+    return { refunded: true }
+  })
+}
+
 async function runGenerationTask(input: {
   costCredits: number
   generationInput: GenerationInput
@@ -750,31 +797,11 @@ async function runGenerationTask(input: {
 }) {
   try {
     const generationResult = await callImagesApi(input.generationInput, resolveGenerationUpstream(input.model))
-    const upstreamImages = generationResult.images
-    let squareUploadError: string | null = null
-    const squareUpload = await autoUploadGeneratedImagesToSquare({
-      userId: input.userId,
-      taskId: input.taskId,
-      prompt: input.generationInput.prompt,
-      params: input.generationInput.params,
-      images: upstreamImages,
-    }).catch((error: unknown) => {
-      squareUploadError = error instanceof Error ? error.message : String(error)
-      console.warn('[square] auto upload failed', squareUploadError)
-      return null
-    })
-    const images = squareUpload?.assetUrls?.length
-      ? upstreamImages.map((image, index): StoredGenerationImageResult => ({
-          ...image,
-          index: image.index ?? index,
-          dataUrl: squareUpload.assetUrls?.[index] ?? image.dataUrl,
-          status: 'done',
-        }))
-      : upstreamImages.map((image, index): StoredGenerationImageResult => ({
-          ...image,
-          index: image.index ?? index,
-          status: 'done',
-        }))
+    const images = generationResult.images.map((image, index): StoredGenerationImageResult => ({
+      ...image,
+      index: image.index ?? index,
+      status: 'done',
+    }))
     const failedImages = generationResult.imageResults
       .filter((item): item is Extract<GenerationImageResult, { status: 'error' }> => item.status === 'error')
       .map((item): StoredGenerationImageResult => ({
@@ -791,8 +818,15 @@ async function runGenerationTask(input: {
     await prisma.$transaction(async (tx) => {
       const currentTask = await tx.generationTask.findUnique({
         where: { id: input.taskId },
-        select: { params: true },
+        select: { params: true, status: true },
       })
+      if (!currentTask || currentTask.status !== 'running') {
+        console.info('[generation] async task result ignored because task is no longer running', {
+          taskId: input.taskId,
+          status: currentTask?.status ?? 'missing',
+        })
+        return
+      }
       if (refundCredits > 0) {
         const latestUser = await tx.user.update({
           where: { id: input.userId },
@@ -814,23 +848,13 @@ async function runGenerationTask(input: {
         data: {
           status: 'done',
           costCredits: chargedCredits,
-          error: squareUploadError,
-          params: mergeAdminReturnParams(currentTask?.params ?? input.generationInput.params, generationResult, squareUploadError),
+          error: null,
+          params: mergeAdminReturnParams(currentTask?.params ?? input.generationInput.params, generationResult),
           outputImages,
           finishedAt: new Date(),
         },
       })
-      await replaceGeneratedAssetsForTask(tx, {
-        taskId: input.taskId,
-        userId: input.userId,
-        uploadMode: squareUpload?.mode ?? null,
-        assets: squareUpload?.assets,
-      })
     })
-
-    if (squareUploadError) {
-      console.warn('[square] generated image upload completed with warning', squareUploadError)
-    }
   } catch (error) {
     console.error('[generation] async task failed', {
       taskId: input.taskId,
@@ -882,7 +906,7 @@ router.get('/:taskId', requireUser, async (req, res, next) => {
       },
       user: latestUser ? publicUser(latestUser) : null,
       responseMeta: {
-        squareUploadError: task.status === 'done' ? task.error : null,
+        squareUploadError: null,
         imageResults: normalizeTaskImageResults(task.outputImages, task.error, task.params),
         appliedImageParams: {
           size: typeof (task.params as { size?: unknown }).size === 'string'
@@ -896,6 +920,35 @@ router.get('/:taskId', requireUser, async (req, res, next) => {
             : 'png',
         },
       },
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/:taskId/timeout', requireUser, async (req, res, next) => {
+  const user = resLocals(req).user!
+  try {
+    const taskId = typeof req.params.taskId === 'string' ? req.params.taskId : ''
+    await timeoutGenerationTaskAndRefund({ taskId, userId: user.id })
+
+    const [task, latestUser] = await Promise.all([
+      prisma.generationTask.findFirst({
+        where: { id: taskId, userId: user.id },
+        select: { id: true, status: true, error: true },
+      }),
+      prisma.user.findUnique({
+        where: { id: user.id },
+        select: { id: true, email: true, role: true, creditBalance: true },
+      }),
+    ])
+    if (!task) throw new HttpError(404, 'task_not_found', '生成任务不存在或已被清理')
+
+    sendOk(res, {
+      taskId: task.id,
+      status: task.status,
+      error: task.status === 'error' ? task.error || '生成等待超时，积分已退回' : null,
+      user: latestUser ? publicUser(latestUser) : null,
     })
   } catch (error) {
     next(error)

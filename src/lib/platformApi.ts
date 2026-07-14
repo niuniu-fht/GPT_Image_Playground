@@ -142,6 +142,13 @@ export interface PlatformGenerationResult {
   responseMeta?: unknown
 }
 
+export interface PlatformGenerationTimeoutResult {
+  taskId: string
+  status: 'running' | 'done' | 'error'
+  error?: string | null
+  user: CurrentUser | null
+}
+
 export interface AdminUpstreamModelOption {
   id: string
   ownedBy?: string
@@ -716,5 +723,11 @@ export const platformApi = {
 
   getGenerationTask(taskId: string) {
     return request<PlatformGenerationResult>(`/api/generations/${encodeURIComponent(taskId)}`)
+  },
+
+  timeoutGenerationTask(taskId: string) {
+    return request<PlatformGenerationTimeoutResult>(`/api/generations/${encodeURIComponent(taskId)}/timeout`, {
+      method: 'POST',
+    })
   },
 }

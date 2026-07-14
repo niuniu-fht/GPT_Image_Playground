@@ -222,8 +222,11 @@ export async function saveRemoteImageAsset(
   return imageId
 }
 
-export async function stageImageAssetReference(referenceUrl: string): Promise<string> {
-  const imageId = await hashDataUrl(referenceUrl)
+export async function stageImageAssetReference(
+  referenceUrl: string,
+  id?: string,
+): Promise<string> {
+  const imageId = id?.trim() || await hashDataUrl(referenceUrl)
   setCachedImage(imageId, referenceUrl, 'original')
   return imageId
 }
@@ -361,7 +364,7 @@ export async function storeImage(
     return saveImageAssetBlob(input, { ...baseOptions, thumbnailBlob, thumbnailMimeType, thumbnailWidth, thumbnailHeight })
   }
   if (stageOnly) {
-    return stageImageAssetReference(input)
+    return stageImageAssetReference(input, baseOptions.id)
   }
   if (isRemoteImageUrl(input)) {
     return saveRemoteImageAsset(input, baseOptions)

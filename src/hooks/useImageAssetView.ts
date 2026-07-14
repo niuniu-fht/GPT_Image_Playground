@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ImageAssetView, ImageAssetViewOptions } from '../store/imageAssets'
 import { getImageView } from '../store'
+import { IMAGE_ASSET_CACHE_UPDATED_EVENT } from '../store/cache'
 
 export interface UseImageAssetViewResult {
   imageId: string
@@ -43,51 +44,67 @@ export function useImageAssetView(
       includeMetadata,
       inferMetadataFromUrl,
     }
-    const handle = getImageView(normalizedImageId, variant)
-    const cachedView = handle.displayUrl
-      ? { url: handle.displayUrl, metadata: handle.metadata } as ImageAssetView
-      : null
-    if (cachedView && (!metadataRequested || cachedView.metadata)) {
+
+    const loadImageView = () => {
+      const handle = getImageView(normalizedImageId, variant)
+      const cachedView = handle.displayUrl
+        ? { url: handle.displayUrl, metadata: handle.metadata } as ImageAssetView
+        : null
+      if (cachedView && (!metadataRequested || cachedView.metadata)) {
+        setResolvedImageId(normalizedImageId)
+        setView(cachedView)
+        setStatus('ready')
+        return
+      }
+
       setResolvedImageId(normalizedImageId)
-      setView(cachedView)
-      setStatus('ready')
-      return () => {
-        cancelled = true
+      if (cachedView) {
+        setView(cachedView)
+      } else {
+        setView(null)
+      }
+      setStatus('loading')
+
+      void getImageView(normalizedImageId, variant).reload().then(h => h.displayUrl ? { url: h.displayUrl, metadata: h.metadata } as ImageAssetView : null)
+        .then((nextView) => {
+          if (cancelled) {
+            return
+          }
+
+          if (nextView) {
+            setView(nextView)
+            setStatus('ready')
+            return
+          }
+
+          setView(null)
+          setStatus('error')
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setView(null)
+            setStatus('error')
+          }
+        })
+    }
+
+    const handleImageCacheUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ imageId?: unknown; variant?: unknown }>).detail
+      if (
+        !cancelled &&
+        detail?.imageId === normalizedImageId &&
+        (detail.variant === undefined || detail.variant === variant)
+      ) {
+        loadImageView()
       }
     }
 
-    setResolvedImageId(normalizedImageId)
-    if (cachedView) {
-      setView(cachedView)
-    } else {
-      setView(null)
-    }
-    setStatus('loading')
-
-    void getImageView(normalizedImageId, variant).reload().then(h => h.displayUrl ? { url: h.displayUrl, metadata: h.metadata } as ImageAssetView : null)
-      .then((nextView) => {
-        if (cancelled) {
-          return
-        }
-
-        if (nextView) {
-          setView(nextView)
-          setStatus('ready')
-          return
-        }
-
-        setView(null)
-        setStatus('error')
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setView(null)
-          setStatus('error')
-        }
-      })
+    loadImageView()
+    window.addEventListener(IMAGE_ASSET_CACHE_UPDATED_EVENT, handleImageCacheUpdated)
 
     return () => {
       cancelled = true
+      window.removeEventListener(IMAGE_ASSET_CACHE_UPDATED_EVENT, handleImageCacheUpdated)
     }
   }, [
     includeMetadata,
