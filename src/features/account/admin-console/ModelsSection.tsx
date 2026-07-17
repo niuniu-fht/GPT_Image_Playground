@@ -6,6 +6,7 @@ import {
   cx,
   EmptyState,
   formatTime,
+  PaginationBar,
   SectionShell,
   StatusBadge,
   upstreamHealthLabel,
@@ -15,6 +16,9 @@ import {
 type ModelsSectionProps = {
   models: ModelConfig[]
   filteredModels: ModelConfig[]
+  total: number
+  page: number
+  pageSize: number
   upstreams: AdminUpstreamProvider[]
   modelQuery: string
   modelStatusFilter: string
@@ -29,6 +33,7 @@ type ModelsSectionProps = {
   setModelProviderFilter: (value: string) => void
   setModelHealthFilter: (value: string) => void
   setSelectedModelIds: (value: string[]) => void
+  setPage: (page: number) => void
   toggleCurrentPageModels: (checked: boolean) => void
   toggleModelSelection: (modelId: string) => void
   batchPatchModels: (input: Partial<Pick<ModelConfig, 'enabled' | 'isNew'>>) => void
@@ -44,6 +49,9 @@ function isGptImageConfig(model: Pick<ModelConfig, 'name' | 'upstreamModel'>): b
 export function ModelsSection({
   models,
   filteredModels,
+  total,
+  page,
+  pageSize,
   upstreams,
   modelQuery,
   modelStatusFilter,
@@ -58,6 +66,7 @@ export function ModelsSection({
   setModelProviderFilter,
   setModelHealthFilter,
   setSelectedModelIds,
+  setPage,
   toggleCurrentPageModels,
   toggleModelSelection,
   batchPatchModels,
@@ -119,9 +128,12 @@ export function ModelsSection({
           <button type="button" disabled={!selectedModelIds.length || modelBatchOperating} onClick={() => setSelectedModelIds([])} className="h-8 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]">取消选择</button>
         </div>
       </div>
-      <AdminTableShell mobileHint="横向滑动查看更多模型字段和操作">
+      <AdminTableShell
+        mobileHint="横向滑动查看更多模型字段和操作"
+        footer={<PaginationBar page={page} pageSize={pageSize} total={total} onPageChange={setPage} />}
+      >
         <div className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.04]">
-          当前显示 <span className="font-semibold text-gray-900 dark:text-gray-100">{filteredModels.length}</span> / {models.length} 个模型
+          当前显示 <span className="font-semibold text-gray-900 dark:text-gray-100">{filteredModels.length}</span> / {total} 个模型
         </div>
         <div className="min-w-[1520px]">
             <div className="sticky top-0 z-20 grid grid-cols-[34px_1.45fr_120px_150px_190px_150px_90px_130px_80px_100px_260px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">

@@ -22,7 +22,7 @@ interface TaskGridOverlaysProps {
   onCloseMoveCategory: () => void
   onConfirmMoveCategory: () => void
   onCloseContextMenu: () => void
-  onOpenTask: (taskId: string) => void
+  onCopyTask: (task: TaskRecord) => void
   onMoveTaskCategory: (task: TaskRecord) => void
   onDeleteTask: (task: TaskRecord) => void
   onPurgeTask: (task: TaskRecord) => void
@@ -43,7 +43,7 @@ export default function TaskGridOverlays(props: TaskGridOverlaysProps) {
     onCloseMoveCategory,
     onConfirmMoveCategory,
     onCloseContextMenu,
-    onOpenTask,
+    onCopyTask,
     onMoveTaskCategory,
     onDeleteTask,
     onPurgeTask,
@@ -81,9 +81,9 @@ export default function TaskGridOverlays(props: TaskGridOverlaysProps) {
         y={contextMenuState?.y ?? 0}
         isInRecycleBin={taskView === 'trash'}
         onClose={onCloseContextMenu}
-        onOpen={() => {
+        onCopy={() => {
           if (contextMenuState?.task) {
-            onOpenTask(contextMenuState.task.id)
+            onCopyTask(contextMenuState.task)
           }
         }}
         onReuse={() => {

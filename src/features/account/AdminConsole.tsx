@@ -4,6 +4,7 @@ import { useStore } from '../../store'
 import { AdminQuickSwitch } from './admin-console/AdminQuickSwitch'
 import { AuditDialog, AuditSection } from './admin-console/AuditSection'
 import { BillingSection } from './admin-console/BillingSection'
+import { GenerationLogsSection } from './admin-console/GenerationLogsSection'
 import { LoginLogDialog, LoginLogsSection } from './admin-console/LoginLogsSection'
 import { ModelConfigDrawer } from './admin-console/model-config/ModelConfigDrawer'
 import { ModelsSection } from './admin-console/ModelsSection'
@@ -215,6 +216,8 @@ export default function AdminConsole() {
   const [ticketTotal, setTicketTotal] = useState(0)
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
   const [moderationRules, setModerationRules] = useState<ModerationRule[]>([])
+  const [moderationPage, setModerationPage] = useState(1)
+  const [moderationTotal, setModerationTotal] = useState(0)
   const [selectedLedgerId, setSelectedLedgerId] = useState<string | null>(null)
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [selectedUserDetail, setSelectedUserDetail] = useState<AdminUserDetail | null>(null)
@@ -224,18 +227,26 @@ export default function AdminConsole() {
   const [tasksPage, setTasksPage] = useState(1)
   const [tasksTotal, setTasksTotal] = useState(0)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [selectedTaskDetail, setSelectedTaskDetail] = useState<AdminGenerationTask | null>(null)
+  const [taskDetailLoading, setTaskDetailLoading] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   const [taskBatchOperating, setTaskBatchOperating] = useState(false)
   const [models, setLocalModels] = useState<ModelConfig[]>([])
+  const [modelsPage, setModelsPage] = useState(1)
+  const [modelsTotal, setModelsTotal] = useState(0)
   const [modelLoadError, setModelLoadError] = useState('')
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>([])
   const [modelBatchOperating, setModelBatchOperating] = useState(false)
   const [upstreams, setUpstreams] = useState<AdminUpstreamProvider[]>([])
+  const [upstreamsPage, setUpstreamsPage] = useState(1)
+  const [upstreamsTotal, setUpstreamsTotal] = useState(0)
   const [upstreamTests, setUpstreamTests] = useState<Record<string, AdminUpstreamTestResult>>({})
   const [testingUpstreamId, setTestingUpstreamId] = useState<string | null>(null)
   const [selectedUpstreamIds, setSelectedUpstreamIds] = useState<string[]>([])
   const [upstreamBatchTesting, setUpstreamBatchTesting] = useState(false)
   const [announcements, setAnnouncements] = useState<AdminAnnouncement[]>([])
+  const [announcementsPage, setAnnouncementsPage] = useState(1)
+  const [announcementsTotal, setAnnouncementsTotal] = useState(0)
   const [selectedAnnouncementIds, setSelectedAnnouncementIds] = useState<string[]>([])
   const [selectedAnnouncementId, setSelectedAnnouncementId] = useState<string | null>(null)
   const [announcementBatchOperating, setAnnouncementBatchOperating] = useState(false)
@@ -539,8 +550,11 @@ export default function AdminConsole() {
         const result = await platformApi.listAdminModerationRules({
           q: moderationQuery,
           enabled: moderationEnabledFilter,
+          page: moderationPage,
+          pageSize: adminPageSize,
         })
         setModerationRules(result.items)
+        setModerationTotal(result.total)
       }
       if (nextTab === 'tasks') {
         const [result, modelResult] = await Promise.all([
@@ -553,7 +567,7 @@ export default function AdminConsole() {
             page: tasksPage,
             pageSize: adminPageSize,
           }),
-          platformApi.listAdminModels(),
+          platformApi.listAdminModels({ pageSize: 100 }),
         ])
         setTasks(result.items)
         setTasksTotal(result.total)
@@ -566,16 +580,31 @@ export default function AdminConsole() {
       if (nextTab === 'models') {
         setModelLoadError('')
         const [modelResult, upstreamResult] = await Promise.all([
-          platformApi.listAdminModels(),
-          platformApi.listAdminUpstreams(),
+          platformApi.listAdminModels({
+            q: modelQuery,
+            status: modelStatusFilter,
+            providerId: modelProviderFilter,
+            health: modelHealthFilter,
+            page: modelsPage,
+            pageSize: adminPageSize,
+          }),
+          platformApi.listAdminUpstreams({ pageSize: 100 }),
         ])
         setLocalModels(modelResult.models)
+        setModelsTotal(modelResult.total)
         setSelectedModelIds((prev) => prev.filter((id) => modelResult.models.some((item) => item.id === id)))
         setUpstreams(upstreamResult.items)
       }
       if (nextTab === 'upstreams') {
-        const result = await platformApi.listAdminUpstreams()
+        const result = await platformApi.listAdminUpstreams({
+          q: upstreamQuery,
+          status: upstreamStatusFilter,
+          health: upstreamHealthFilter,
+          page: upstreamsPage,
+          pageSize: adminPageSize,
+        })
         setUpstreams(result.items)
+        setUpstreamsTotal(result.total)
         setSelectedUpstreamIds((prev) => prev.filter((id) => result.items.some((item) => item.id === id)))
       }
       if (nextTab === 'square') {
@@ -600,8 +629,16 @@ export default function AdminConsole() {
         }
       }
       if (nextTab === 'announcements') {
-        const result = await platformApi.listAdminAnnouncements()
+        const result = await platformApi.listAdminAnnouncements({
+          q: announcementQuery,
+          status: announcementStatusFilter,
+          placement: announcementPlacementFilter,
+          level: announcementLevelFilter,
+          page: announcementsPage,
+          pageSize: adminPageSize,
+        })
         setAnnouncements(result.items)
+        setAnnouncementsTotal(result.total)
         setSelectedAnnouncementIds((prev) => prev.filter((id) => result.items.some((item) => item.id === id)))
         if (selectedAnnouncementId && !result.items.some((item) => item.id === selectedAnnouncementId)) setSelectedAnnouncementId(null)
       }
@@ -679,15 +716,36 @@ export default function AdminConsole() {
 
   useEffect(() => {
     if (open && tab === 'announcements') {
-      setSelectedAnnouncementIds((prev) => prev.filter((id) => filteredAnnouncements.some((item) => item.id === id)))
+      if (announcementsPage !== 1) {
+        setAnnouncementsPage(1)
+        return
+      }
+      const id = window.setTimeout(() => void loadAll('announcements'), 300)
+      return () => window.clearTimeout(id)
     }
-  }, [filteredAnnouncements, open, tab])
+  }, [announcementQuery, announcementStatusFilter, announcementPlacementFilter, announcementLevelFilter])
 
   useEffect(() => {
     if (open && tab === 'models') {
-      setSelectedModelIds((prev) => prev.filter((id) => filteredModels.some((item) => item.id === id)))
+      if (modelsPage !== 1) {
+        setModelsPage(1)
+        return
+      }
+      const id = window.setTimeout(() => void loadAll('models'), 300)
+      return () => window.clearTimeout(id)
     }
-  }, [filteredModels, open, tab])
+  }, [modelQuery, modelStatusFilter, modelProviderFilter, modelHealthFilter])
+
+  useEffect(() => {
+    if (open && tab === 'upstreams') {
+      if (upstreamsPage !== 1) {
+        setUpstreamsPage(1)
+        return
+      }
+      const id = window.setTimeout(() => void loadAll('upstreams'), 300)
+      return () => window.clearTimeout(id)
+    }
+  }, [upstreamQuery, upstreamStatusFilter, upstreamHealthFilter])
 
   useEffect(() => {
     if (open && tab === 'tasks') {
@@ -751,6 +809,10 @@ export default function AdminConsole() {
 
   useEffect(() => {
     if (open && tab === 'moderation') {
+      if (moderationPage !== 1) {
+        setModerationPage(1)
+        return
+      }
       const id = window.setTimeout(() => void loadAll('moderation'), 300)
       return () => window.clearTimeout(id)
     }
@@ -783,6 +845,22 @@ export default function AdminConsole() {
   useEffect(() => {
     if (open && tab === 'tasks') void loadAll('tasks')
   }, [tasksPage])
+
+  useEffect(() => {
+    if (open && tab === 'models') void loadAll('models')
+  }, [modelsPage])
+
+  useEffect(() => {
+    if (open && tab === 'upstreams') void loadAll('upstreams')
+  }, [upstreamsPage])
+
+  useEffect(() => {
+    if (open && tab === 'announcements') void loadAll('announcements')
+  }, [announcementsPage])
+
+  useEffect(() => {
+    if (open && tab === 'moderation') void loadAll('moderation')
+  }, [moderationPage])
 
   useEffect(() => {
     if (open && tab === 'square') void loadAll('square')
@@ -1136,27 +1214,27 @@ export default function AdminConsole() {
     })
   }
 
+  async function openTaskDetail(taskId: string) {
+    setSelectedTaskId(taskId)
+    setSelectedTaskDetail(null)
+    setTaskDetailLoading(true)
+    try {
+      const result = await platformApi.getAdminTask(taskId)
+      setSelectedTaskDetail(result.task)
+    } catch (error) {
+      setSelectedTaskId(null)
+      showToast(error instanceof Error ? error.message : '生成日志详情加载失败', 'error')
+    } finally {
+      setTaskDetailLoading(false)
+    }
+  }
+
   function readTaskAdminMeta(task: AdminGenerationTask): Record<string, unknown> {
     const params = task.params && typeof task.params === 'object' && !Array.isArray(task.params)
       ? task.params as Record<string, unknown>
       : {}
     const meta = params._admin
     return meta && typeof meta === 'object' && !Array.isArray(meta) ? meta as Record<string, unknown> : {}
-  }
-
-  function taskOperationMeta(task: AdminGenerationTask): { label: string; tone: 'blue' | 'purple' | 'gray'; isEdit: boolean } {
-    const meta = readTaskAdminMeta(task)
-    const operation = typeof meta.operation === 'string' ? meta.operation : ''
-    if (operation === 'edit') return { label: '编辑', tone: 'purple', isEdit: true }
-    if (operation === 'generation') return { label: '生成', tone: 'blue', isEdit: false }
-    return { label: '生成', tone: 'blue', isEdit: false }
-  }
-
-  function taskReferenceImages(task: AdminGenerationTask): Array<Record<string, unknown>> {
-    const meta = readTaskAdminMeta(task)
-    return Array.isArray(meta.referenceImages)
-      ? meta.referenceImages.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
-      : []
   }
 
   function taskRequestParams(task: AdminGenerationTask): unknown {
@@ -2604,202 +2682,32 @@ export default function AdminConsole() {
 
   function renderTasks() {
     return (
-      <SectionShell
-        title="生成日志"
-        description="运营和排障入口。失败任务优先看错误、用户、模型和消耗。"
-        action={
-          <div className="grid w-full gap-2 md:grid-cols-[minmax(220px,1.2fr)_150px_minmax(180px,1fr)_140px_140px_auto] xl:w-auto">
-            <input
-              value={taskQuery}
-              onChange={(event) => setTaskQuery(event.target.value)}
-              placeholder="搜索任务、提示词、用户、模型"
-              className="h-10 min-w-0 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-white/[0.04]"
-            />
-            <select value={taskStatus} onChange={(event) => setTaskStatus(event.target.value)} className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-white/[0.04]">
-              <option value="all">全部状态</option>
-              <option value="done">成功</option>
-              <option value="error">失败</option>
-              <option value="running">运行中</option>
-            </select>
-            <select value={taskModelFilter} onChange={(event) => setTaskModelFilter(event.target.value)} className="h-10 min-w-0 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-white/[0.04]">
-              <option value="all">全部模型</option>
-              {models.map((model) => (
-                <option key={model.id} value={model.id}>{model.displayName}</option>
-              ))}
-            </select>
-            <input
-              type="date"
-              value={taskFrom}
-              onChange={(event) => setTaskFrom(event.target.value)}
-              aria-label="开始日期"
-              className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-white/[0.04]"
-            />
-            <input
-              type="date"
-              value={taskTo}
-              onChange={(event) => setTaskTo(event.target.value)}
-              aria-label="结束日期"
-              className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-white/[0.04]"
-            />
-            <button
-              type="button"
-              onClick={() => {
-                setTaskQuery('')
-                setTaskStatus('all')
-                setTaskModelFilter('all')
-                setTaskFrom('')
-                setTaskTo('')
-              }}
-              className="h-10 rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-600 transition hover:bg-gray-50 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-gray-200 dark:hover:bg-white/[0.08]"
-            >
-              重置
-            </button>
-          </div>
-        }
-      >
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
-          <span>
-            当前显示 <span className="font-semibold text-gray-900 dark:text-gray-100">{tasks.length}</span> / {tasksTotal} 条日志
-          </span>
-          {(taskQuery || taskStatus !== 'all' || taskModelFilter !== 'all' || taskFrom || taskTo) && (
-            <span className="rounded-full bg-blue-50 px-2.5 py-1 font-medium text-blue-700 dark:bg-blue-400/10 dark:text-blue-200">已应用筛选</span>
-          )}
-        </div>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2 text-xs shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
-          <div className="flex flex-wrap items-center gap-2 text-gray-500">
-            <span>已选 <span className="font-semibold text-gray-900 dark:text-gray-100">{selectedTaskIds.length}</span> / 本页 {tasks.length}</span>
-            <span className="hidden h-3 w-px bg-gray-200 dark:bg-white/[0.08] sm:block" />
-            <span>清理日志只删除后台任务记录，不影响积分流水。</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={!selectedTaskIds.length || taskBatchOperating}
-              onClick={() => void batchDeleteTasks()}
-              className="h-8 rounded-lg border border-rose-200 px-3 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-rose-400/20 dark:hover:bg-rose-400/10"
-            >
-              批量清理
-            </button>
-            <button
-              type="button"
-              disabled={!selectedTaskIds.length || taskBatchOperating}
-              onClick={() => setSelectedTaskIds([])}
-              className="h-8 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]"
-            >
-              取消选择
-            </button>
-          </div>
-        </div>
-        <AdminTableShell
-          mobileHint="横向滑动查看更多任务字段和操作"
-          footer={<PaginationBar page={tasksPage} pageSize={adminPageSize} total={tasksTotal} onPageChange={setTasksPage} />}
-        >
-          <div className="min-w-[1500px]">
-              <div className="sticky top-0 z-20 grid grid-cols-[34px_1.45fr_170px_1.05fr_1fr_180px_110px_90px_150px_170px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={tasks.length > 0 && selectedTaskIds.length === tasks.length}
-                    onChange={(event) => toggleCurrentPageTasks(event.target.checked)}
-                    aria-label="选择当前页全部生成日志"
-                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                </label>
-                <span>请求</span>
-                <span>类型 / 参考图</span>
-                <span>用户</span>
-                <span>模型</span>
-                <span>参数</span>
-                <span>状态</span>
-                <span>消耗</span>
-                <span>创建时间</span>
-                <span className="text-right">操作</span>
-              </div>
-              {tasks.map((task) => {
-                const checked = selectedTaskIds.includes(task.id)
-                const operation = taskOperationMeta(task)
-                const referenceImages = taskReferenceImages(task)
-                return (
-                  <div key={task.id} className={cx('grid grid-cols-[34px_1.45fr_170px_1.05fr_1fr_180px_110px_90px_150px_170px] items-center gap-3 border-b border-gray-100 px-4 py-3 text-sm transition last:border-0 dark:border-white/[0.06]', checked ? 'bg-blue-50/70 dark:bg-blue-400/10' : 'hover:bg-gray-50 dark:hover:bg-white/[0.04]')}>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleTaskSelection(task.id)}
-                        aria-label={`选择生成日志 ${task.id}`}
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                    </label>
-                    <div className="min-w-0">
-                      <div className="truncate font-medium text-gray-900 dark:text-gray-100">{task.prompt}</div>
-                      <div className="mt-1 truncate text-xs text-gray-400">
-                        ID {task.id.slice(0, 12)} · 云端资产 {task.generatedAssets?.length ?? 0}
-                      </div>
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <StatusBadge tone={operation.tone}>{operation.label}</StatusBadge>
-                        {operation.isEdit && (
-                          <span className="text-xs text-gray-400">{referenceImages.length} 张参考图</span>
-                        )}
-                      </div>
-                      {operation.isEdit && (
-                        <div className="mt-1.5 flex min-h-9 items-center gap-1.5">
-                          {referenceImages.length ? referenceImages.slice(0, 4).map((image, index) => {
-                            const previewDataUrl = typeof image.previewDataUrl === 'string' ? image.previewDataUrl : ''
-                            const title = [
-                              typeof image.id === 'string' ? `ID ${image.id}` : '',
-                              typeof image.mimeType === 'string' ? image.mimeType : '',
-                              typeof image.byteSize === 'number' ? `${Math.round(image.byteSize / 1024)}KB` : '',
-                            ].filter(Boolean).join(' · ')
-                            return previewDataUrl ? (
-                              <img
-                                key={`${task.id}-ref-${index}`}
-                                src={previewDataUrl}
-                                title={title || '参考图'}
-                                className="h-8 w-8 rounded-lg border border-gray-200 object-cover shadow-sm dark:border-white/[0.08]"
-                                alt="参考图"
-                              />
-                            ) : (
-                              <span
-                                key={`${task.id}-ref-${index}`}
-                                title={title || '参考图无预览'}
-                                className="grid h-8 w-8 place-items-center rounded-lg border border-dashed border-gray-200 text-[10px] text-gray-400 dark:border-white/[0.08]"
-                              >
-                                图
-                              </span>
-                            )
-                          }) : (
-                            <span className="text-xs text-gray-400">无预览</span>
-                          )}
-                          {referenceImages.length > 4 && <span className="text-xs text-gray-400">+{referenceImages.length - 4}</span>}
-                        </div>
-                      )}
-                    </div>
-                    <span className="truncate text-xs text-gray-500">{task.user?.email ?? '-'}</span>
-                    <span className="truncate text-xs text-gray-500">{task.modelConfig?.displayName ?? '-'}</span>
-                    <span className="truncate text-xs text-gray-500">{taskParamsSummary(task.params)}</span>
-                    <StatusBadge tone={taskTone(task.status)}>{task.status}</StatusBadge>
-                    <div className="font-semibold text-amber-700">{task.costCredits}</div>
-                    <span className="text-xs text-gray-400">{formatTime(task.createdAt)}</span>
-                    <div className="flex justify-end gap-1.5">
-                      <button type="button" onClick={() => setSelectedTaskId(task.id)} className="h-8 rounded-lg border border-gray-200 px-2.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]">详情</button>
-                      <button
-                        type="button"
-                        disabled={task.status === 'running'}
-                        onClick={() => void deleteTask(task.id)}
-                        className="h-8 rounded-lg border border-rose-200 px-2.5 text-xs font-medium text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-rose-400/20 dark:hover:bg-rose-400/10"
-                      >
-                        清理
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
-              {!tasks.length && <EmptyState text="暂无生成日志" />}
-          </div>
-        </AdminTableShell>
-      </SectionShell>
+      <GenerationLogsSection
+        tasks={tasks}
+        total={tasksTotal}
+        page={tasksPage}
+        pageSize={adminPageSize}
+        models={models}
+        query={taskQuery}
+        status={taskStatus}
+        modelFilter={taskModelFilter}
+        from={taskFrom}
+        to={taskTo}
+        selectedIds={selectedTaskIds}
+        batchOperating={taskBatchOperating}
+        setQuery={setTaskQuery}
+        setStatus={setTaskStatus}
+        setModelFilter={setTaskModelFilter}
+        setFrom={setTaskFrom}
+        setTo={setTaskTo}
+        setPage={setTasksPage}
+        onToggleTask={toggleTaskSelection}
+        onTogglePage={toggleCurrentPageTasks}
+        onClearSelection={() => setSelectedTaskIds([])}
+        onBatchDelete={() => void batchDeleteTasks()}
+        onOpenDetail={(taskId) => void openTaskDetail(taskId)}
+        onDelete={(taskId) => void deleteTask(taskId)}
+      />
     )
   }
 
@@ -2870,9 +2778,12 @@ export default function AdminConsole() {
             </button>
           </div>
         </div>
-        <AdminTableShell mobileHint="横向滑动查看更多渠道字段和操作">
+        <AdminTableShell
+          mobileHint="横向滑动查看更多渠道字段和操作"
+          footer={<PaginationBar page={upstreamsPage} pageSize={adminPageSize} total={upstreamsTotal} onPageChange={setUpstreamsPage} />}
+        >
           <div className="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs text-gray-500 dark:border-white/[0.06] dark:bg-white/[0.04]">
-            当前显示 <span className="font-semibold text-gray-900 dark:text-gray-100">{filteredUpstreams.length}</span> / {upstreams.length} 个渠道
+            当前显示 <span className="font-semibold text-gray-900 dark:text-gray-100">{filteredUpstreams.length}</span> / {upstreamsTotal} 个渠道
           </div>
           <div className="min-w-[1280px]">
               <div className="sticky top-0 z-20 grid grid-cols-[34px_1fr_1.05fr_1.2fr_190px_90px_190px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
@@ -3022,7 +2933,10 @@ export default function AdminConsole() {
             <button type="button" disabled={!selectedAnnouncementIds.length || announcementBatchOperating} onClick={() => setSelectedAnnouncementIds([])} className="h-8 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]">取消选择</button>
           </div>
         </div>
-        <AdminTableShell mobileHint="横向滑动查看更多公告字段和操作">
+        <AdminTableShell
+          mobileHint="横向滑动查看更多公告字段和操作"
+          footer={<PaginationBar page={announcementsPage} pageSize={adminPageSize} total={announcementsTotal} onPageChange={setAnnouncementsPage} />}
+        >
           <div className="min-w-[1500px]">
               <div className="sticky top-0 z-20 grid grid-cols-[34px_1.45fr_130px_105px_90px_220px_150px_145px_145px_300px] gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
                 <span />
@@ -3301,8 +3215,7 @@ export default function AdminConsole() {
 
   function renderTaskDialog() {
     if (!selectedTaskId) return null
-    const selected = tasks.find((task) => task.id === selectedTaskId) ?? null
-    if (!selected) return null
+    const selected = selectedTaskDetail
 
     return (
       <div className="absolute inset-0 z-20 grid place-items-center bg-gray-950/25 px-4 backdrop-blur-sm">
@@ -3311,14 +3224,16 @@ export default function AdminConsole() {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="truncate text-base font-semibold text-gray-950 dark:text-gray-50">生成任务详情</div>
-                <StatusBadge tone={taskTone(selected.status)}>{selected.status}</StatusBadge>
+                {selected && <StatusBadge tone={taskTone(selected.status)}>{selected.status}</StatusBadge>}
               </div>
-              <div className="mt-1 text-xs text-gray-400">任务 ID {selected.id} · {formatTime(selected.createdAt)}</div>
+              <div className="mt-1 text-xs text-gray-400">任务 ID {selectedTaskId}{selected ? ` · ${formatTime(selected.createdAt)}` : ''}</div>
             </div>
             <button type="button" onClick={() => setSelectedTaskId(null)} className="grid h-9 w-9 place-items-center rounded-full text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-white/[0.06]">×</button>
           </div>
 
-          <div className="max-h-[72vh] space-y-5 overflow-y-auto p-5">
+          {taskDetailLoading || !selected ? (
+            <div className="grid min-h-[360px] place-items-center text-sm text-gray-500">正在加载轻量详情...</div>
+          ) : <div className="max-h-[72vh] space-y-5 overflow-y-auto p-5">
             <div className="grid gap-3 sm:grid-cols-3">
               <StatCard label="消耗积分" value={selected.costCredits} hint="任务创建时快照" />
               <StatCard label="模型" value={selected.modelConfig?.displayName ?? '-'} hint={selected.modelConfig?.name ?? '未记录上游模型'} />
@@ -3363,7 +3278,7 @@ export default function AdminConsole() {
                 )}
               </div>
             </div>
-          </div>
+          </div>}
           <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 bg-gray-50 px-5 py-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
             <button
               type="button"
@@ -3374,8 +3289,8 @@ export default function AdminConsole() {
             </button>
             <button
               type="button"
-              disabled={selected.status === 'running'}
-              onClick={() => void deleteTask(selected.id)}
+              disabled={!selected || selected.status === 'running'}
+              onClick={() => selected && void deleteTask(selected.id)}
               className="h-10 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-rose-400/20 dark:hover:bg-rose-400/10"
             >
               清理日志
@@ -4427,10 +4342,14 @@ export default function AdminConsole() {
             {tab === 'moderation' && (
               <ModerationSection
                 rules={moderationRules}
+                total={moderationTotal}
+                page={moderationPage}
+                pageSize={adminPageSize}
                 query={moderationQuery}
                 enabledFilter={moderationEnabledFilter}
                 setQuery={setModerationQuery}
                 setEnabledFilter={setModerationEnabledFilter}
+                setPage={setModerationPage}
                 openEditor={openModerationRuleEditor}
                 patchRule={(id, input) => void patchModerationRule(id, input)}
                 deleteRule={(id) => void deleteModerationRule(id)}
@@ -4441,6 +4360,9 @@ export default function AdminConsole() {
               <ModelsSection
                 models={models}
                 filteredModels={filteredModels}
+                total={modelsTotal}
+                page={modelsPage}
+                pageSize={adminPageSize}
                 upstreams={upstreams}
                 modelQuery={modelQuery}
                 modelStatusFilter={modelStatusFilter}
@@ -4455,6 +4377,7 @@ export default function AdminConsole() {
                 setModelProviderFilter={setModelProviderFilter}
                 setModelHealthFilter={setModelHealthFilter}
                 setSelectedModelIds={setSelectedModelIds}
+                setPage={setModelsPage}
                 toggleCurrentPageModels={toggleCurrentPageModels}
                 toggleModelSelection={toggleModelSelection}
                 batchPatchModels={(input) => void batchPatchModels(input)}

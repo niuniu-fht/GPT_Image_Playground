@@ -1,12 +1,16 @@
 import type { ModerationRule } from '../../../types'
-import { AdminTableShell, EmptyState, formatTime, SectionShell, StatusBadge, type ModerationRuleDraft } from './shared'
+import { AdminTableShell, EmptyState, formatTime, PaginationBar, SectionShell, StatusBadge, type ModerationRuleDraft } from './shared'
 
 type ModerationSectionProps = {
   rules: ModerationRule[]
+  total: number
+  page: number
+  pageSize: number
   query: string
   enabledFilter: string
   setQuery: (value: string) => void
   setEnabledFilter: (value: string) => void
+  setPage: (page: number) => void
   openEditor: (rule?: ModerationRule) => void
   patchRule: (id: string, input: Partial<ModerationRuleDraft>) => void
   deleteRule: (id: string) => void
@@ -14,10 +18,14 @@ type ModerationSectionProps = {
 
 export function ModerationSection({
   rules,
+  total,
+  page,
+  pageSize,
   query,
   enabledFilter,
   setQuery,
   setEnabledFilter,
+  setPage,
   openEditor,
   patchRule,
   deleteRule,
@@ -57,7 +65,10 @@ export function ModerationSection({
         </select>
       </div>
 
-      <AdminTableShell mobileHint="横向滑动查看更多风控字段和操作">
+      <AdminTableShell
+        mobileHint="横向滑动查看更多风控字段和操作"
+        footer={<PaginationBar page={page} pageSize={pageSize} total={total} onPageChange={setPage} />}
+      >
         <div className="min-w-[1040px]">
             <div className="sticky top-0 z-20 grid grid-cols-[1.2fr_0.8fr_1.5fr_1fr_0.8fr_0.9fr_1fr_1.1fr] gap-4 border-b border-gray-100 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-white/[0.06] dark:bg-[#171a22]">
               <span>规则</span><span>类型</span><span>匹配内容</span><span>提示</span><span>优先级</span><span>命中</span><span>状态</span><span className="text-right">操作</span>

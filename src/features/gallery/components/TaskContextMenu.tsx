@@ -8,7 +8,7 @@ interface Props {
   y: number
   isInRecycleBin: boolean
   onClose: () => void
-  onOpen: () => void
+  onCopy: () => void
   onReuse: () => void
   onEdit: () => void
   onRetry: () => void
@@ -61,7 +61,7 @@ export default function TaskContextMenu({
   y,
   isInRecycleBin,
   onClose,
-  onOpen,
+  onCopy,
   onReuse,
   onEdit,
   onRetry,
@@ -133,14 +133,15 @@ export default function TaskContextMenu({
       onContextMenu={(event) => event.preventDefault()}
     >
       <MenuItem
-        label="打开详情"
+        label="复制"
+        disabled={!task.outputImages.length}
         onClick={() => {
           onClose()
-          onOpen()
+          onCopy()
         }}
       >
         <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12H9m12 0A9 9 0 113 12a9 9 0 0118 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2m-6 12h8a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2Z" />
         </svg>
       </MenuItem>
       {isInRecycleBin ? (

@@ -1,12 +1,14 @@
 import { useEffect } from 'react'
 import {
-  openGalleryTaskDetail,
   runGalleryEditOutputs,
   runGalleryRetry,
   runGalleryReuse,
   runGalleryToggleFavorite,
   useStore,
 } from '../../../../store'
+import { copyImageToClipboard } from '../../../../lib/clipboardImage'
+import { resolveRemoteImageAccessMessage } from '../../../../lib/remoteImageAccess'
+import { ensureImageAssetUrl } from '../../../../store/imageAssets'
 import SelectionToolbar from './SelectionToolbar'
 import TaskGridBody from './TaskGridBody'
 import TaskGridImageMode from './TaskGridImageMode'
@@ -31,6 +33,7 @@ export default function TaskGrid() {
   const toggleTaskSelection = useStore((state) => state.toggleTaskSelection)
   const clearSelectedTasks = useStore((state) => state.clearSelectedTasks)
   const setShareToSquareTarget = useStore((state) => state.setShareToSquareTarget)
+  const showToast = useStore((state) => state.showToast)
 
   const uiState = useTaskGridUiState({
     categories,
@@ -117,6 +120,20 @@ export default function TaskGrid() {
   }, [filteredTasks, uiState.contextMenuState, uiState.setContextMenuState])
 
   const shouldShowSelectionToolbar = taskView === 'trash' || selectedCount > 0
+
+  async function copyTaskCover(task: (typeof tasks)[number]) {
+    const imageId = task.outputImages[0]
+    if (!imageId) return
+
+    try {
+      const src = await ensureImageAssetUrl(imageId, 'original')
+      if (!src) throw new Error('图片数据不存在')
+      await copyImageToClipboard(src)
+      showToast('图片已复制', 'success')
+    } catch (error) {
+      showToast(resolveRemoteImageAccessMessage(error, 'copy'), 'error')
+    }
+  }
 
   return (
     <div
@@ -232,7 +249,9 @@ export default function TaskGrid() {
           void handleSingleTaskMoveCategory()
         }}
         onCloseContextMenu={() => uiState.setContextMenuState(null)}
-        onOpenTask={openGalleryTaskDetail}
+        onCopyTask={(task) => {
+          void copyTaskCover(task)
+        }}
         onMoveTaskCategory={openMoveCategoryModal}
         onDeleteTask={handleDelete}
         onPurgeTask={handlePurge}

@@ -211,8 +211,15 @@ export const platformApi = {
     return request<{ redeemDescription: string }>('/api/public/settings')
   },
 
-  listAdminModels() {
-    return request<{ models: ModelConfig[] }>('/api/admin/models')
+  listAdminModels(params: { q?: string; status?: string; providerId?: string; health?: string; page?: number; pageSize?: number } = {}) {
+    const query = new URLSearchParams()
+    if (params.q) query.set('q', params.q)
+    if (params.status) query.set('status', params.status)
+    if (params.providerId) query.set('providerId', params.providerId)
+    if (params.health) query.set('health', params.health)
+    if (params.page) query.set('page', String(params.page))
+    if (params.pageSize) query.set('pageSize', String(params.pageSize))
+    return request<{ models: ModelConfig[]; total: number; page: number; pageSize: number }>(`/api/admin/models?${query}`)
   },
 
   createAdminModel(input: Omit<ModelConfig, 'id' | 'createdAt' | 'updatedAt'>) {
@@ -506,11 +513,13 @@ export const platformApi = {
     })
   },
 
-  listAdminModerationRules(params: { q?: string; enabled?: string } = {}) {
+  listAdminModerationRules(params: { q?: string; enabled?: string; page?: number; pageSize?: number } = {}) {
     const query = new URLSearchParams()
     if (params.q) query.set('q', params.q)
     if (params.enabled) query.set('enabled', params.enabled)
-    return request<{ items: ModerationRule[] }>(`/api/admin/moderation-rules?${query}`)
+    if (params.page) query.set('page', String(params.page))
+    if (params.pageSize) query.set('pageSize', String(params.pageSize))
+    return request<{ items: ModerationRule[]; total: number; page: number; pageSize: number }>(`/api/admin/moderation-rules?${query}`)
   },
 
   createAdminModerationRule(input: Omit<ModerationRule, 'id' | 'createdAt' | 'updatedAt' | 'hitCount' | 'lastHitAt'>) {
@@ -550,6 +559,10 @@ export const platformApi = {
       `/api/admin/tasks/${encodeURIComponent(id)}`,
       { method: 'DELETE' },
     )
+  },
+
+  getAdminTask(id: string) {
+    return request<{ task: AdminGenerationTask }>(`/api/admin/tasks/${encodeURIComponent(id)}`)
   },
 
   deleteAdminTasks(ids: string[]) {
@@ -599,8 +612,14 @@ export const platformApi = {
     })
   },
 
-  listAdminUpstreams() {
-    return request<{ items: AdminUpstreamProvider[] }>('/api/admin/upstreams')
+  listAdminUpstreams(params: { q?: string; status?: string; health?: string; page?: number; pageSize?: number } = {}) {
+    const query = new URLSearchParams()
+    if (params.q) query.set('q', params.q)
+    if (params.status) query.set('status', params.status)
+    if (params.health) query.set('health', params.health)
+    if (params.page) query.set('page', String(params.page))
+    if (params.pageSize) query.set('pageSize', String(params.pageSize))
+    return request<{ items: AdminUpstreamProvider[]; total: number; page: number; pageSize: number }>(`/api/admin/upstreams?${query}`)
   },
 
   createAdminUpstream(input: Omit<AdminUpstreamProvider, 'id' | 'createdAt' | 'updatedAt' | '_count' | 'models' | 'lastCheckedAt' | 'lastHealthStatus' | 'lastLatencyMs' | 'lastHttpStatus' | 'lastHealthMessage'>) {
@@ -642,8 +661,15 @@ export const platformApi = {
     })
   },
 
-  listAdminAnnouncements() {
-    return request<{ items: AdminAnnouncement[] }>('/api/admin/announcements')
+  listAdminAnnouncements(params: { q?: string; status?: string; placement?: string; level?: string; page?: number; pageSize?: number } = {}) {
+    const query = new URLSearchParams()
+    if (params.q) query.set('q', params.q)
+    if (params.status) query.set('status', params.status)
+    if (params.placement) query.set('placement', params.placement)
+    if (params.level) query.set('level', params.level)
+    if (params.page) query.set('page', String(params.page))
+    if (params.pageSize) query.set('pageSize', String(params.pageSize))
+    return request<{ items: AdminAnnouncement[]; total: number; page: number; pageSize: number }>(`/api/admin/announcements?${query}`)
   },
 
   createAdminAnnouncement(input: Omit<AdminAnnouncement, 'id' | 'createdAt' | 'updatedAt'>) {

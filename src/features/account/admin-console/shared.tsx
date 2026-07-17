@@ -306,6 +306,11 @@ export function PaginationBar({
   const totalPages = Math.max(Math.ceil(total / pageSize), 1)
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1
   const end = Math.min(page * pageSize, total)
+  const firstVisiblePage = Math.max(1, Math.min(page - 2, totalPages - 4))
+  const visiblePages = Array.from(
+    { length: Math.min(totalPages, 5) },
+    (_, index) => firstVisiblePage + index,
+  )
 
   return (
     <div className="flex flex-col gap-2 border-t border-gray-100 bg-white px-4 py-3 text-xs text-gray-500 dark:border-white/[0.06] dark:bg-transparent sm:flex-row sm:items-center sm:justify-between">
@@ -313,23 +318,43 @@ export function PaginationBar({
         共 <span className="font-semibold text-gray-900 dark:text-gray-100">{total}</span> 条
         {total > 0 && <span>，当前 {start}-{end}</span>}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <button
           type="button"
           onClick={() => onPageChange(page - 1)}
           disabled={page <= 1}
-          className="h-8 rounded-lg border border-gray-200 px-3 font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/[0.08] dark:text-gray-200 dark:hover:bg-white/[0.06]"
+          aria-label="上一页"
+          className="grid h-8 w-8 place-items-center rounded-lg border border-gray-200 font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/[0.08] dark:text-gray-200 dark:hover:bg-white/[0.06]"
         >
-          上一页
+          ‹
         </button>
-        <span className="min-w-16 text-center font-medium text-gray-700 dark:text-gray-200">{page} / {totalPages}</span>
+        <div className="hidden items-center gap-1 sm:flex">
+          {visiblePages.map((pageNumber) => (
+            <button
+              key={pageNumber}
+              type="button"
+              onClick={() => onPageChange(pageNumber)}
+              aria-current={pageNumber === page ? 'page' : undefined}
+              className={cx(
+                'grid h-8 min-w-8 place-items-center rounded-lg border px-2 font-semibold transition',
+                pageNumber === page
+                  ? 'border-slate-950 bg-slate-950 text-white dark:border-white dark:bg-white dark:text-gray-950'
+                  : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]',
+              )}
+            >
+              {pageNumber}
+            </button>
+          ))}
+        </div>
+        <span className="min-w-16 text-center font-medium text-gray-700 dark:text-gray-200 sm:hidden">{page} / {totalPages}</span>
         <button
           type="button"
           onClick={() => onPageChange(page + 1)}
           disabled={page >= totalPages}
-          className="h-8 rounded-lg border border-gray-200 px-3 font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/[0.08] dark:text-gray-200 dark:hover:bg-white/[0.06]"
+          aria-label="下一页"
+          className="grid h-8 w-8 place-items-center rounded-lg border border-gray-200 font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/[0.08] dark:text-gray-200 dark:hover:bg-white/[0.06]"
         >
-          下一页
+          ›
         </button>
       </div>
     </div>

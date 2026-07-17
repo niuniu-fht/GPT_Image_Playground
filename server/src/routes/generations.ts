@@ -260,6 +260,20 @@ async function createReferenceImagePreview(
   }
 }
 
+async function createGeneratedImagePreview(dataUrl: string): Promise<string | undefined> {
+  try {
+    const { bytes } = parseDataUrl(dataUrl)
+    const thumbnail = await sharp(Buffer.from(bytes))
+      .rotate()
+      .resize({ width: 320, height: 320, fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 68, effort: 4 })
+      .toBuffer()
+    return `data:image/webp;base64,${thumbnail.toString('base64')}`
+  } catch {
+    return undefined
+  }
+}
+
 async function createAdminTaskMeta(input: GenerationInput): Promise<Record<string, unknown>> {
   const operation = input.inputImages.length > 0 ? 'edit' : 'generation'
   const referenceImages = operation === 'edit'
@@ -437,6 +451,10 @@ function withImageCount(input: GenerationInput, n: number): GenerationInput {
   }
 }
 
+function shouldRequestExplicitBase64(model: string): boolean {
+  return !/^gpt-image(?:$|[-_:/.])/i.test(model.trim())
+}
+
 function resolveEffectiveQuality(model: GenerationModel, quality: string): string {
   if (!isGptImage2Model(model)) return 'medium'
   if (quality === 'low' && model.lowQualityEnabled !== false) return 'low'
@@ -525,6 +543,7 @@ async function callImagesApiOnce(
   const baseUrl = upstream.baseUrl.replace(/\/+$/, '')
   const headers = { Authorization: `Bearer ${upstream.apiKey}` }
   const hasInputImages = input.inputImages.length > 0
+  const requestExplicitBase64 = shouldRequestExplicitBase64(upstream.model)
 
   if (hasInputImages) {
     const form = new FormData()
@@ -533,6 +552,7 @@ async function callImagesApiOnce(
     form.set('size', input.params.size)
     form.set('quality', input.params.quality)
     form.set('n', String(input.params.n))
+    if (requestExplicitBase64) form.set('response_format', 'b64_json')
     input.inputImages.forEach((image, index) => {
       form.append('image[]', dataUrlToFile(image.dataUrl, `input-${index}.png`))
     })
@@ -547,6 +567,7 @@ async function callImagesApiOnce(
       size: input.params.size,
       quality: input.params.quality,
       n: input.params.n,
+      response_format: requestExplicitBase64 ? 'b64_json' : 'b64_json (GPT Image 默认)',
       referenceImageCount: input.inputImages.length,
       referenceImages: input.inputImages.map(summarizeReferenceImage),
       mask: summarizeMaskImage(input.editMask),
@@ -584,6 +605,7 @@ async function callImagesApiOnce(
     moderation: input.params.moderation,
     n: input.params.n,
   }
+  if (requestExplicitBase64) body.response_format = 'b64_json'
   if (typeof input.params.output_compression === 'number') {
     body.output_compression = input.params.output_compression
   }
@@ -797,11 +819,15 @@ async function runGenerationTask(input: {
 }) {
   try {
     const generationResult = await callImagesApi(input.generationInput, resolveGenerationUpstream(input.model))
-    const images = generationResult.images.map((image, index): StoredGenerationImageResult => ({
-      ...image,
-      index: image.index ?? index,
-      status: 'done',
-    }))
+    const imagePayloads = await Promise.all(generationResult.images.map(async (image, index) => ({
+      image: {
+        ...image,
+        index: image.index ?? index,
+        status: 'done' as const,
+      } satisfies StoredGenerationImageResult,
+      previewDataUrl: await createGeneratedImagePreview(image.dataUrl),
+    })))
+    const images = imagePayloads.map((item) => item.image)
     const failedImages = generationResult.imageResults
       .filter((item): item is Extract<GenerationImageResult, { status: 'error' }> => item.status === 'error')
       .map((item): StoredGenerationImageResult => ({
@@ -810,6 +836,15 @@ async function runGenerationTask(input: {
         error: item.error,
       }))
     const outputImages = [...images, ...failedImages].sort((left, right) => left.index - right.index)
+    const outputPreviews = [
+      ...imagePayloads.map((item) => ({
+        index: item.image.index,
+        status: item.image.status,
+        mimeType: item.image.mimeType,
+        previewDataUrl: item.previewDataUrl,
+      })),
+      ...failedImages,
+    ].sort((left, right) => left.index - right.index)
     const refundCredits = generationResult.requestedCount > 0 && failedImages.length > 0
       ? (input.costCredits / generationResult.requestedCount) * failedImages.length
       : 0
@@ -851,6 +886,7 @@ async function runGenerationTask(input: {
           error: null,
           params: mergeAdminReturnParams(currentTask?.params ?? input.generationInput.params, generationResult),
           outputImages,
+          outputPreviews,
           finishedAt: new Date(),
         },
       })

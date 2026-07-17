@@ -36,6 +36,12 @@ function readParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] || '' : value || ''
 }
 
+function readPagination(query: Record<string, unknown>) {
+  const page = Math.max(Number(query.page) || 1, 1)
+  const pageSize = Math.min(Math.max(Number(query.pageSize) || 20, 1), 100)
+  return { page, pageSize, skip: (page - 1) * pageSize }
+}
+
 const upstreamProviderModelSelect = {
   id: true,
   name: true,
@@ -61,13 +67,38 @@ router.get('/models', async (_req, res, next) => {
   }
 })
 
-router.get('/admin/models', requireAdmin, async (_req, res, next) => {
+router.get('/admin/models', requireAdmin, async (req, res, next) => {
   try {
-    const models = await prisma.modelConfig.findMany({
-      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-      include: { upstreamProvider: { select: upstreamProviderModelSelect } },
-    })
-    sendOk(res, { models })
+    const { page, pageSize, skip } = readPagination(req.query)
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
+    const status = typeof req.query.status === 'string' ? req.query.status : 'all'
+    const providerId = typeof req.query.providerId === 'string' ? req.query.providerId : 'all'
+    const health = typeof req.query.health === 'string' ? req.query.health : 'all'
+    const where = {
+      ...(q ? { OR: [
+        { name: { contains: q, mode: 'insensitive' as const } },
+        { displayName: { contains: q, mode: 'insensitive' as const } },
+        { upstreamModel: { contains: q, mode: 'insensitive' as const } },
+        { upstreamProvider: { name: { contains: q, mode: 'insensitive' as const } } },
+      ] } : {}),
+      ...(status === 'enabled' ? { enabled: true } : {}),
+      ...(status === 'disabled' ? { enabled: false } : {}),
+      ...(providerId === 'default' ? { upstreamProviderId: null } : {}),
+      ...(providerId !== 'all' && providerId !== 'default' ? { upstreamProviderId: providerId } : {}),
+      ...(health === 'default' ? { upstreamProviderId: null } : {}),
+      ...(health !== 'all' && health !== 'default' ? { upstreamProvider: { lastHealthStatus: health } } : {}),
+    }
+    const [models, total] = await Promise.all([
+      prisma.modelConfig.findMany({
+        where,
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        skip,
+        take: pageSize,
+        include: { upstreamProvider: { select: upstreamProviderModelSelect } },
+      }),
+      prisma.modelConfig.count({ where }),
+    ])
+    sendOk(res, { models, total, page, pageSize })
   } catch (error) {
     next(error)
   }

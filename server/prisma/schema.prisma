@@ -269,6 +269,7 @@ model GenerationTask {
   status        TaskStatus   @default(running)
   costCredits   Int
   outputImages  Json?
+  outputPreviews Json?
   error         String?
   createdAt     DateTime     @default(now())
   finishedAt    DateTime?

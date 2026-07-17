@@ -3,6 +3,11 @@ import { randomBytes } from 'node:crypto'
 import { Router } from 'express'
 import { z } from 'zod'
 import { writeAudit } from '../audit.js'
+import {
+  adminGenerationTaskSelect,
+  toAdminGenerationTask,
+  toAdminGenerationTasks,
+} from '../adminGenerationTasks.js'
 import { requireAdmin, resLocals } from '../auth.js'
 import { cleanupGeneratedAssetsForTasks } from '../generatedAssetCleanup.js'
 import { HttpError, sendOk } from '../http.js'
@@ -218,11 +223,7 @@ router.get('/overview', async (_req, res, next) => {
         prisma.generationTask.findMany({
           orderBy: { createdAt: 'desc' },
           take: 8,
-          include: {
-            user: { select: { email: true } },
-            modelConfig: { select: { displayName: true } },
-            generatedAssets: { orderBy: { imageIndex: 'asc' } },
-          },
+          select: adminGenerationTaskSelect,
         }),
         prisma.user.findMany({
           orderBy: { createdAt: 'desc' },
@@ -354,7 +355,7 @@ router.get('/overview', async (_req, res, next) => {
       })),
       providerSummaries,
       recentUsers,
-      recentTasks,
+      recentTasks: toAdminGenerationTasks(recentTasks),
     })
   } catch (error) {
     next(error)
@@ -661,10 +662,7 @@ router.get('/users/:id', async (req, res, next) => {
         where: { userId: id },
         orderBy: { createdAt: 'desc' },
         take: 12,
-        include: {
-          modelConfig: { select: { displayName: true, name: true } },
-          generatedAssets: { orderBy: { imageIndex: 'asc' } },
-        },
+        select: adminGenerationTaskSelect,
       }),
       prisma.creditLedger.findMany({
         where: { userId: id },
@@ -703,7 +701,7 @@ router.get('/users/:id', async (req, res, next) => {
 
     sendOk(res, {
       user,
-      tasks,
+      tasks: toAdminGenerationTasks(tasks),
       ledgers,
       loginLogs,
       creditOrders,
@@ -937,15 +935,25 @@ router.get('/tasks', async (req, res, next) => {
         orderBy: { createdAt: 'desc' },
         skip,
         take: pageSize,
-        include: {
-          user: { select: { email: true } },
-          modelConfig: { select: { displayName: true, name: true } },
-          generatedAssets: { orderBy: { imageIndex: 'asc' } },
-        },
+        select: adminGenerationTaskSelect,
       }),
       prisma.generationTask.count({ where }),
     ])
-    sendOk(res, { items, total, page, pageSize })
+    sendOk(res, { items: toAdminGenerationTasks(items), total, page, pageSize })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/tasks/:id', async (req, res, next) => {
+  try {
+    const id = readParam(req.params.id)
+    const task = await prisma.generationTask.findUnique({
+      where: { id },
+      select: adminGenerationTaskSelect,
+    })
+    if (!task) throw new HttpError(404, 'TASK_NOT_FOUND', '生成任务不存在')
+    sendOk(res, { task: toAdminGenerationTask(task) })
   } catch (error) {
     next(error)
   }
@@ -1278,6 +1286,7 @@ router.patch('/support-tickets/:id', async (req, res, next) => {
 
 router.get('/moderation-rules', async (req, res, next) => {
   try {
+    const { page, pageSize, skip } = readPagination(req.query)
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
     const enabled = typeof req.query.enabled === 'string' ? req.query.enabled.trim() : ''
     const where = {
@@ -1293,11 +1302,16 @@ router.get('/moderation-rules', async (req, res, next) => {
           }
         : {}),
     }
-    const items = await prisma.moderationRule.findMany({
-      where,
-      orderBy: [{ enabled: 'desc' }, { priority: 'asc' }, { updatedAt: 'desc' }],
-    })
-    sendOk(res, { items })
+    const [items, total] = await Promise.all([
+      prisma.moderationRule.findMany({
+        where,
+        orderBy: [{ enabled: 'desc' }, { priority: 'asc' }, { updatedAt: 'desc' }],
+        skip,
+        take: pageSize,
+      }),
+      prisma.moderationRule.count({ where }),
+    ])
+    sendOk(res, { items, total, page, pageSize })
   } catch (error) {
     next(error)
   }
@@ -1696,36 +1710,61 @@ const providerSchema = z.object({
   notes: z.string().max(500).default(''),
 })
 
-router.get('/upstreams', async (_req, res, next) => {
+router.get('/upstreams', async (req, res, next) => {
   try {
-    const providers = await prisma.upstreamProvider.findMany({
-      orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
-      include: {
-        _count: { select: { models: true } },
-        models: {
-          orderBy: [{ enabled: 'desc' }, { sortOrder: 'asc' }],
-          select: {
-            id: true,
-            displayName: true,
-            name: true,
-            enabled: true,
-            costCredits: true,
-            costCredits2K: true,
-            costCredits4K: true,
-            lowQualityEnabled: true,
-            lowQualityCostCredits: true,
-            lowQualityCostCredits2K: true,
-            lowQualityCostCredits4K: true,
-            mediumQualityEnabled: true,
-            highQualityEnabled: true,
-            highQualityCostCredits: true,
-            highQualityCostCredits2K: true,
-            highQualityCostCredits4K: true,
+    const { page, pageSize, skip } = readPagination(req.query)
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
+    const status = typeof req.query.status === 'string' ? req.query.status : 'all'
+    const health = typeof req.query.health === 'string' ? req.query.health : 'all'
+    const where = {
+      ...(q ? { OR: [
+        { name: { contains: q, mode: 'insensitive' as const } },
+        { baseUrl: { contains: q, mode: 'insensitive' as const } },
+        { notes: { contains: q, mode: 'insensitive' as const } },
+        { models: { some: { OR: [
+          { name: { contains: q, mode: 'insensitive' as const } },
+          { displayName: { contains: q, mode: 'insensitive' as const } },
+        ] } } },
+      ] } : {}),
+      ...(status === 'enabled' ? { enabled: true } : {}),
+      ...(status === 'disabled' ? { enabled: false } : {}),
+      ...(health !== 'all' ? { lastHealthStatus: health } : {}),
+    }
+    const [providers, total] = await Promise.all([
+      prisma.upstreamProvider.findMany({
+        where,
+        orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
+        skip,
+        take: pageSize,
+        include: {
+          _count: { select: { models: true } },
+          models: {
+            orderBy: [{ enabled: 'desc' }, { sortOrder: 'asc' }],
+            take: 8,
+            select: {
+              id: true,
+              displayName: true,
+              name: true,
+              enabled: true,
+              costCredits: true,
+              costCredits2K: true,
+              costCredits4K: true,
+              lowQualityEnabled: true,
+              lowQualityCostCredits: true,
+              lowQualityCostCredits2K: true,
+              lowQualityCostCredits4K: true,
+              mediumQualityEnabled: true,
+              highQualityEnabled: true,
+              highQualityCostCredits: true,
+              highQualityCostCredits2K: true,
+              highQualityCostCredits4K: true,
+            },
           },
         },
-      },
-    })
-    sendOk(res, { items: providers.map(maskProvider) })
+      }),
+      prisma.upstreamProvider.count({ where }),
+    ])
+    sendOk(res, { items: providers.map(maskProvider), total, page, pageSize })
   } catch (error) {
     next(error)
   }
@@ -1864,12 +1903,33 @@ const announcementSchema = z.object({
   endsAt: z.preprocess((value) => value === '' ? null : value, z.coerce.date().nullable()).optional(),
 })
 
-router.get('/announcements', async (_req, res, next) => {
+router.get('/announcements', async (req, res, next) => {
   try {
-    const items = await prisma.announcement.findMany({
-      orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }],
-    })
-    sendOk(res, { items })
+    const { page, pageSize, skip } = readPagination(req.query)
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
+    const status = typeof req.query.status === 'string' ? req.query.status : 'all'
+    const placement = typeof req.query.placement === 'string' ? req.query.placement : 'all'
+    const level = typeof req.query.level === 'string' ? req.query.level : 'all'
+    const where = {
+      ...(q ? { OR: [
+        { title: { contains: q, mode: 'insensitive' as const } },
+        { content: { contains: q, mode: 'insensitive' as const } },
+        { actionLabel: { contains: q, mode: 'insensitive' as const } },
+      ] } : {}),
+      ...(status !== 'all' ? { status: status as 'draft' | 'published' | 'archived' } : {}),
+      ...(placement !== 'all' ? { placement } : {}),
+      ...(level !== 'all' ? { level } : {}),
+    }
+    const [items, total] = await Promise.all([
+      prisma.announcement.findMany({
+        where,
+        orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }],
+        skip,
+        take: pageSize,
+      }),
+      prisma.announcement.count({ where }),
+    ])
+    sendOk(res, { items, total, page, pageSize })
   } catch (error) {
     next(error)
   }
