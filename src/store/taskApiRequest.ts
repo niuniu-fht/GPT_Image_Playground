@@ -1,6 +1,10 @@
 import type { ApiInputImage, ApiImageAsset, CallApiResult } from '../lib/api'
 import { isRemoteImageUrl } from '../lib/imageUrl'
-import { platformApi } from '../lib/platformApi'
+import {
+  PlatformApiError,
+  platformApi,
+  type PlatformGenerationResult,
+} from '../lib/platformApi'
 import type { AppSettings, TaskRecord, TaskResponseMeta } from '../types'
 import { getImageView } from './imageAssets'
 import { useStore } from './state'
@@ -27,11 +31,14 @@ interface TaskPlatformApiResult {
 }
 
 const GENERATION_POLL_INTERVAL_MS = 1800
-const GENERATION_POLL_TIMEOUT_MS = 1000 * 300
+const GENERATION_RETRY_BASE_DELAY_MS = 2000
+const GENERATION_RETRY_MAX_DELAY_MS = 30_000
+const GENERATION_REQUEST_TIMEOUT_MS = 60_000
+const ABORT_CHECK_INTERVAL_MS = 500
 
 export interface TaskApiRequestHandlers {
+  onTaskAccepted?: (generationTaskId: string) => void | Promise<void>
   onFinalImages?: (images: TaskApiOutputImageAsset[]) => void | Promise<void>
-  registerAbort?: (abort: () => void) => void
   throwIfAborted?: () => void
 }
 
@@ -77,58 +84,164 @@ async function loadTaskEditMaskDataUrl(
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms)
-  })
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms))
+}
+
+async function waitWithAbortChecks(
+  ms: number,
+  throwIfAborted?: () => void,
+): Promise<void> {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) {
+    throwIfAborted?.()
+    await sleep(Math.min(ABORT_CHECK_INTERVAL_MS, deadline - Date.now()))
+  }
+  throwIfAborted?.()
+}
+
+async function waitUntilOnline(throwIfAborted?: () => void): Promise<void> {
+  while (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    throwIfAborted?.()
+    await sleep(ABORT_CHECK_INTERVAL_MS)
+  }
+}
+
+export function isRetryableGenerationRequestError(error: unknown): boolean {
+  if (!(error instanceof PlatformApiError)) {
+    return false
+  }
+  if (error.code === 'generation_closed') {
+    return false
+  }
+
+  return (
+    error.status === 0 ||
+    (error.status >= 200 && error.status < 300) ||
+    error.status === 408 ||
+    error.status === 425 ||
+    error.status === 429 ||
+    error.status >= 500
+  )
+}
+
+function isGenerationAuthenticationError(error: unknown): boolean {
+  return error instanceof PlatformApiError && error.status === 401
+}
+
+async function waitForGenerationAuthentication(
+  throwIfAborted?: () => void,
+): Promise<void> {
+  const snapshot = useStore.getState()
+  snapshot.setCurrentUser(null)
+  snapshot.openAuthModal('login')
+
+  while (!useStore.getState().currentUser) {
+    await waitWithAbortChecks(ABORT_CHECK_INTERVAL_MS, throwIfAborted)
+  }
+}
+
+function getGenerationRetryDelay(retryCount: number): number {
+  const exponentialDelay = GENERATION_RETRY_BASE_DELAY_MS * (2 ** Math.max(0, retryCount - 1))
+  return Math.min(exponentialDelay, GENERATION_RETRY_MAX_DELAY_MS)
+}
+
+async function runGenerationRequestWithRetry<T>(
+  request: (signal: AbortSignal) => Promise<T>,
+  throwIfAborted?: () => void,
+): Promise<T> {
+  let retryCount = 0
+
+  while (true) {
+    throwIfAborted?.()
+    await waitUntilOnline(throwIfAborted)
+
+    const controller = new AbortController()
+    let abortError: unknown = null
+    const timeoutId = globalThis.setTimeout(() => {
+      controller.abort()
+    }, GENERATION_REQUEST_TIMEOUT_MS)
+    const abortCheckId = throwIfAborted
+      ? globalThis.setInterval(() => {
+          try {
+            throwIfAborted()
+          } catch (error) {
+            abortError = error
+            controller.abort()
+          }
+        }, ABORT_CHECK_INTERVAL_MS)
+      : null
+
+    let requestError: unknown = null
+    try {
+      return await request(controller.signal)
+    } catch (error) {
+      requestError = abortError ?? error
+    } finally {
+      globalThis.clearTimeout(timeoutId)
+      if (abortCheckId != null) {
+        globalThis.clearInterval(abortCheckId)
+      }
+    }
+
+    if (abortError) {
+      throw requestError
+    }
+    if (isGenerationAuthenticationError(requestError)) {
+      retryCount = 0
+      await waitForGenerationAuthentication(throwIfAborted)
+      continue
+    }
+    if (!isRetryableGenerationRequestError(requestError)) {
+      throw requestError
+    }
+
+    retryCount += 1
+    await waitWithAbortChecks(getGenerationRetryDelay(retryCount), throwIfAborted)
+  }
+}
+
+function syncGenerationUser(result: PlatformGenerationResult) {
+  if (result.user) {
+    useStore.getState().setCurrentUser(result.user)
+  }
+}
+
+function resolveTerminalGenerationResult(
+  result: PlatformGenerationResult,
+): PlatformGenerationResult | null {
+  if (result.status === 'error') {
+    throw new Error(result.error || '生成失败，请稍后重试')
+  }
+  if (result.status === 'done' || result.images.length > 0) {
+    return result
+  }
+  return null
 }
 
 async function waitForGenerationResult(
   taskId: string,
   throwIfAborted?: () => void,
-) {
-  const startedAt = Date.now()
+  pollImmediately = false,
+): Promise<PlatformGenerationResult> {
+  let shouldWait = !pollImmediately
 
-  while (Date.now() - startedAt < GENERATION_POLL_TIMEOUT_MS) {
-    throwIfAborted?.()
-    await sleep(GENERATION_POLL_INTERVAL_MS)
-    throwIfAborted?.()
-
-    const result = await platformApi.getGenerationTask(taskId)
-    if (result.user) {
-      useStore.getState().setCurrentUser(result.user)
+  while (true) {
+    if (shouldWait) {
+      await waitWithAbortChecks(GENERATION_POLL_INTERVAL_MS, throwIfAborted)
     }
+    shouldWait = true
 
-    if (result.status === 'done') {
-      return result
-    }
-    if (result.status === 'error') {
-      throw new Error(result.error || '生成失败，请稍后重试')
-    }
-  }
+    const result = await runGenerationRequestWithRetry(
+      (signal) => platformApi.getGenerationTask(taskId, signal),
+      throwIfAborted,
+    )
+    syncGenerationUser(result)
 
-  throwIfAborted?.()
-  const latestResult = await platformApi.getGenerationTask(taskId)
-  if (latestResult.user) {
-    useStore.getState().setCurrentUser(latestResult.user)
-  }
-  if (latestResult.status === 'done') {
-    return latestResult
-  }
-  if (latestResult.status === 'error') {
-    throw new Error(latestResult.error || '生成失败，请稍后重试')
-  }
-
-  const timeoutResult = await platformApi.timeoutGenerationTask(taskId)
-  if (timeoutResult.user) {
-    useStore.getState().setCurrentUser(timeoutResult.user)
-  }
-  if (timeoutResult.status === 'done') {
-    const completedResult = await platformApi.getGenerationTask(taskId)
-    if (completedResult.status === 'done') {
-      return completedResult
+    const terminalResult = resolveTerminalGenerationResult(result)
+    if (terminalResult) {
+      return terminalResult
     }
   }
-  throw new Error(timeoutResult.error || '生成等待超时，积分已退回')
 }
 
 function mergeGenerationResponseMeta(
@@ -150,36 +263,46 @@ export async function callTaskImageApi(
   _settings: AppSettings,
   handlers: TaskApiRequestHandlers = {},
 ): Promise<TaskPlatformApiResult> {
-  const inputImages = await loadTaskInputImages(
-    task,
-    handlers.throwIfAborted,
-  )
-  const editMaskDataUrl = await loadTaskEditMaskDataUrl(task, handlers.throwIfAborted)
-  handlers.throwIfAborted?.()
+  const persistedGenerationTaskId = task.generationTaskId?.trim()
+  let completedResult: PlatformGenerationResult
 
-  const result = await platformApi.generate({
-    modelConfigId: task.modelConfigId || '',
-    prompt: task.prompt,
-    params: task.params,
-    inputImages: inputImages.map((image) => ({
-      id: image.id || 'input',
-      dataUrl: image.dataUrl,
-    })),
-    editMask: editMaskDataUrl
-      ? {
-          dataUrl: editMaskDataUrl,
-          sourceImageId: task.editSourceImageId ?? null,
-          selection: task.editSelection ?? null,
-        }
-      : null,
-  })
-  if (result.user) {
-    useStore.getState().setCurrentUser(result.user)
+  if (persistedGenerationTaskId) {
+    completedResult = await waitForGenerationResult(
+      persistedGenerationTaskId,
+      handlers.throwIfAborted,
+      true,
+    )
+  } else {
+    const inputImages = await loadTaskInputImages(task, handlers.throwIfAborted)
+    const editMaskDataUrl = await loadTaskEditMaskDataUrl(task, handlers.throwIfAborted)
+    handlers.throwIfAborted?.()
+
+    const result = await runGenerationRequestWithRetry(
+      (signal) => platformApi.generate({
+        clientRequestId: task.generationRequestId?.trim() || task.id,
+        modelConfigId: task.modelConfigId || '',
+        prompt: task.prompt,
+        params: task.params,
+        inputImages: inputImages.map((image) => ({
+          id: image.id || 'input',
+          dataUrl: image.dataUrl,
+        })),
+        editMask: editMaskDataUrl
+          ? {
+              dataUrl: editMaskDataUrl,
+              sourceImageId: task.editSourceImageId ?? null,
+              selection: task.editSelection ?? null,
+            }
+          : null,
+      }, signal),
+      handlers.throwIfAborted,
+    )
+    syncGenerationUser(result)
+    await handlers.onTaskAccepted?.(result.taskId)
+
+    completedResult = resolveTerminalGenerationResult(result)
+      ?? await waitForGenerationResult(result.taskId, handlers.throwIfAborted)
   }
-
-  const completedResult = result.status === 'running' || result.images.length === 0
-    ? await waitForGenerationResult(result.taskId, handlers.throwIfAborted)
-    : result
 
   const images: TaskApiOutputImageAsset[] = await Promise.all(
     completedResult.images.map(async (image, index) => {

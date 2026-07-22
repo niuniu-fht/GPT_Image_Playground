@@ -142,13 +142,6 @@ export interface PlatformGenerationResult {
   responseMeta?: unknown
 }
 
-export interface PlatformGenerationTimeoutResult {
-  taskId: string
-  status: 'running' | 'done' | 'error'
-  error?: string | null
-  user: CurrentUser | null
-}
-
 export interface AdminUpstreamModelOption {
   id: string
   ownedBy?: string
@@ -747,6 +740,7 @@ export const platformApi = {
   },
 
   generate(input: {
+    clientRequestId: string
     modelConfigId: string
     prompt: string
     params: TaskParams
@@ -756,20 +750,17 @@ export const platformApi = {
       sourceImageId?: string | null
       selection?: unknown
     } | null
-  }) {
+  }, signal?: AbortSignal) {
     return request<PlatformGenerationResult>('/api/generations', {
       method: 'POST',
       body: JSON.stringify(input),
+      signal,
     })
   },
 
-  getGenerationTask(taskId: string) {
-    return request<PlatformGenerationResult>(`/api/generations/${encodeURIComponent(taskId)}`)
-  },
-
-  timeoutGenerationTask(taskId: string) {
-    return request<PlatformGenerationTimeoutResult>(`/api/generations/${encodeURIComponent(taskId)}/timeout`, {
-      method: 'POST',
+  getGenerationTask(taskId: string, signal?: AbortSignal) {
+    return request<PlatformGenerationResult>(`/api/generations/${encodeURIComponent(taskId)}`, {
+      signal,
     })
   },
 }

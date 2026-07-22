@@ -69,9 +69,13 @@ interface GenerationTaskRecordInput {
 }
 
 export function createGenerationTaskRecord(input: GenerationTaskRecordInput): TaskRecord {
+  const id = genId()
+
   return {
-    id: genId(),
+    id,
     taskKind: 'generation',
+    generationRequestId: id,
+    generationTaskId: null,
     providerId: input.providerId,
     providerName: input.providerName,
     modelConfigId: input.modelConfigId,
@@ -103,10 +107,14 @@ export function createGenerationTaskRecord(input: GenerationTaskRecordInput): Ta
 }
 
 export function cloneTaskForRetry(task: TaskRecord): TaskRecord {
+  const id = genId()
+
   return {
     ...task,
-    id: genId(),
+    id,
     taskKind: 'generation',
+    generationRequestId: id,
+    generationTaskId: null,
     deletedAt: null,
     isFavorite: false,
     parentTaskId: task.id,
@@ -383,6 +391,8 @@ export function createSingleImageTaskRecord(
   return {
     id: genId(),
     taskKind: 'image',
+    generationRequestId: null,
+    generationTaskId: null,
     providerId: null,
     providerName: LOCAL_IMAGE_TASK_PROVIDER_NAME,
     categoryId: category?.id ?? null,

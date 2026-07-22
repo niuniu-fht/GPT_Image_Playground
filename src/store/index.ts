@@ -5,7 +5,7 @@ export { ensureImageAssetDataUrl, ensureImageAssetMetadata, ensureImageAssetUrl,
 export { applyImageEditToInput, clearInputImageEdit, closeImageEditor, editOutputs, reopenImageEditorFromInputImage } from './imageEditActions'
 export { closeLightbox, openLightbox } from './lightboxWorkflow'
 export { createSingleImageTasksFromFiles } from './imageTaskActions'
-export { abortTask, cleanupExpiredRecycleBinTasks, initStore, retryTask, startRecycleBinJanitor, submitTask } from './runtime'
+export { abortTask, cleanupExpiredRecycleBinTasks, initStore, resumeRunningTasks, retryTask, startRecycleBinJanitor, submitTask } from './runtime'
 export { DEFAULT_PARAMS, resolveTaskParamSizeOrDefault } from './taskParams'
 export { canEditTaskOutputs, canRetryTask, isTaskInRecycleBin, isTaskRunExceptional, resolveTaskAppliedImageParam, resolveTaskCategoryName, resolveTaskDisplayImageParam, resolveTaskImageProgress, resolveTaskKind, resolveTaskModelLabel, resolveTaskProviderName, resolveTaskRunOutcome, resolveTaskStatusLabel, resolveTaskTransportLabel, resolveTaskTransportMeta } from './taskRecords'
 export { useStore } from './state'

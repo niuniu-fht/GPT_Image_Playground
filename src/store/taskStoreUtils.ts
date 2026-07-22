@@ -12,8 +12,10 @@ export function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
   setTasks(updatedTasks)
   const updatedTask = updatedTasks.find((task) => task.id === taskId)
   if (updatedTask) {
-    void putTask(updatedTask)
+    return putTask(updatedTask)
   }
+
+  return null
 }
 
 export function clearTaskUiState(taskIds: Set<string>) {

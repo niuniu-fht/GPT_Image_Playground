@@ -35,6 +35,21 @@ function resolveTaskRequestSettings(task: TaskRecord) {
   return provider ? getProviderSettings(provider) : snapshot.settings
 }
 
+/** 恢复刷新、重开页面或网络中断前已经提交的生成任务。 */
+export function resumeRunningTasks() {
+  const snapshot = useStore.getState()
+  const runningTasks = snapshot.tasks.filter(
+    (task) =>
+      task.status === 'running' &&
+      task.taskKind !== 'image' &&
+      task.deletedAt == null,
+  )
+
+  for (const task of runningTasks) {
+    void executeTask(task.id, resolveTaskRequestSettings(task))
+  }
+}
+
 /** 提交当前输入区内容为一个新任务 */
 export async function submitTask() {
   const snapshot = useStore.getState()

@@ -1,4 +1,4 @@
-export { submitTask, retryTask, abortTask } from './taskRunner'
+export { submitTask, retryTask, abortTask, resumeRunningTasks } from './taskRunner'
 export {
   cleanupExpiredRecycleBinTasks,
   initStore,

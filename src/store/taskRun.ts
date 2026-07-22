@@ -3,6 +3,7 @@ import type { TaskErrorDebugInfo, TaskRecord, TaskResponseMeta } from '../types'
 import { getTaskAborter, requestTaskAbort } from './taskAbort'
 import { useStore } from './state'
 import { resolveTaskAbortPlan, resolveTaskRetryPlan } from './taskRecords'
+import { genId } from './constants'
 import { updateTaskInStore } from './taskStoreUtils'
 
 export interface EnqueueTaskRunOptions {
@@ -106,6 +107,8 @@ export function requestAbortTaskRun(task: TaskRecord): RequestAbortTaskRunResult
 
 export function restartTaskRun(taskId: string) {
   updateTaskInStore(taskId, {
+    generationRequestId: genId(),
+    generationTaskId: null,
     status: 'running',
     isAborted: false,
     error: null,

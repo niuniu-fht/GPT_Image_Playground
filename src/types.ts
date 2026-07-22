@@ -786,6 +786,10 @@ export interface TaskRecord {
   id: string
   /** 任务类型：普通生成任务 / 单图任务 */
   taskKind?: TaskKind
+  /** 每次生成请求的稳定幂等标识；断线重试时保持不变，用户主动重试时更新 */
+  generationRequestId?: string | null
+  /** 服务端生成任务 ID；服务端接受请求后立即持久化，用于刷新和断线恢复 */
+  generationTaskId?: string | null
   /** 任务提交时选中的供应商 ID */
   providerId?: string | null
   /** 任务提交时记录的供应商名称快照 */

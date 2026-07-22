@@ -3,7 +3,6 @@ import { DEFAULT_SETTINGS } from '../types'
 import {
   clearTaskAbortState,
   isTaskAbortRequested,
-  registerTaskAborter,
 } from './taskAbort'
 import type { TaskApiOutputImageAsset } from './taskApiRequest'
 import { callTaskImageApi } from './taskApiRequest'
@@ -19,6 +18,7 @@ import {
   failTaskRun,
   succeedTaskRun,
 } from './taskRun'
+import { updateTaskInStore } from './taskStoreUtils'
 
 function readLocalDebugFromErrorDetails(details: unknown): TaskErrorDebugInfo | null {
   if (!isRecord(details)) {
@@ -196,10 +196,21 @@ async function storeGeneratedOutputImage(
   }
 }
 
-export async function executeTask(taskId: string, requestSettings: AppSettings) {
-  const task = useStore.getState().tasks.find((item) => item.id === taskId)
+const activeTaskExecutions = new Map<string, Promise<void>>()
+
+async function executeTaskRun(taskId: string, requestSettings: AppSettings) {
+  let task = useStore.getState().tasks.find((item) => item.id === taskId)
   if (!task) {
     return
+  }
+
+  if (!task.generationRequestId?.trim()) {
+    const generationRequestId = task.id
+    const persistence = updateTaskInStore(taskId, { generationRequestId })
+    await persistence?.catch((error: unknown) => {
+      console.warn('[generation] failed to persist generation request id; recovery can use local task id', error)
+    })
+    task = { ...task, generationRequestId }
   }
 
   const outputIds: string[] = []
@@ -237,10 +248,17 @@ export async function executeTask(taskId: string, requestSettings: AppSettings) 
 
     throwIfTaskAbortRequested(taskId)
     const result = await callTaskImageApi(task, requestSettings, {
-      onFinalImages: appendOutputImages,
-      registerAbort: (abort) => {
-        registerTaskAborter(taskId, abort)
+      onTaskAccepted: async (generationTaskId) => {
+        const currentTask = useStore.getState().tasks.find((item) => item.id === taskId)
+        if (currentTask?.generationTaskId === generationTaskId) {
+          return
+        }
+        const persistence = updateTaskInStore(taskId, { generationTaskId })
+        await persistence?.catch((error: unknown) => {
+          console.warn('[generation] failed to persist remote task id; idempotent request recovery remains available', error)
+        })
       },
+      onFinalImages: appendOutputImages,
       throwIfAborted: () => throwIfTaskAbortRequested(taskId),
     })
 
@@ -298,4 +316,20 @@ export async function executeTask(taskId: string, requestSettings: AppSettings) 
       evictImage(imageId)
     }
   }
+}
+
+export function executeTask(taskId: string, requestSettings: AppSettings): Promise<void> {
+  const activeExecution = activeTaskExecutions.get(taskId)
+  if (activeExecution) {
+    return activeExecution
+  }
+
+  let execution: Promise<void>
+  execution = executeTaskRun(taskId, requestSettings).finally(() => {
+    if (activeTaskExecutions.get(taskId) === execution) {
+      activeTaskExecutions.delete(taskId)
+    }
+  })
+  activeTaskExecutions.set(taskId, execution)
+  return execution
 }

@@ -1,5 +1,5 @@
 import { getAllTasks, putTask } from '../lib/db'
-import { platformApi } from '../lib/platformApi'
+import { PlatformApiError, platformApi } from '../lib/platformApi'
 import type { TaskRecord } from '../types'
 import {
   ERROR_LOG_POLL_INTERVAL_MS,
@@ -24,6 +24,14 @@ import { repairCategoryStateFromTasks } from './taskStoreUtils'
 
 let recycleBinJanitorId: number | null = null
 let errorLogJanitorId: number | null = null
+let storeInitializationPromise: Promise<void> | null = null
+let authRefreshPromise: Promise<void> | null = null
+let authRecoveryListenerStarted = false
+let authRefreshRetryTimerId: number | null = null
+let authRefreshRetryCount = 0
+
+const AUTH_REFRESH_RETRY_BASE_DELAY_MS = 2000
+const AUTH_REFRESH_RETRY_MAX_DELAY_MS = 30_000
 
 function resolveErrorDebugCreatedAt(
   task: Pick<TaskRecord, 'createdAt' | 'finishedAt' | 'errorDebug'>,
@@ -97,12 +105,87 @@ async function cleanupOrphanImages(tasks: TaskRecord[]) {
   }
 }
 
-export async function initStore() {
-  void platformApi
+function clearAuthRefreshRetry() {
+  if (authRefreshRetryTimerId != null) {
+    window.clearTimeout(authRefreshRetryTimerId)
+    authRefreshRetryTimerId = null
+  }
+  authRefreshRetryCount = 0
+}
+
+function isTransientAuthRefreshError(error: unknown): boolean {
+  return (
+    error instanceof PlatformApiError &&
+    (
+      error.status === 0 ||
+      error.status === 408 ||
+      error.status === 425 ||
+      error.status === 429 ||
+      error.status >= 500
+    )
+  )
+}
+
+function scheduleAuthRefreshRetry() {
+  if (authRefreshRetryTimerId != null) {
+    return
+  }
+
+  authRefreshRetryCount += 1
+  const delay = Math.min(
+    AUTH_REFRESH_RETRY_BASE_DELAY_MS * (2 ** Math.max(0, authRefreshRetryCount - 1)),
+    AUTH_REFRESH_RETRY_MAX_DELAY_MS,
+  )
+  authRefreshRetryTimerId = window.setTimeout(() => {
+    authRefreshRetryTimerId = null
+    void refreshAuthSession()
+  }, delay)
+}
+
+function refreshAuthSession(): Promise<void> {
+  if (authRefreshPromise) {
+    return authRefreshPromise
+  }
+
+  authRefreshPromise = platformApi
     .getMe()
-    .then(({ user }) => useStore.getState().setCurrentUser(user))
-    .catch(() => useStore.getState().setCurrentUser(null))
-    .finally(() => useStore.getState().setAuthReady(true))
+    .then(({ user }) => {
+      clearAuthRefreshRetry()
+      useStore.getState().setCurrentUser(user)
+    })
+    .catch((error: unknown) => {
+      if (error instanceof PlatformApiError && error.status === 401) {
+        clearAuthRefreshRetry()
+        useStore.getState().setCurrentUser(null)
+        return
+      }
+      if (isTransientAuthRefreshError(error)) {
+        scheduleAuthRefreshRetry()
+      }
+    })
+    .finally(() => {
+      useStore.getState().setAuthReady(true)
+      authRefreshPromise = null
+    })
+
+  return authRefreshPromise
+}
+
+function ensureAuthRecoveryListenerStarted() {
+  if (authRecoveryListenerStarted) {
+    return
+  }
+
+  authRecoveryListenerStarted = true
+  window.addEventListener('online', () => {
+    clearAuthRefreshRetry()
+    void refreshAuthSession()
+  })
+}
+
+async function initializeStore() {
+  ensureAuthRecoveryListenerStarted()
+  void refreshAuthSession()
 
   void platformApi
     .listModels()
@@ -132,6 +215,17 @@ export async function initStore() {
   window.setTimeout(() => {
     void seedGeneratedImagePersistenceRetriesFromTasks(tasks)
   }, 300)
+}
+
+export function initStore(): Promise<void> {
+  if (!storeInitializationPromise) {
+    storeInitializationPromise = initializeStore().catch((error: unknown) => {
+      storeInitializationPromise = null
+      throw error
+    })
+  }
+
+  return storeInitializationPromise
 }
 
 export async function cleanupExpiredRecycleBinTasks() {

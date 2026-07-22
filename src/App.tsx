@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { initStore, startRecycleBinJanitor, useStore } from './store'
+import { initStore, resumeRunningTasks, startRecycleBinJanitor, useStore } from './store'
 import { useGlobalRuntimeErrors } from './hooks/useGlobalRuntimeErrors'
 import { resolveAppViewFromPath, resolveAppViewPath, resolveAppViewTitle } from './app/appRoutes'
 import { Header } from './app/components'
@@ -29,6 +29,14 @@ export default function App() {
   const themeMode = useStore((state) => state.themeMode)
   const authReady = useStore((state) => state.authReady)
   const currentUser = useStore((state) => state.currentUser)
+  const runningTaskCount = useStore((state) =>
+    state.tasks.filter(
+      (task) =>
+        task.status === 'running' &&
+        task.taskKind !== 'image' &&
+        task.deletedAt == null,
+    ).length,
+  )
   const openAuthModal = useStore((state) => state.openAuthModal)
   const setAppView = useStore((state) => state.setAppView)
   const setShowAdminModels = useStore((state) => state.setShowAdminModels)
@@ -94,6 +102,14 @@ export default function App() {
       openAuthModal('login')
     }
   }, [appView, authReady, currentUser, openAuthModal])
+
+  useEffect(() => {
+    if (!authReady || !currentUser || runningTaskCount === 0) {
+      return
+    }
+
+    resumeRunningTasks()
+  }, [authReady, currentUser?.id, runningTaskCount])
 
   const showLanding =
     (appView === 'home' || (authReady && !currentUser && appView === 'local')) &&

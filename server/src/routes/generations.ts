@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import type { Prisma } from '@prisma/client'
+import type { GenerationTask, Prisma } from '@prisma/client'
 import crypto from 'node:crypto'
 import sharp from 'sharp'
 import { z } from 'zod'
@@ -23,6 +23,7 @@ const taskParamsSchema = z.object({
 })
 
 const generationSchema = z.object({
+  clientRequestId: z.string().trim().min(1).max(128),
   modelConfigId: z.string().min(1),
   prompt: z.string().min(1, '请输入提示词'),
   params: taskParamsSchema,
@@ -133,6 +134,48 @@ function normalizeTaskImageResults(
   }
 
   return Array.from(resultsByIndex.values()).sort((left, right) => left.index - right.index)
+}
+
+async function buildGenerationTaskResponse(task: GenerationTask) {
+  const [latestUser, model] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: task.userId },
+      select: { id: true, email: true, role: true, creditBalance: true },
+    }),
+    prisma.modelConfig.findUnique({
+      where: { id: task.modelConfigId },
+      select: { id: true, displayName: true },
+    }),
+  ])
+
+  return {
+    taskId: task.id,
+    status: task.status,
+    error: task.status === 'error' ? task.error || GENERIC_GENERATION_FAILURE_MESSAGE : null,
+    images: normalizeTaskImages(task.outputImages),
+    model: {
+      id: model?.id ?? task.modelConfigId,
+      displayName: model?.displayName ?? '未知模型',
+      costCredits: task.costCredits,
+    },
+    user: latestUser ? publicUser(latestUser) : null,
+    responseMeta: {
+      pending: task.status === 'running',
+      squareUploadError: null,
+      imageResults: normalizeTaskImageResults(task.outputImages, task.error, task.params),
+      appliedImageParams: {
+        size: typeof (task.params as { size?: unknown }).size === 'string'
+          ? (task.params as { size: string }).size
+          : 'auto',
+        quality: typeof (task.params as { quality?: unknown }).quality === 'string'
+          ? (task.params as { quality: string }).quality
+          : 'auto',
+        output_format: typeof (task.params as { output_format?: unknown }).output_format === 'string'
+          ? (task.params as { output_format: string }).output_format
+          : 'png',
+      },
+    },
+  }
 }
 
 function getGenerationFailureMessage(error: unknown): string {
@@ -767,49 +810,6 @@ async function refundFailedGeneration(input: {
   })
 }
 
-async function timeoutGenerationTaskAndRefund(input: {
-  taskId: string
-  userId: string
-}) {
-  return prisma.$transaction(async (tx) => {
-    const task = await tx.generationTask.findFirst({
-      where: { id: input.taskId, userId: input.userId },
-      select: { id: true, status: true, costCredits: true },
-    })
-    if (!task) {
-      throw new HttpError(404, 'task_not_found', '生成任务不存在或已被清理')
-    }
-    if (task.status !== 'running') {
-      return { refunded: false }
-    }
-
-    const latestUser = await tx.user.update({
-      where: { id: input.userId },
-      data: { creditBalance: { increment: task.costCredits } },
-      select: { creditBalance: true },
-    })
-    await tx.creditLedger.create({
-      data: {
-        userId: input.userId,
-        delta: task.costCredits,
-        reason: '生成等待超时退回积分',
-        taskId: input.taskId,
-        balanceAfter: latestUser.creditBalance,
-      },
-    })
-    await tx.generationTask.update({
-      where: { id: input.taskId },
-      data: {
-        status: 'error',
-        error: '生成等待超时，积分已退回',
-        finishedAt: new Date(),
-      },
-    })
-
-    return { refunded: true }
-  })
-}
-
 async function runGenerationTask(input: {
   costCredits: number
   generationInput: GenerationInput
@@ -919,73 +919,7 @@ router.get('/:taskId', requireUser, async (req, res, next) => {
     })
     if (!task) throw new HttpError(404, 'task_not_found', '生成任务不存在或已被清理')
 
-    const [latestUser, model] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: user.id },
-        select: { id: true, email: true, role: true, creditBalance: true },
-      }),
-      prisma.modelConfig.findUnique({
-        where: { id: task.modelConfigId },
-        select: { id: true, displayName: true },
-      }),
-    ])
-
-    sendOk(res, {
-      taskId: task.id,
-      status: task.status,
-      error: task.status === 'error' ? task.error || GENERIC_GENERATION_FAILURE_MESSAGE : null,
-      images: normalizeTaskImages(task.outputImages),
-      model: {
-        id: model?.id ?? task.modelConfigId,
-        displayName: model?.displayName ?? '未知模型',
-        costCredits: task.costCredits,
-      },
-      user: latestUser ? publicUser(latestUser) : null,
-      responseMeta: {
-        squareUploadError: null,
-        imageResults: normalizeTaskImageResults(task.outputImages, task.error, task.params),
-        appliedImageParams: {
-          size: typeof (task.params as { size?: unknown }).size === 'string'
-            ? (task.params as { size: string }).size
-            : 'auto',
-          quality: typeof (task.params as { quality?: unknown }).quality === 'string'
-            ? (task.params as { quality: string }).quality
-            : 'auto',
-          output_format: typeof (task.params as { output_format?: unknown }).output_format === 'string'
-            ? (task.params as { output_format: string }).output_format
-            : 'png',
-        },
-      },
-    })
-  } catch (error) {
-    next(error)
-  }
-})
-
-router.post('/:taskId/timeout', requireUser, async (req, res, next) => {
-  const user = resLocals(req).user!
-  try {
-    const taskId = typeof req.params.taskId === 'string' ? req.params.taskId : ''
-    await timeoutGenerationTaskAndRefund({ taskId, userId: user.id })
-
-    const [task, latestUser] = await Promise.all([
-      prisma.generationTask.findFirst({
-        where: { id: taskId, userId: user.id },
-        select: { id: true, status: true, error: true },
-      }),
-      prisma.user.findUnique({
-        where: { id: user.id },
-        select: { id: true, email: true, role: true, creditBalance: true },
-      }),
-    ])
-    if (!task) throw new HttpError(404, 'task_not_found', '生成任务不存在或已被清理')
-
-    sendOk(res, {
-      taskId: task.id,
-      status: task.status,
-      error: task.status === 'error' ? task.error || '生成等待超时，积分已退回' : null,
-      user: latestUser ? publicUser(latestUser) : null,
-    })
+    sendOk(res, await buildGenerationTaskResponse(task))
   } catch (error) {
     next(error)
   }
@@ -996,6 +930,19 @@ router.post('/', requireUser, async (req, res, next) => {
 
   try {
     const input = generationSchema.parse(req.body)
+    const existingTask = await prisma.generationTask.findUnique({
+      where: {
+        userId_clientRequestId: {
+          userId: user.id,
+          clientRequestId: input.clientRequestId,
+        },
+      },
+    })
+    if (existingTask) {
+      sendOk(res, await buildGenerationTaskResponse(existingTask))
+      return
+    }
+
     const settings = await getPlatformSettings()
     if (!settings.generationEnabled) {
       throw new HttpError(503, 'generation_closed', settings.maintenanceMessage || '当前生成服务维护中，请稍后再试')
@@ -1020,45 +967,69 @@ router.post('/', requireUser, async (req, res, next) => {
     const adminTaskMeta = await createAdminTaskMeta(generationInput)
     const requestedCount = clampImageCount(generationInput.params.n)
     const costCredits = resolveModelCostForSize(model, generationInput.params.size, generationInput.params.quality) * requestedCount
-    const task = await prisma.$transaction(async (tx) => {
-      const latestUser = await tx.user.findUnique({
-        where: { id: user.id },
-        select: { creditBalance: true },
-      })
-      if (!latestUser) throw new HttpError(401, 'unauthorized', '登录状态已失效')
-      if (latestUser.creditBalance < costCredits) {
-        throw new HttpError(402, 'insufficient_credits', '积分不足，请联系管理员补充积分')
-      }
+    let shouldStartGeneration = true
+    let task: GenerationTask
+    try {
+      task = await prisma.$transaction(async (tx) => {
+        const latestUser = await tx.user.findUnique({
+          where: { id: user.id },
+          select: { creditBalance: true },
+        })
+        if (!latestUser) throw new HttpError(401, 'unauthorized', '登录状态已失效')
+        if (latestUser.creditBalance < costCredits) {
+          throw new HttpError(402, 'insufficient_credits', '积分不足，请联系管理员补充积分')
+        }
 
-      const nextBalance = latestUser.creditBalance - costCredits
-      await tx.user.update({
-        where: { id: user.id },
-        data: { creditBalance: nextBalance },
+        const nextBalance = latestUser.creditBalance - costCredits
+        await tx.user.update({
+          where: { id: user.id },
+          data: { creditBalance: nextBalance },
+        })
+        const createdTask = await tx.generationTask.create({
+          data: {
+            userId: user.id,
+            clientRequestId: input.clientRequestId,
+            modelConfigId: model.id,
+            prompt: generationInput.prompt,
+            params: toPrismaJsonValue({
+              ...generationInput.params,
+              _admin: adminTaskMeta,
+            }),
+            status: 'running',
+            costCredits,
+          },
+        })
+        await tx.creditLedger.create({
+          data: {
+            userId: user.id,
+            delta: -costCredits,
+            reason: `生成消耗：${model.displayName}`,
+            taskId: createdTask.id,
+            balanceAfter: nextBalance,
+          },
+        })
+        return createdTask
       })
-      const createdTask = await tx.generationTask.create({
-        data: {
-          userId: user.id,
-          modelConfigId: model.id,
-          prompt: generationInput.prompt,
-          params: toPrismaJsonValue({
-            ...generationInput.params,
-            _admin: adminTaskMeta,
-          }),
-          status: 'running',
-          costCredits,
+    } catch (error) {
+      const concurrentTask = await prisma.generationTask.findUnique({
+        where: {
+          userId_clientRequestId: {
+            userId: user.id,
+            clientRequestId: input.clientRequestId,
+          },
         },
       })
-      await tx.creditLedger.create({
-        data: {
-          userId: user.id,
-          delta: -costCredits,
-          reason: `生成消耗：${model.displayName}`,
-          taskId: createdTask.id,
-          balanceAfter: nextBalance,
-        },
-      })
-      return createdTask
-    })
+      if (!concurrentTask) {
+        throw error
+      }
+      task = concurrentTask
+      shouldStartGeneration = false
+    }
+
+    if (!shouldStartGeneration) {
+      sendOk(res, await buildGenerationTaskResponse(task))
+      return
+    }
 
     const latestUser = await prisma.user.findUnique({
       where: { id: user.id },
