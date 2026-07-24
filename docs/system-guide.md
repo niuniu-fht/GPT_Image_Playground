@@ -134,7 +134,9 @@ https://assets.code2alita.com
 
 生成原图不写入 PostgreSQL，也不自动上传 R2。R2 只服务于用户主动发布到广场的图片。
 
-数据库迁移会以 `NOT VALID` 检查约束阻止新任务写入 data URL，同时保留历史任务可读。历史 base64 需要在维护窗口单独清理，清理后再验证约束并整理 PostgreSQL 表空间。
+数据库迁移会先阻止新任务写入 data URL，再自动移除历史任务输出、缩略图和参考图预览中的 Base64 字段并验证完整约束。清理只删除图片载荷，任务状态、提示词、图片索引、MIME、错误信息和积分记录继续保留；新的 `/api/generations/...` 临时交付路径不会被清理。
+
+迁移完成后，PostgreSQL 可以通过 autovacuum 复用这些空间。若需要让宿主机上的数据库文件立即缩小，应在业务低峰期单独执行 `VACUUM FULL "GenerationTask";`，该操作会锁表并需要额外临时磁盘空间。
 
 ## 4. 广场 API 与图片域名的区别
 
