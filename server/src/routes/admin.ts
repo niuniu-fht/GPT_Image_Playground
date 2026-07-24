@@ -657,7 +657,7 @@ router.get('/users/:id', async (req, res, next) => {
     })
     if (!user) throw new HttpError(404, 'USER_NOT_FOUND', '用户不存在')
 
-    const [tasks, ledgers, loginLogs, creditOrders, supportTickets, auditLogs] = await Promise.all([
+    const [tasks, ledgers, loginLogs, redemptions, supportTickets, auditLogs] = await Promise.all([
       prisma.generationTask.findMany({
         where: { userId: id },
         orderBy: { createdAt: 'desc' },
@@ -674,10 +674,23 @@ router.get('/users/:id', async (req, res, next) => {
         orderBy: { createdAt: 'desc' },
         take: 12,
       }),
-      prisma.creditOrder.findMany({
+      prisma.creditRedemption.findMany({
         where: { userId: id },
         orderBy: { createdAt: 'desc' },
-        take: 8,
+        take: 20,
+        include: {
+          redeemCode: {
+            select: { code: true, name: true, status: true },
+          },
+          transaction: {
+            select: {
+              id: true,
+              status: true,
+              externalConsumed: true,
+              externalUsedAt: true,
+            },
+          },
+        },
       }),
       prisma.supportTicket.findMany({
         where: { userId: id },
@@ -704,7 +717,7 @@ router.get('/users/:id', async (req, res, next) => {
       tasks: toAdminGenerationTasks(tasks),
       ledgers,
       loginLogs,
-      creditOrders,
+      redemptions,
       supportTickets,
       auditLogs: auditLogs.map((item) => ({
         ...item,
@@ -1002,6 +1015,34 @@ router.post('/tasks/batch/delete', async (req, res, next) => {
       cleanup,
     })
     sendOk(res, { affected: result.count, cleanup })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.post('/tasks/clear', async (req, res, next) => {
+  try {
+    const [tasks, skippedRunning] = await Promise.all([
+      prisma.generationTask.findMany({
+        where: { status: { in: ['done', 'error'] } },
+        select: { id: true },
+      }),
+      prisma.generationTask.count({ where: { status: 'running' } }),
+    ])
+    const targetIds = tasks.map((task) => task.id)
+    const cleanup = await cleanupGeneratedAssetsForTasks(targetIds)
+    const result = await prisma.generationTask.deleteMany({
+      where: {
+        id: { in: targetIds },
+        status: { in: ['done', 'error'] },
+      },
+    })
+    await writeAudit(req, 'task.clear', 'tasks', {
+      affected: result.count,
+      skippedRunning,
+      cleanup,
+    })
+    sendOk(res, { affected: result.count, skippedRunning, cleanup })
   } catch (error) {
     next(error)
   }
@@ -1635,6 +1676,7 @@ router.get('/settings', async (_req, res, next) => {
 const settingsSchema = z.object({
   registerEnabled: z.boolean().optional(),
   generationEnabled: z.boolean().optional(),
+  generationTimeoutSeconds: z.number().int().min(30).max(1800).optional(),
   registerBonusCredits: z.number().int().min(0).max(100000).optional(),
   maintenanceMessage: z.string().max(500).optional(),
   redeemDescription: z.string().max(1000).optional(),

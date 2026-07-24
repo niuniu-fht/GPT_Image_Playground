@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { platformApi } from '../../lib/platformApi'
 import { useStore } from '../../store'
 import { ThemeToggle } from '../../shared/components'
@@ -84,6 +84,7 @@ export default function Header() {
   const [redeemOpen, setRedeemOpen] = useState(false)
   const [redeemCode, setRedeemCode] = useState('')
   const [redeeming, setRedeeming] = useState(false)
+  const redeemRequestRef = useRef<{ code: string; requestId: string } | null>(null)
   const [topupOpen, setTopupOpen] = useState(false)
   const [packages, setPackages] = useState<CreditPackage[]>([])
   const [orders, setOrders] = useState<CreditOrder[]>([])
@@ -158,10 +159,18 @@ export default function Header() {
     event.preventDefault()
     const code = redeemCode.trim()
     if (!code) return
+    const normalizedCode = code.toUpperCase()
+    if (redeemRequestRef.current?.code !== normalizedCode) {
+      redeemRequestRef.current = { code: normalizedCode, requestId: crypto.randomUUID() }
+    }
     setRedeeming(true)
     try {
-      const result = await platformApi.redeemCredits({ code })
+      const result = await platformApi.redeemCredits({
+        code,
+        requestId: redeemRequestRef.current.requestId,
+      })
       setCurrentUser(result.user)
+      redeemRequestRef.current = null
       setRedeemCode('')
       setRedeemOpen(false)
       showToast(`兑换成功，获得 ${result.redeemCode.credits} 积分`, 'success')

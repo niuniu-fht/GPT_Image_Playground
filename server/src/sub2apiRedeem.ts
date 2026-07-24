@@ -6,6 +6,16 @@ interface ConsumeSub2ApiRedeemCodeInput {
   settings: Pick<PlatformSettings, 'sub2apiRedeemEnabled' | 'sub2apiRedeemBaseUrl' | 'sub2apiRedeemToken'>
   userId: string
   email: string
+  transactionId?: string
+  attemptCreatedAt?: Date
+}
+
+export interface Sub2ApiRedeemResult {
+  external: boolean
+  recovered: boolean
+  id?: number
+  usedBy?: number
+  usedAt?: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -122,13 +132,13 @@ async function requestSub2ApiJson(apiBase: string, token: string, path: string, 
   return payload
 }
 
-async function findSub2ApiRedeemCode(apiBase: string, token: string, code: string) {
+async function findSub2ApiRedeemCode(apiBase: string, token: string, code: string, signal?: AbortSignal) {
   const query = buildQuery({
     search: code,
     page: 1,
     page_size: 10,
   })
-  const payload = await requestSub2ApiJson(apiBase, token, `/admin/redeem-codes?${query}`)
+  const payload = await requestSub2ApiJson(apiBase, token, `/admin/redeem-codes?${query}`, { signal })
   const normalizedCode = code.toLowerCase()
   const record = readItems(payload).find((item) => readString(item.code).toLowerCase() === normalizedCode)
   if (!record) {
@@ -137,13 +147,13 @@ async function findSub2ApiRedeemCode(apiBase: string, token: string, code: strin
   return record
 }
 
-async function getSub2ApiRedeemUserId(apiBase: string, token: string) {
+async function getSub2ApiRedeemUserId(apiBase: string, token: string, signal?: AbortSignal) {
   const query = buildQuery({
     role: 'admin',
     page: 1,
     page_size: 1,
   })
-  const payload = await requestSub2ApiJson(apiBase, token, `/admin/users?${query}`)
+  const payload = await requestSub2ApiJson(apiBase, token, `/admin/users?${query}`, { signal })
   const first = readItems(payload)[0]
   const id = first ? readNumber(first.id) : undefined
   if (!id || id <= 0) {
@@ -152,10 +162,26 @@ async function getSub2ApiRedeemUserId(apiBase: string, token: string) {
   return id
 }
 
-export async function consumeSub2ApiRedeemCode(input: ConsumeSub2ApiRedeemCodeInput) {
+function isRecoverableConsumedCode(
+  record: Record<string, unknown>,
+  redeemUserId: number,
+  input: ConsumeSub2ApiRedeemCodeInput,
+): boolean {
+  if (!input.transactionId || !input.attemptCreatedAt) return false
+  const usedBy = readNumber(record.used_by)
+  if (usedBy !== redeemUserId) return false
+
+  const notes = readString(record.notes) || readString(record.note)
+  if (notes.includes(`transaction=${input.transactionId}`)) return true
+
+  const usedAt = new Date(readString(record.used_at)).getTime()
+  return Number.isFinite(usedAt) && usedAt >= input.attemptCreatedAt.getTime() - 5_000
+}
+
+export async function consumeSub2ApiRedeemCode(input: ConsumeSub2ApiRedeemCodeInput): Promise<Sub2ApiRedeemResult> {
   const apiBase = normalizeSub2ApiApiBase(input.settings.sub2apiRedeemBaseUrl)
   if (!input.settings.sub2apiRedeemEnabled || !apiBase) {
-    return
+    return { external: false, recovered: false }
   }
   if (!input.settings.sub2apiRedeemToken.trim()) {
     throw new HttpError(400, 'SUB2API_ADMIN_KEY_REQUIRED', '请先配置 sub2api Admin API Key')
@@ -165,10 +191,22 @@ export async function consumeSub2ApiRedeemCode(input: ConsumeSub2ApiRedeemCodeIn
   const timer = setTimeout(() => controller.abort(), 10_000)
   try {
     const token = input.settings.sub2apiRedeemToken.trim()
-    const before = await findSub2ApiRedeemCode(apiBase, token, input.code)
+    const before = await findSub2ApiRedeemCode(apiBase, token, input.code, controller.signal)
+    const redeemUserId = await getSub2ApiRedeemUserId(apiBase, token, controller.signal)
+    if (readString(before.status).toLowerCase() === 'used' || before.used_at || before.used_by) {
+      if (isRecoverableConsumedCode(before, redeemUserId, input)) {
+        return {
+          external: true,
+          recovered: true,
+          id: readNumber(before.id),
+          usedBy: readNumber(before.used_by),
+          usedAt: readString(before.used_at),
+        }
+      }
+      assertSub2ApiRedeemCodeUsable(before)
+    }
     assertSub2ApiRedeemCodeUsable(before)
 
-    const redeemUserId = await getSub2ApiRedeemUserId(apiBase, token)
     const canonicalCode = readString(before.code) || input.code
     const type = readString(before.type) || 'balance'
     const value = readNumber(before.value) || 1
@@ -183,21 +221,16 @@ export async function consumeSub2ApiRedeemCode(input: ConsumeSub2ApiRedeemCodeIn
         user_id: redeemUserId,
         ...(groupId ? { group_id: groupId } : {}),
         ...(validityDays ? { validity_days: validityDays } : {}),
-        notes: `gpt-image-playground sync: user=${input.userId}, email=${input.email}`,
+        notes: `gpt-image-playground transaction=${input.transactionId ?? 'admin-test'} user=${input.userId}, email=${input.email}`,
       }),
       signal: controller.signal,
     })
-
-    const after = await findSub2ApiRedeemCode(apiBase, token, input.code)
-    const afterStatus = readString(after.status).toLowerCase()
-    if (afterStatus !== 'used' || !after.used_at) {
-      throw new HttpError(502, 'SUB2API_REDEEM_CONFIRM_FAILED', 'sub2api 兑换码核销后确认状态失败')
-    }
     return {
-      id: readNumber(after.id),
-      status: afterStatus,
-      usedBy: readNumber(after.used_by),
-      usedAt: readString(after.used_at),
+      external: true,
+      recovered: false,
+      id: readNumber(before.id),
+      usedBy: redeemUserId,
+      usedAt: new Date().toISOString(),
     }
   } catch (error) {
     if (error instanceof HttpError) {

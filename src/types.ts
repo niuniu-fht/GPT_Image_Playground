@@ -313,7 +313,7 @@ export interface AdminUserDetail {
   tasks: AdminGenerationTask[]
   ledgers: AdminCreditLedger[]
   loginLogs: AdminLoginLog[]
-  creditOrders: CreditOrder[]
+  redemptions: AdminUserRedemption[]
   supportTickets: SupportTicket[]
   auditLogs: AdminAuditLog[]
 }
@@ -355,6 +355,26 @@ export interface AdminUpstreamProvider {
     highQualityCostCredits2K: number
     highQualityCostCredits4K: number
   }>
+}
+
+export interface AdminUserRedemption {
+  id: string
+  redeemCodeId: string
+  userId: string
+  credits: number
+  balanceAfter: number
+  createdAt: string
+  redeemCode: {
+    code: string
+    name: string
+    status: 'active' | 'disabled'
+  }
+  transaction?: {
+    id: string
+    status: string
+    externalConsumed: boolean
+    externalUsedAt?: string | null
+  } | null
 }
 
 export interface AdminUpstreamTestResult {
@@ -417,6 +437,12 @@ export interface AdminGeneratedAssetCleanupResult {
   assetRecords: number
   r2Objects: number
   skippedAssets: number
+}
+
+export interface AdminTaskClearResult {
+  affected: number
+  skippedRunning: number
+  cleanup: AdminGeneratedAssetCleanupResult
 }
 
 export interface AdminAuditLog {
@@ -602,6 +628,7 @@ export interface AdminSquareShare {
 export interface AdminPlatformSettings {
   registerEnabled: boolean
   generationEnabled: boolean
+  generationTimeoutSeconds: number
   registerBonusCredits: number
   maintenanceMessage: string
   redeemDescription: string
@@ -686,6 +713,7 @@ export type TaskImageResult =
 
 export interface TaskResponseMeta {
   generationTaskId?: string | null
+  generationTimeoutSeconds?: number | null
   appliedImageParams?: AppliedImageParams | null
   imageResults?: TaskImageResult[] | null
   revisedPrompt?: string | null
@@ -790,6 +818,8 @@ export interface TaskRecord {
   generationRequestId?: string | null
   /** 服务端生成任务 ID；服务端接受请求后立即持久化，用于刷新和断线恢复 */
   generationTaskId?: string | null
+  /** 任务提交时固化的服务端总超时秒数 */
+  generationTimeoutSeconds?: number | null
   /** 任务提交时选中的供应商 ID */
   providerId?: string | null
   /** 任务提交时记录的供应商名称快照 */

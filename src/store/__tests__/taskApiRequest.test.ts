@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PlatformApiError } from '../../lib/platformApi'
 import type { TaskRecord } from '../../types'
-import { callTaskImageApi, isRetryableGenerationRequestError } from '../taskApiRequest'
+import {
+  callTaskImageApi,
+  GenerationSubmissionError,
+  GenerationTaskTimeoutError,
+  isRetryableGenerationRequestError,
+} from '../taskApiRequest'
 
 const platformMocks = vi.hoisted(() => ({
   generate: vi.fn(),
@@ -77,7 +82,7 @@ function createTask(patch: Partial<TaskRecord> = {}): TaskRecord {
     isAborted: false,
     status: 'running',
     error: null,
-    createdAt: 1,
+    createdAt: Date.now(),
     finishedAt: null,
     elapsed: null,
     ...patch,
@@ -91,7 +96,7 @@ function createDoneResult(taskId = 'remote-task-1') {
     images: [{ dataUrl: 'data:image/png;base64,AA==', mimeType: 'image/png' }],
     model: { id: 'model-1', displayName: 'Model', costCredits: 1 },
     user: null,
-    responseMeta: {},
+    responseMeta: { generationTimeoutSeconds: 300 },
   }
 }
 
@@ -129,8 +134,21 @@ describe('callTaskImageApi recovery', () => {
     expect(platformMocks.generate).toHaveBeenCalledTimes(2)
     expect(platformMocks.generate.mock.calls[0]?.[0].clientRequestId).toBe('request-1')
     expect(platformMocks.generate.mock.calls[1]?.[0].clientRequestId).toBe('request-1')
-    expect(onTaskAccepted).toHaveBeenCalledWith('remote-task-1')
+    expect(onTaskAccepted).toHaveBeenCalledWith('remote-task-1', 300)
     expect(result.images).toHaveLength(1)
+  })
+
+  it('stops submission after one idempotent confirmation retry', async () => {
+    platformMocks.generate.mockRejectedValue(
+      new PlatformApiError('network', { code: 'network_error', status: 0 }),
+    )
+
+    const pendingResult = callTaskImageApi(createTask(), {} as never)
+    const rejection = expect(pendingResult).rejects.toBeInstanceOf(GenerationSubmissionError)
+    await vi.advanceTimersByTimeAsync(2000)
+    await rejection
+
+    expect(platformMocks.generate).toHaveBeenCalledTimes(2)
   })
 
   it('retries a hung create request after aborting the timed out attempt', async () => {
@@ -192,6 +210,34 @@ describe('callTaskImageApi recovery', () => {
 
     expect(platformMocks.getGenerationTask).toHaveBeenCalledTimes(1)
     expect(result.responseMeta?.generationTaskId).toBe('remote-task-3')
+  })
+
+  it('stops before submission when the browser is offline', async () => {
+    vi.stubGlobal('navigator', { onLine: false })
+
+    await expect(callTaskImageApi(createTask(), {} as never)).rejects.toBeInstanceOf(
+      GenerationSubmissionError,
+    )
+    expect(platformMocks.generate).not.toHaveBeenCalled()
+  })
+
+  it('stops polling when the configured task deadline is reached', async () => {
+    platformMocks.getGenerationTask.mockResolvedValue({
+      ...createDoneResult('remote-task-timeout'),
+      status: 'running',
+      images: [],
+    })
+    const pendingResult = callTaskImageApi(
+      createTask({
+        generationTaskId: 'remote-task-timeout',
+        generationTimeoutSeconds: 30,
+      }),
+      {} as never,
+    )
+    const rejection = expect(pendingResult).rejects.toBeInstanceOf(GenerationTaskTimeoutError)
+
+    await vi.advanceTimersByTimeAsync(31_000)
+    await rejection
   })
 
   it('keeps the task running while login is restored', async () => {

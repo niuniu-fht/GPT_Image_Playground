@@ -1,10 +1,10 @@
-import { putTask } from '../lib/db'
+import { deleteTask, putTask } from '../lib/db'
 import type { TaskErrorDebugInfo, TaskRecord, TaskResponseMeta } from '../types'
 import { getTaskAborter, requestTaskAbort } from './taskAbort'
 import { useStore } from './state'
 import { resolveTaskAbortPlan, resolveTaskRetryPlan } from './taskRecords'
 import { genId } from './constants'
-import { updateTaskInStore } from './taskStoreUtils'
+import { clearTaskUiState, updateTaskInStore } from './taskStoreUtils'
 
 export interface EnqueueTaskRunOptions {
   focusDetail?: boolean
@@ -55,6 +55,28 @@ export async function enqueueTaskRun(
   if (options?.focusDetail) {
     setDetailTaskId(task.id)
   }
+}
+
+export async function discardUnsubmittedTaskRun(taskId: string): Promise<boolean> {
+  const { tasks, setTasks } = useStore.getState()
+  const task = tasks.find((item) => item.id === taskId)
+  if (!task || task.generationTaskId) {
+    return false
+  }
+
+  setTasks(tasks.filter((item) => item.id !== taskId))
+  clearTaskUiState(new Set([taskId]))
+  try {
+    await deleteTask(taskId)
+  } catch (error) {
+    console.error('[generation] failed to delete unsubmitted local task', error)
+    window.setTimeout(() => {
+      void deleteTask(taskId).catch((retryError: unknown) => {
+        console.error('[generation] failed to retry deleting unsubmitted local task', retryError)
+      })
+    }, 1000)
+  }
+  return true
 }
 
 export async function retryTaskRun(task: TaskRecord): Promise<RetryTaskRunResult> {
@@ -109,6 +131,7 @@ export function restartTaskRun(taskId: string) {
   updateTaskInStore(taskId, {
     generationRequestId: genId(),
     generationTaskId: null,
+    generationTimeoutSeconds: null,
     status: 'running',
     isAborted: false,
     error: null,

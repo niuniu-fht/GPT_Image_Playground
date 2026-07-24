@@ -79,6 +79,31 @@ function collectR2Keys(assets: GeneratedAssetForCleanup[]): string[] {
   )
 }
 
+function isSquareAssetPath(key: string): boolean {
+  const normalized = key.trim().replace(/^\/+/, '').toLowerCase()
+  return normalized.startsWith('shares/') || normalized.startsWith('demo-square/')
+}
+
+function isR2ObjectKey(key: string): boolean {
+  return !/^(?:https?:)?\/\//i.test(key) && !key.startsWith('data:')
+}
+
+async function collectSquareReferencedKeys(keys: string[]): Promise<Set<string>> {
+  if (!keys.length) return new Set()
+  const assets = await prisma.squareShareAsset.findMany({
+    where: {
+      OR: [
+        { r2Key: { in: keys } },
+        { thumbR2Key: { in: keys } },
+      ],
+    },
+    select: { r2Key: true, thumbR2Key: true },
+  })
+  return new Set(
+    assets.flatMap((asset) => [asset.r2Key, asset.thumbR2Key]).filter((key): key is string => Boolean(key)),
+  )
+}
+
 export async function cleanupGeneratedAssetsForTasks(taskIds: string[]): Promise<GeneratedAssetCleanupResult> {
   const uniqueTaskIds = Array.from(new Set(taskIds.filter(Boolean)))
   if (!uniqueTaskIds.length) {
@@ -90,11 +115,17 @@ export async function cleanupGeneratedAssetsForTasks(taskIds: string[]): Promise
     select: { id: true, taskId: true, r2Key: true },
   })
   const keys = collectR2Keys(assets)
-  const deletedObjects = await deleteR2Keys(keys)
+  const squareReferencedKeys = await collectSquareReferencedKeys(keys)
+  const deletableKeys = keys.filter((key) => (
+    isR2ObjectKey(key)
+    && !isSquareAssetPath(key)
+    && !squareReferencedKeys.has(key)
+  ))
+  const deletedObjects = await deleteR2Keys(deletableKeys)
 
   return {
     assetRecords: assets.length,
     r2Objects: deletedObjects,
-    skippedAssets: assets.length - keys.length,
+    skippedAssets: Math.max(0, assets.length - deletedObjects),
   }
 }

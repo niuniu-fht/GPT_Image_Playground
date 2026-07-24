@@ -5,7 +5,11 @@ import {
   isTaskAbortRequested,
 } from './taskAbort'
 import type { TaskApiOutputImageAsset } from './taskApiRequest'
-import { callTaskImageApi } from './taskApiRequest'
+import {
+  callTaskImageApi,
+  GenerationSubmissionError,
+  GenerationTaskTimeoutError,
+} from './taskApiRequest'
 import type { StoreApiError } from './contracts'
 import { isRecord } from '../lib/guards'
 import { platformApi } from '../lib/platformApi'
@@ -15,6 +19,7 @@ import { useStore } from './state'
 import {
   abortTaskRun,
   appendTaskRunOutputs,
+  discardUnsubmittedTaskRun,
   failTaskRun,
   succeedTaskRun,
 } from './taskRun'
@@ -215,6 +220,7 @@ async function executeTaskRun(taskId: string, requestSettings: AppSettings) {
 
   const outputIds: string[] = []
   let transientOutputCount = 0
+  let taskAccepted = Boolean(task.generationTaskId)
 
   try {
     throwIfTaskAbortRequested(taskId)
@@ -248,12 +254,19 @@ async function executeTaskRun(taskId: string, requestSettings: AppSettings) {
 
     throwIfTaskAbortRequested(taskId)
     const result = await callTaskImageApi(task, requestSettings, {
-      onTaskAccepted: async (generationTaskId) => {
+      onTaskAccepted: async (generationTaskId, generationTimeoutSeconds) => {
+        taskAccepted = true
         const currentTask = useStore.getState().tasks.find((item) => item.id === taskId)
-        if (currentTask?.generationTaskId === generationTaskId) {
+        if (
+          currentTask?.generationTaskId === generationTaskId &&
+          currentTask.generationTimeoutSeconds === generationTimeoutSeconds
+        ) {
           return
         }
-        const persistence = updateTaskInStore(taskId, { generationTaskId })
+        const persistence = updateTaskInStore(taskId, {
+          generationTaskId,
+          generationTimeoutSeconds,
+        })
         await persistence?.catch((error: unknown) => {
           console.warn('[generation] failed to persist remote task id; idempotent request recovery remains available', error)
         })
@@ -304,11 +317,20 @@ async function executeTaskRun(taskId: string, requestSettings: AppSettings) {
       return
     }
 
+    if (!taskAccepted && error instanceof GenerationSubmissionError) {
+      await discardUnsubmittedTaskRun(taskId)
+      useStore.getState().showToast(error.message, 'error')
+      return
+    }
+
     failTaskRun(taskId, {
       outputImageIds: outputIds,
       errorMessage: error instanceof Error ? error.message : String(error),
       errorDebug: buildTaskErrorDebugInfo(requestSettings, error),
     })
+    if (error instanceof GenerationTaskTimeoutError) {
+      useStore.getState().showToast(error.message, 'error')
+    }
     useStore.getState().setDetailTaskId(taskId)
   } finally {
     clearTaskAbortState(taskId)

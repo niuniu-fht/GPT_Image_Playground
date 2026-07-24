@@ -52,6 +52,7 @@ model User {
   ledgers       CreditLedger[]
   tasks         GenerationTask[]
   redemptions   CreditRedemption[]
+  redeemTransactions RedeemTransaction[]
   creditOrders  CreditOrder[]
   supportTickets SupportTicket[]
   loginLogs     LoginLog[]
@@ -157,6 +158,7 @@ model RedeemCode {
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
   redemptions    CreditRedemption[]
+  transactions   RedeemTransaction[]
 
   @@index([status, startsAt, endsAt])
 }
@@ -170,6 +172,8 @@ model CreditRedemption {
   createdAt      DateTime    @default(now())
   redeemCode     RedeemCode  @relation(fields: [redeemCodeId], references: [id], onDelete: Cascade)
   user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactionId  String?     @unique
+  transaction    RedeemTransaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
   @@index([redeemCodeId, createdAt])
@@ -280,6 +284,31 @@ model GenerationTask {
 
   @@index([userId, createdAt])
   @@unique([userId, clientRequestId])
+}
+
+model RedeemTransaction {
+  id               String            @id @default(cuid())
+  requestId        String            @unique
+  redeemCodeId     String
+  userId           String
+  code             String
+  name             String
+  credits          Int
+  status           String            @default("pending")
+  externalConsumed Boolean           @default(false)
+  externalCodeId   Int?
+  externalUserId   Int?
+  externalUsedAt   DateTime?
+  lastError        String            @default("") @db.Text
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  completedAt      DateTime?
+  redeemCode       RedeemCode        @relation(fields: [redeemCodeId], references: [id], onDelete: Restrict)
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  redemption       CreditRedemption?
+
+  @@index([userId, redeemCodeId, createdAt])
+  @@index([status, updatedAt])
 }
 
 model GeneratedAsset {

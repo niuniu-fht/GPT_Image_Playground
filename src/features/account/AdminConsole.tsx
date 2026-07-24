@@ -3,7 +3,6 @@ import { platformApi } from '../../lib/platformApi'
 import { useStore } from '../../store'
 import { AdminQuickSwitch } from './admin-console/AdminQuickSwitch'
 import { AuditDialog, AuditSection } from './admin-console/AuditSection'
-import { BillingSection } from './admin-console/BillingSection'
 import { GenerationLogsSection } from './admin-console/GenerationLogsSection'
 import { LoginLogDialog, LoginLogsSection } from './admin-console/LoginLogsSection'
 import { ModelConfigDrawer } from './admin-console/model-config/ModelConfigDrawer'
@@ -26,7 +25,6 @@ import {
   downloadCsv,
   EmptyState,
   emptyAnnouncementDraft,
-  emptyCreditPackageDraft,
   emptyModerationRuleDraft,
   emptyModelDraft,
   emptyRedeemCodeDraft,
@@ -57,7 +55,6 @@ import {
   type AdminEditor,
   type AdminTab,
   type AnnouncementDraft,
-  type CreditPackageDraft,
   type ModerationRuleDraft,
   type ModelDraft,
   type RedeemCodeDraft,
@@ -82,8 +79,6 @@ import type {
   AdminUsageReport,
   AdminUserDetail,
   AdminUserSummary,
-  CreditOrder,
-  CreditPackage,
   ModelConfig,
   ModerationRule,
   SupportTicket,
@@ -207,10 +202,6 @@ export default function AdminConsole() {
   const [redeemCodes, setRedeemCodes] = useState<AdminRedeemCode[]>([])
   const [redeemCodePage, setRedeemCodePage] = useState(1)
   const [redeemCodeTotal, setRedeemCodeTotal] = useState(0)
-  const [creditPackages, setCreditPackages] = useState<CreditPackage[]>([])
-  const [creditOrders, setCreditOrders] = useState<CreditOrder[]>([])
-  const [orderPage, setOrderPage] = useState(1)
-  const [orderTotal, setOrderTotal] = useState(0)
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([])
   const [ticketPage, setTicketPage] = useState(1)
   const [ticketTotal, setTicketTotal] = useState(0)
@@ -288,8 +279,6 @@ export default function AdminConsole() {
   const [ledgerTo, setLedgerTo] = useState('')
   const [redeemCodeQuery, setRedeemCodeQuery] = useState('')
   const [redeemCodeStatus, setRedeemCodeStatus] = useState('all')
-  const [orderQuery, setOrderQuery] = useState('')
-  const [orderStatus, setOrderStatus] = useState('all')
   const [ticketQuery, setTicketQuery] = useState('')
   const [ticketStatus, setTicketStatus] = useState('all')
   const [ticketPriority, setTicketPriority] = useState('all')
@@ -327,8 +316,6 @@ export default function AdminConsole() {
   const [announcementDraft, setAnnouncementDraft] = useState<AnnouncementDraft>(emptyAnnouncementDraft)
   const [editingRedeemCodeId, setEditingRedeemCodeId] = useState<string | null>(null)
   const [redeemCodeDraft, setRedeemCodeDraft] = useState<RedeemCodeDraft>(emptyRedeemCodeDraft)
-  const [editingCreditPackageId, setEditingCreditPackageId] = useState<string | null>(null)
-  const [creditPackageDraft, setCreditPackageDraft] = useState<CreditPackageDraft>(emptyCreditPackageDraft)
   const [editingModerationRuleId, setEditingModerationRuleId] = useState<string | null>(null)
   const [moderationRuleDraft, setModerationRuleDraft] = useState<ModerationRuleDraft>(emptyModerationRuleDraft)
   const [activeEditor, setActiveEditor] = useState<AdminEditor>(null)
@@ -378,22 +365,6 @@ export default function AdminConsole() {
     if (value.includes('Firefox/')) return 'Firefox'
     if (value.includes('Safari/')) return 'Safari'
     return value.slice(0, 32)
-  }
-
-  function orderStatusLabel(status: CreditOrder['status']) {
-    if (status === 'paid') return '已支付'
-    if (status === 'cancelled') return '已取消'
-    return '待确认'
-  }
-
-  function orderStatusTone(status: CreditOrder['status']): 'green' | 'amber' | 'gray' {
-    if (status === 'paid') return 'green'
-    if (status === 'cancelled') return 'gray'
-    return 'amber'
-  }
-
-  function formatPrice(cents: number, currency: string) {
-    return `${currency} ${(cents / 100).toFixed(2)}`
   }
 
   function confirmAdminAction(input: {
@@ -519,20 +490,6 @@ export default function AdminConsole() {
         })
         setRedeemCodes(result.items)
         setRedeemCodeTotal(result.total)
-      }
-      if (nextTab === 'billing') {
-        const [packagesResult, ordersResult] = await Promise.all([
-          platformApi.listAdminCreditPackages(),
-          platformApi.listAdminCreditOrders({
-            q: orderQuery,
-            status: orderStatus,
-            page: orderPage,
-            pageSize: adminPageSize,
-          }),
-        ])
-        setCreditPackages(packagesResult.items)
-        setCreditOrders(ordersResult.items)
-        setOrderTotal(ordersResult.total)
       }
       if (nextTab === 'tickets') {
         const result = await platformApi.listAdminSupportTickets({
@@ -784,18 +741,6 @@ export default function AdminConsole() {
   }, [redeemCodeQuery, redeemCodeStatus])
 
   useEffect(() => {
-    if (open && tab === 'billing') {
-      if (orderPage !== 1) {
-        setOrderPage(1)
-        return
-      }
-      setOrderPage(1)
-      const id = window.setTimeout(() => void loadAll('billing'), 300)
-      return () => window.clearTimeout(id)
-    }
-  }, [orderQuery, orderStatus])
-
-  useEffect(() => {
     if (open && tab === 'tickets') {
       if (ticketPage !== 1) {
         setTicketPage(1)
@@ -835,16 +780,39 @@ export default function AdminConsole() {
   }, [redeemCodePage])
 
   useEffect(() => {
-    if (open && tab === 'billing') void loadAll('billing')
-  }, [orderPage])
-
-  useEffect(() => {
     if (open && tab === 'tickets') void loadAll('tickets')
   }, [ticketPage])
 
   useEffect(() => {
     if (open && tab === 'tasks') void loadAll('tasks')
   }, [tasksPage])
+
+  useEffect(() => {
+    if (!open || tab !== 'tasks' || !tasks.some((task) => task.status === 'running')) return
+    let refreshing = false
+    const timer = window.setInterval(() => {
+      if (refreshing) return
+      refreshing = true
+      void platformApi.listAdminTasks({
+        status: taskStatus,
+        q: taskQuery,
+        modelConfigId: taskModelFilter,
+        from: taskFrom ? `${taskFrom}T00:00:00.000` : undefined,
+        to: taskTo ? `${taskTo}T23:59:59.999` : undefined,
+        page: tasksPage,
+        pageSize: adminPageSize,
+      }).then((result) => {
+        setTasks(result.items)
+        setTasksTotal(result.total)
+        setSelectedTaskIds((prev) => prev.filter((id) => result.items.some((item) => item.id === id)))
+      }).catch((error) => {
+        console.warn('[admin] failed to refresh running generation tasks', error)
+      }).finally(() => {
+        refreshing = false
+      })
+    }, 5_000)
+    return () => window.clearInterval(timer)
+  }, [open, tab, tasks.some((task) => task.status === 'running'), tasksPage, taskStatus, taskQuery, taskModelFilter, taskFrom, taskTo])
 
   useEffect(() => {
     if (open && tab === 'models') void loadAll('models')
@@ -900,13 +868,6 @@ export default function AdminConsole() {
       if (groupId === activeNavGroupId) return prev.includes(groupId) ? prev : [...prev, groupId]
       return prev.includes(groupId) ? prev.filter((id) => id !== groupId) : [...prev, groupId]
     })
-  }
-
-  function jumpToBilling(search = '', status = 'pending') {
-    setOrderQuery(search)
-    setOrderStatus(status)
-    setOrderPage(1)
-    setTab('billing')
   }
 
   function jumpToTickets(search = '', status = 'open', priority = 'all') {
@@ -1214,6 +1175,29 @@ export default function AdminConsole() {
     })
   }
 
+  async function clearAllTasks() {
+    confirmAdminAction({
+      title: '清空生成日志',
+      message: '确认清空全部已成功和已失败的生成日志？运行中任务、积分流水和广场图片会保留；只清理由生成任务独占的云端对象。',
+      confirmText: '确认清空',
+      action: async () => {
+        setTaskBatchOperating(true)
+        try {
+          const result = await platformApi.clearAdminTasks()
+          setSelectedTaskIds([])
+          setSelectedTaskId(null)
+          setTasksPage(1)
+          await loadAll('tasks')
+          showToast(`已清理 ${result.affected} 条日志，保留 ${result.skippedRunning} 条运行中任务，${formatTaskCleanupSummary(result.cleanup)}`, 'success')
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : '生成日志清空失败', 'error')
+        } finally {
+          setTaskBatchOperating(false)
+        }
+      },
+    })
+  }
+
   async function openTaskDetail(taskId: string) {
     setSelectedTaskId(taskId)
     setSelectedTaskDetail(null)
@@ -1398,22 +1382,6 @@ export default function AdminConsole() {
     setActiveEditor('redeemCode')
   }
 
-  function openCreditPackageEditor(pack?: CreditPackage) {
-    setEditingCreditPackageId(pack?.id ?? null)
-    setCreditPackageDraft(pack ? {
-      name: pack.name,
-      description: pack.description,
-      credits: pack.credits,
-      bonusCredits: pack.bonusCredits,
-      priceCents: pack.priceCents,
-      currency: pack.currency,
-      badge: pack.badge,
-      enabled: pack.enabled,
-      sortOrder: pack.sortOrder,
-    } : emptyCreditPackageDraft)
-    setActiveEditor('creditPackage')
-  }
-
   function openModerationRuleEditor(rule?: ModerationRule) {
     setEditingModerationRuleId(rule?.id ?? null)
     setModerationRuleDraft(rule ? {
@@ -1435,7 +1403,6 @@ export default function AdminConsole() {
     setEditingUpstreamId(null)
     setEditingAnnouncementId(null)
     setEditingRedeemCodeId(null)
-    setEditingCreditPackageId(null)
     setEditingModerationRuleId(null)
   }
 
@@ -1519,27 +1486,6 @@ export default function AdminConsole() {
           showToast('兑换码已保存', 'success')
         } catch (error) {
           showToast(error instanceof Error ? error.message : '兑换码保存失败', 'error')
-        }
-      },
-    })
-  }
-
-  async function saveCreditPackage(event: FormEvent) {
-    event.preventDefault()
-    confirmAdminAction({
-      title: editingCreditPackageId ? '保存积分套餐' : '创建积分套餐',
-      message: '确认保存当前套餐？上架套餐会展示给前台用户下单。',
-      confirmText: '保存',
-      action: async () => {
-        try {
-          if (editingCreditPackageId) await platformApi.updateAdminCreditPackage(editingCreditPackageId, creditPackageDraft)
-          else await platformApi.createAdminCreditPackage(creditPackageDraft)
-          closeEditor()
-          setCreditPackageDraft(emptyCreditPackageDraft)
-          await loadAll('billing')
-          showToast('积分套餐已保存', 'success')
-        } catch (error) {
-          showToast(error instanceof Error ? error.message : '积分套餐保存失败', 'error')
         }
       },
     })
@@ -1783,59 +1729,6 @@ export default function AdminConsole() {
           showToast('兑换码已删除或停用', 'success')
         } catch (error) {
           showToast(error instanceof Error ? error.message : '兑换码删除失败', 'error')
-        }
-      },
-    })
-  }
-
-  async function patchCreditPackage(id: string, input: Partial<CreditPackageDraft>) {
-    confirmAdminAction({
-      title: '修改积分套餐',
-      message: '确认修改该积分套餐？前台下单入口会按新配置展示。',
-      confirmText: '确认修改',
-      action: async () => {
-        try {
-          await platformApi.updateAdminCreditPackage(id, input)
-          await loadAll('billing')
-          showToast('积分套餐已更新', 'success')
-        } catch (error) {
-          showToast(error instanceof Error ? error.message : '积分套餐更新失败', 'error')
-        }
-      },
-    })
-  }
-
-  async function deleteCreditPackage(id: string) {
-    confirmAdminAction({
-      title: '删除积分套餐',
-      message: '确认删除该套餐？如果已有订单，系统会改为下架以保留历史。',
-      confirmText: '删除',
-      action: async () => {
-        try {
-          await platformApi.deleteAdminCreditPackage(id)
-          closeEditor()
-          await loadAll('billing')
-          showToast('积分套餐已删除或下架', 'success')
-        } catch (error) {
-          showToast(error instanceof Error ? error.message : '积分套餐删除失败', 'error')
-        }
-      },
-    })
-  }
-
-  async function patchCreditOrder(id: string, input: { status: 'paid' | 'cancelled'; adminNote?: string }) {
-    const label = input.status === 'paid' ? '确认该订单到账并给用户加积分？' : '确认取消该订单？'
-    confirmAdminAction({
-      title: input.status === 'paid' ? '确认订单到账' : '取消订单',
-      message: label,
-      confirmText: input.status === 'paid' ? '确认到账' : '取消订单',
-      action: async () => {
-        try {
-          await platformApi.updateAdminCreditOrder(id, input)
-          await Promise.all([loadAll('billing'), loadAll('credits')])
-          showToast(input.status === 'paid' ? '订单已确认，积分已到账' : '订单已取消', 'success')
-        } catch (error) {
-          showToast(error instanceof Error ? error.message : '订单处理失败', 'error')
         }
       },
     })
@@ -2136,14 +2029,6 @@ export default function AdminConsole() {
     const providerMax = Math.max(...(overview?.providerSummaries ?? []).map((item) => item._count?.models ?? 0), 1)
     const todoItems = [
       {
-        key: 'orders',
-        label: '待确认订单',
-        value: workbench?.pendingOrders ?? 0,
-        hint: '人工确认充值到账',
-        tone: 'amber' as const,
-        action: () => jumpToBilling(),
-      },
-      {
         key: 'tickets',
         label: '待处理工单',
         value: workbench?.openTickets ?? 0,
@@ -2230,28 +2115,7 @@ export default function AdminConsole() {
             ))}
           </div>
 
-          <div className="mt-4 grid gap-4 xl:grid-cols-4">
-            <div className="rounded-2xl border border-gray-100 p-3 dark:border-white/[0.06]">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">待确认订单</div>
-                <button type="button" onClick={() => jumpToBilling()} className="text-xs font-medium text-blue-600 hover:text-blue-700">处理</button>
-              </div>
-              <div className="space-y-2">
-                {workbench?.recentPendingOrders?.map((order) => (
-                  <button key={order.id} type="button" onClick={() => jumpToBilling(order.orderNo, 'pending')} className="w-full rounded-xl bg-gray-50 px-3 py-2 text-left text-sm transition hover:bg-white hover:shadow-sm dark:bg-white/[0.04] dark:hover:bg-white/[0.07]">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate font-medium text-gray-900 dark:text-gray-100">{order.user?.email ?? order.userId}</div>
-                        <div className="mt-0.5 truncate text-xs text-gray-400">{order.orderNo} · {order.packageName} · {formatPrice(order.priceCents, order.currency)}</div>
-                      </div>
-                      <span className="shrink-0 text-xs font-semibold text-amber-700">直达</span>
-                    </div>
-                  </button>
-                ))}
-                {overview && !workbench?.recentPendingOrders?.length && <EmptyState text="暂无待确认订单" />}
-              </div>
-            </div>
-
+          <div className="mt-4 grid gap-4 xl:grid-cols-3">
             <div className="rounded-2xl border border-gray-100 p-3 dark:border-white/[0.06]">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">待处理工单</div>
@@ -2695,6 +2559,7 @@ export default function AdminConsole() {
         to={taskTo}
         selectedIds={selectedTaskIds}
         batchOperating={taskBatchOperating}
+        clearAllOperating={taskBatchOperating}
         setQuery={setTaskQuery}
         setStatus={setTaskStatus}
         setModelFilter={setTaskModelFilter}
@@ -2705,6 +2570,7 @@ export default function AdminConsole() {
         onTogglePage={toggleCurrentPageTasks}
         onClearSelection={() => setSelectedTaskIds([])}
         onBatchDelete={() => void batchDeleteTasks()}
+        onClearAll={() => void clearAllTasks()}
         onOpenDetail={(taskId) => void openTaskDetail(taskId)}
         onDelete={(taskId) => void deleteTask(taskId)}
       />
@@ -3030,6 +2896,22 @@ export default function AdminConsole() {
                   </span>
                   <input type="checkbox" checked={settingsDraft.generationEnabled} onChange={(event) => setSettingsDraft((prev) => ({ ...prev, generationEnabled: event.target.checked }))} />
                 </label>
+                <label className="rounded-2xl border border-gray-200 px-4 py-3 dark:border-white/[0.08]">
+                  <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">生成超时</span>
+                  <span className="mt-0.5 block text-xs text-gray-400">新任务超过该时长后终止并退回积分</span>
+                  <div className="mt-3 flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={30}
+                      max={1800}
+                      step={10}
+                      value={settingsDraft.generationTimeoutSeconds}
+                      onChange={(event) => setSettingsDraft((prev) => ({ ...prev, generationTimeoutSeconds: Number(event.target.value) }))}
+                      className="h-10 w-32 rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+                    />
+                    <span className="text-sm text-gray-500">秒</span>
+                  </div>
+                </label>
               </div>
             </div>
 
@@ -3158,6 +3040,7 @@ export default function AdminConsole() {
             <div className="mt-4 space-y-3 text-sm">
               <div className="flex items-center justify-between"><span className="text-gray-500">注册</span><StatusBadge tone={settingsDraft.registerEnabled ? 'green' : 'red'}>{settingsDraft.registerEnabled ? '开放' : '关闭'}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">生成</span><StatusBadge tone={settingsDraft.generationEnabled ? 'green' : 'red'}>{settingsDraft.generationEnabled ? '开放' : '维护'}</StatusBadge></div>
+              <div className="flex items-center justify-between"><span className="text-gray-500">生成超时</span><span className="font-semibold text-gray-900 dark:text-gray-100">{settingsDraft.generationTimeoutSeconds} 秒</span></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">注册送分</span><span className="font-semibold text-amber-700">{settingsDraft.registerBonusCredits}</span></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">兑换说明</span><StatusBadge tone={settingsDraft.redeemDescription.trim() ? 'green' : 'gray'}>{settingsDraft.redeemDescription.trim() ? '已配置' : '不显示'}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">sub2api 校验</span><StatusBadge tone={settingsDraft.sub2apiRedeemEnabled ? 'blue' : 'gray'}>{settingsDraft.sub2apiRedeemEnabled ? '启用' : '关闭'}</StatusBadge></div>
@@ -3531,43 +3414,28 @@ export default function AdminConsole() {
 
               <div className="grid gap-4 xl:grid-cols-2">
                 <div>
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">最近订单</div>
-                      <div className="mt-0.5 text-xs text-gray-400">充值套餐、支付状态和到账积分。</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUserDialogMode(null)
-                        setOrderQuery(selected.email)
-                        setOrderStatus('all')
-                        setOrderPage(1)
-                        setTab('billing')
-                      }}
-                      className="h-8 shrink-0 rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-600 transition hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]"
-                    >
-                      查看全部
-                    </button>
+                  <div className="mb-2">
+                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">兑换码使用记录</div>
+                    <div className="mt-0.5 text-xs text-gray-400">展示兑换码、到账积分、兑换后余额和远端核销状态。</div>
                   </div>
                   <div className="space-y-2">
-                    {selectedUserDetail?.creditOrders.map((order) => (
-                      <div key={order.id} className="rounded-xl border border-gray-100 px-3 py-2 text-sm dark:border-white/[0.06]">
+                    {selectedUserDetail?.redemptions.map((redemption) => (
+                      <div key={redemption.id} className="rounded-xl border border-gray-100 px-3 py-2 text-sm dark:border-white/[0.06]">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="truncate font-semibold text-gray-900 dark:text-gray-100">{order.packageName}</div>
-                            <div className="mt-1 truncate text-xs text-gray-400">{order.orderNo} · {formatTime(order.createdAt)}</div>
+                            <div className="truncate font-semibold text-gray-900 dark:text-gray-100">{redemption.redeemCode.name || '未命名兑换码'}</div>
+                            <div className="mt-1 truncate font-mono text-xs text-gray-400" title={redemption.redeemCode.code}>{redemption.redeemCode.code} · {formatTime(redemption.createdAt)}</div>
                           </div>
-                          <StatusBadge tone={orderStatusTone(order.status)}>{orderStatusLabel(order.status)}</StatusBadge>
+                          <span className="shrink-0 font-semibold text-emerald-700 dark:text-emerald-300">+{redemption.credits}</span>
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                          <span>{formatPrice(order.priceCents, order.currency)}</span>
-                          <span>{order.totalCredits} 积分</span>
-                          <span>{order.paymentMethod}</span>
+                          <span>兑换后余额 {redemption.balanceAfter}</span>
+                          <StatusBadge tone={redemption.transaction?.externalConsumed ? 'blue' : 'gray'}>{redemption.transaction?.externalConsumed ? '远端已核销' : redemption.transaction ? '本地事务' : '历史记录'}</StatusBadge>
+                          <StatusBadge tone="green">已到账</StatusBadge>
                         </div>
                       </div>
                     ))}
-                    {selectedUserDetail && !selectedUserDetail.creditOrders.length && <EmptyState text="该用户暂无订单" />}
+                    {selectedUserDetail && !selectedUserDetail.redemptions.length && <EmptyState text="该用户暂无兑换码使用记录" />}
                   </div>
                 </div>
 
@@ -3832,7 +3700,6 @@ export default function AdminConsole() {
                 {activeEditor === 'upstream' && (editingUpstreamId ? '编辑上游渠道' : '新增上游渠道')}
                 {activeEditor === 'announcement' && (editingAnnouncementId ? '编辑公告' : '新增公告')}
                 {activeEditor === 'redeemCode' && (editingRedeemCodeId ? '编辑兑换码' : '新增兑换码')}
-                {activeEditor === 'creditPackage' && (editingCreditPackageId ? '编辑积分套餐' : '新增积分套餐')}
                 {activeEditor === 'moderationRule' && (editingModerationRuleId ? '编辑风控规则' : '新增风控规则')}
               </div>
               <div className="mt-1 text-sm text-gray-500">保存后会同步刷新当前列表。</div>
@@ -4027,58 +3894,6 @@ export default function AdminConsole() {
                 {editingRedeemCodeId && <button type="button" onClick={() => void deleteRedeemCode(editingRedeemCodeId)} className="h-10 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-600 hover:bg-rose-50 dark:border-rose-400/20 dark:hover:bg-rose-400/10">删除</button>}
                 <button type="button" onClick={closeEditor} className="h-10 flex-1 rounded-xl border border-gray-200 text-sm font-medium hover:bg-gray-50 dark:border-white/[0.08] dark:hover:bg-white/[0.06]">取消</button>
                 <button className="h-10 flex-1 rounded-xl bg-slate-950 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-gray-950">保存兑换码</button>
-              </div>
-            </form>
-          )}
-
-          {activeEditor === 'creditPackage' && (
-            <form onSubmit={saveCreditPackage} className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block text-xs font-semibold text-gray-500">
-                  套餐名称
-                  <input value={creditPackageDraft.name} onChange={(event) => setCreditPackageDraft((prev) => ({ ...prev, name: event.target.value }))} placeholder="创作者套餐" className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" required />
-                </label>
-                <label className="block text-xs font-semibold text-gray-500">
-                  标签
-                  <input value={creditPackageDraft.badge} onChange={(event) => setCreditPackageDraft((prev) => ({ ...prev, badge: event.target.value }))} placeholder="热门 / 高性价比" className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" />
-                </label>
-              </div>
-              <label className="block text-xs font-semibold text-gray-500">
-                说明
-                <textarea value={creditPackageDraft.description} onChange={(event) => setCreditPackageDraft((prev) => ({ ...prev, description: event.target.value }))} rows={4} placeholder="用于前台充值弹窗展示" className="mt-1.5 w-full resize-none rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-normal leading-6 text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" />
-              </label>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <label className="block text-xs font-semibold text-gray-500">
-                  基础积分
-                  <input type="number" min={1} value={creditPackageDraft.credits} onChange={(event) => setCreditPackageDraft((prev) => ({ ...prev, credits: Number(event.target.value) }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" />
-                </label>
-                <label className="block text-xs font-semibold text-gray-500">
-                  赠送积分
-                  <input type="number" min={0} value={creditPackageDraft.bonusCredits} onChange={(event) => setCreditPackageDraft((prev) => ({ ...prev, bonusCredits: Number(event.target.value) }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" />
-                </label>
-                <label className="block text-xs font-semibold text-gray-500">
-                  价格（分）
-                  <input type="number" min={0} value={creditPackageDraft.priceCents} onChange={(event) => setCreditPackageDraft((prev) => ({ ...prev, priceCents: Number(event.target.value) }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" />
-                </label>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block text-xs font-semibold text-gray-500">
-                  币种
-                  <input value={creditPackageDraft.currency} onChange={(event) => setCreditPackageDraft((prev) => ({ ...prev, currency: event.target.value.toUpperCase() }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" />
-                </label>
-                <label className="block text-xs font-semibold text-gray-500">
-                  排序
-                  <input type="number" value={creditPackageDraft.sortOrder} onChange={(event) => setCreditPackageDraft((prev) => ({ ...prev, sortOrder: Number(event.target.value) }))} className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100" />
-                </label>
-              </div>
-              <label className="flex items-center justify-between rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-white/[0.08]">
-                前台上架
-                <input type="checkbox" checked={creditPackageDraft.enabled} onChange={(event) => setCreditPackageDraft((prev) => ({ ...prev, enabled: event.target.checked }))} />
-              </label>
-              <div className="sticky bottom-0 -mx-5 mt-6 flex gap-2 border-t border-gray-100 bg-white px-5 py-4 dark:border-white/[0.08] dark:bg-gray-900">
-                {editingCreditPackageId && <button type="button" onClick={() => void deleteCreditPackage(editingCreditPackageId)} className="h-10 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-600 hover:bg-rose-50 dark:border-rose-400/20 dark:hover:bg-rose-400/10">删除</button>}
-                <button type="button" onClick={closeEditor} className="h-10 flex-1 rounded-xl border border-gray-200 text-sm font-medium hover:bg-gray-50 dark:border-white/[0.08] dark:hover:bg-white/[0.06]">取消</button>
-                <button className="h-10 flex-1 rounded-xl bg-slate-950 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-gray-950">保存套餐</button>
               </div>
             </form>
           )}
@@ -4304,23 +4119,6 @@ export default function AdminConsole() {
                 patchRedeemCode={(id, input) => void patchRedeemCode(id, input)}
                 deleteRedeemCode={(id) => void deleteRedeemCode(id)}
                 onBatchCreated={() => loadAll('redeemCodes')}
-              />
-            )}
-            {tab === 'billing' && (
-              <BillingSection
-                creditPackages={creditPackages}
-                creditOrders={creditOrders}
-                orderQuery={orderQuery}
-                orderStatus={orderStatus}
-                orderPage={orderPage}
-                orderTotal={orderTotal}
-                setOrderQuery={setOrderQuery}
-                setOrderStatus={setOrderStatus}
-                setOrderPage={setOrderPage}
-                openPackageEditor={openCreditPackageEditor}
-                patchPackage={(id, input) => void patchCreditPackage(id, input)}
-                deletePackage={(id) => void deleteCreditPackage(id)}
-                patchOrder={(id, input) => void patchCreditOrder(id, input)}
               />
             )}
             {tab === 'tickets' && (

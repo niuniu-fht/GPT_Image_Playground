@@ -8,20 +8,18 @@ import type {
   AdminUpstreamProvider,
   AdminUpstreamTestResult,
   AdminUserSummary,
-  CreditPackage,
   ModelConfig,
   ModerationRule,
   SupportTicket,
 } from '../../../types'
 
-export type AdminTab = 'overview' | 'reports' | 'users' | 'loginLogs' | 'credits' | 'redeemCodes' | 'billing' | 'tickets' | 'moderation' | 'tasks' | 'models' | 'upstreams' | 'square' | 'announcements' | 'settings' | 'audit'
-export type AdminEditor = 'model' | 'upstream' | 'announcement' | 'redeemCode' | 'creditPackage' | 'moderationRule' | null
+export type AdminTab = 'overview' | 'reports' | 'users' | 'loginLogs' | 'credits' | 'redeemCodes' | 'tickets' | 'moderation' | 'tasks' | 'models' | 'upstreams' | 'square' | 'announcements' | 'settings' | 'audit'
+export type AdminEditor = 'model' | 'upstream' | 'announcement' | 'redeemCode' | 'moderationRule' | null
 
 export type ModelDraft = Omit<ModelConfig, 'id' | 'createdAt' | 'updatedAt' | 'upstreamProvider'>
 export type UpstreamDraft = Omit<AdminUpstreamProvider, 'id' | 'createdAt' | 'updatedAt' | '_count' | 'models' | 'lastCheckedAt' | 'lastHealthStatus' | 'lastLatencyMs' | 'lastHttpStatus' | 'lastHealthMessage'>
 export type AnnouncementDraft = Omit<AdminAnnouncement, 'id' | 'createdAt' | 'updatedAt'>
 export type RedeemCodeDraft = Omit<AdminRedeemCode, 'id' | 'createdAt' | 'updatedAt' | 'usedCount' | '_count' | 'redemptions'>
-export type CreditPackageDraft = Omit<CreditPackage, 'id' | 'createdAt' | 'updatedAt' | '_count'>
 export type ModerationRuleDraft = Omit<ModerationRule, 'id' | 'createdAt' | 'updatedAt' | 'hitCount' | 'lastHitAt'>
 
 export type AdminNavItem = { id: AdminTab; label: string; caption: string }
@@ -44,7 +42,6 @@ export const navGroups: Array<{ id: string; label: string; caption: string; item
       { id: 'users', label: '用户与积分', caption: '账号、余额、权限' },
       { id: 'loginLogs', label: '登录日志', caption: '账号安全、失败排查' },
       { id: 'credits', label: '积分流水', caption: '收入、消耗、退回' },
-      { id: 'billing', label: '套餐订单', caption: '充值、确认、套餐' },
       { id: 'redeemCodes', label: '兑换码', caption: '活动发放、补贴' },
       { id: 'tickets', label: '反馈工单', caption: '客服、问题、投诉' },
     ],
@@ -135,17 +132,6 @@ export const emptyRedeemCodeDraft: RedeemCodeDraft = {
   note: '',
 }
 
-export const emptyCreditPackageDraft: CreditPackageDraft = {
-  name: '',
-  description: '',
-  credits: 100,
-  bonusCredits: 0,
-  priceCents: 990,
-  currency: 'CNY',
-  badge: '',
-  enabled: true,
-  sortOrder: 100,
-}
 
 export const emptyModerationRuleDraft: ModerationRuleDraft = {
   name: '',
@@ -161,6 +147,7 @@ export const emptyModerationRuleDraft: ModerationRuleDraft = {
 export const defaultSettingsDraft: AdminPlatformSettings = {
   registerEnabled: true,
   generationEnabled: true,
+  generationTimeoutSeconds: 300,
   registerBonusCredits: 100,
   maintenanceMessage: '',
   redeemDescription: '活动码和客服补偿码会立即到账，并写入积分流水。',

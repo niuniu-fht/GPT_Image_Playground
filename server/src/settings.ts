@@ -4,6 +4,7 @@ import { prisma } from './prisma.js'
 export interface PlatformSettings {
   registerEnabled: boolean
   generationEnabled: boolean
+  generationTimeoutSeconds: number
   registerBonusCredits: number
   maintenanceMessage: string
   redeemDescription: string
@@ -58,6 +59,7 @@ export const defaultLandingHeroSlides = [
 export const defaultPlatformSettings: PlatformSettings = {
   registerEnabled: true,
   generationEnabled: true,
+  generationTimeoutSeconds: 300,
   registerBonusCredits: env.registerBonusCredits,
   maintenanceMessage: '',
   redeemDescription: '活动码和客服补偿码会立即到账，并写入积分流水。',
@@ -77,12 +79,22 @@ function parseNumber(value: string | undefined, fallback: number) {
   return Number.isFinite(next) ? next : fallback
 }
 
+export function normalizeGenerationTimeoutSeconds(value: number): number {
+  if (!Number.isFinite(value)) {
+    return defaultPlatformSettings.generationTimeoutSeconds
+  }
+  return Math.min(1800, Math.max(30, Math.floor(value)))
+}
+
 export async function getPlatformSettings(): Promise<PlatformSettings> {
   const rows = await prisma.platformSetting.findMany()
   const map = new Map(rows.map((row) => [row.key, row.value]))
   return {
     registerEnabled: parseBoolean(map.get('registerEnabled'), defaultPlatformSettings.registerEnabled),
     generationEnabled: parseBoolean(map.get('generationEnabled'), defaultPlatformSettings.generationEnabled),
+    generationTimeoutSeconds: normalizeGenerationTimeoutSeconds(
+      parseNumber(map.get('generationTimeoutSeconds'), defaultPlatformSettings.generationTimeoutSeconds),
+    ),
     registerBonusCredits: parseNumber(map.get('registerBonusCredits'), defaultPlatformSettings.registerBonusCredits),
     maintenanceMessage: map.get('maintenanceMessage') ?? defaultPlatformSettings.maintenanceMessage,
     redeemDescription: map.get('redeemDescription') ?? defaultPlatformSettings.redeemDescription,
@@ -107,6 +119,7 @@ export async function upsertPlatformSettings(input: Partial<PlatformSettings>) {
   const entries: Array<[keyof PlatformSettings, string]> = []
   if (typeof input.registerEnabled === 'boolean') entries.push(['registerEnabled', String(input.registerEnabled)])
   if (typeof input.generationEnabled === 'boolean') entries.push(['generationEnabled', String(input.generationEnabled)])
+  if (typeof input.generationTimeoutSeconds === 'number') entries.push(['generationTimeoutSeconds', String(normalizeGenerationTimeoutSeconds(input.generationTimeoutSeconds))])
   if (typeof input.registerBonusCredits === 'number') entries.push(['registerBonusCredits', String(input.registerBonusCredits)])
   if (typeof input.maintenanceMessage === 'string') entries.push(['maintenanceMessage', input.maintenanceMessage])
   if (typeof input.redeemDescription === 'string') entries.push(['redeemDescription', input.redeemDescription])
@@ -131,6 +144,7 @@ export async function seedMissingPlatformSettings(input: PlatformSettings) {
   const entries: Array<[keyof PlatformSettings, string]> = [
     ['registerEnabled', String(input.registerEnabled)],
     ['generationEnabled', String(input.generationEnabled)],
+    ['generationTimeoutSeconds', String(normalizeGenerationTimeoutSeconds(input.generationTimeoutSeconds))],
     ['registerBonusCredits', String(input.registerBonusCredits)],
     ['maintenanceMessage', input.maintenanceMessage],
     ['redeemDescription', input.redeemDescription],

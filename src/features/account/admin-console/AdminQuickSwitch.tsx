@@ -16,7 +16,6 @@ const tabKeywords: Partial<Record<AdminTab, string>> = {
   loginLogs: '登录 日志 安全 IP 失败 login security',
   credits: '积分 流水 扣费 退款 credit ledger balance',
   redeemCodes: '兑换码 卡券 卡密 优惠码 批量 发码 redeem coupon code',
-  billing: '套餐 订单 充值 支付 billing order package',
   tickets: '反馈 工单 客服 投诉 support ticket service',
   moderation: '风控 敏感词 审核 拦截 moderation keyword',
   square: '广场 图片 分享 审核 square gallery share',

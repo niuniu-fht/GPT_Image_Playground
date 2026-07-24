@@ -3,6 +3,7 @@ import type {
   AdminAuditLog,
   AdminCreditLedger,
   AdminGeneratedAssetCleanupResult,
+  AdminTaskClearResult,
   AdminGenerationTask,
   AdminLoginLog,
   AdminPlatformSettings,
@@ -346,7 +347,7 @@ export const platformApi = {
     })
   },
 
-  redeemCredits(input: { code: string }) {
+  redeemCredits(input: { code: string; requestId: string }) {
     return request<{
       user: CurrentUser
       redeemCode: { id: string; code: string; name: string; credits: number }
@@ -562,6 +563,12 @@ export const platformApi = {
     return request<{ affected: number; cleanup: AdminGeneratedAssetCleanupResult }>('/api/admin/tasks/batch/delete', {
       method: 'POST',
       body: JSON.stringify({ ids }),
+    })
+  },
+
+  clearAdminTasks() {
+    return request<AdminTaskClearResult>('/api/admin/tasks/clear', {
+      method: 'POST',
     })
   },
 

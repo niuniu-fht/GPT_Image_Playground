@@ -5,6 +5,10 @@ import sharp from 'sharp'
 import { z } from 'zod'
 import { requireUser, resLocals } from '../auth.js'
 import { env } from '../env.js'
+import {
+  getGenerationTimeoutMessage,
+  readStoredGenerationTimeoutSeconds,
+} from '../generationTimeout.js'
 import { HttpError, sendOk } from '../http.js'
 import { isGptImage2Model, resolveModelCostForSize, supportsHighQualityPricing } from '../modelCost.js'
 import { prisma } from '../prisma.js'
@@ -51,6 +55,15 @@ type StoredGenerationImageResult =
 
 const GENERIC_GENERATION_FAILURE_MESSAGE = '生成失败，请稍后重试'
 const UPSTREAM_FALLBACK_RETRY_COUNT = 1
+const GENERATION_TIMEOUT_ERROR_CODE = 'generation_timeout'
+
+function createGenerationTimeoutError(timeoutSeconds: number): HttpError {
+  return new HttpError(504, GENERATION_TIMEOUT_ERROR_CODE, getGenerationTimeoutMessage(timeoutSeconds))
+}
+
+function isGenerationTimeoutError(error: unknown): boolean {
+  return error instanceof HttpError && error.code === GENERATION_TIMEOUT_ERROR_CODE
+}
 
 function publicUser(user: { id: string; email: string; role: string; creditBalance: number }) {
   return {
@@ -161,6 +174,7 @@ async function buildGenerationTaskResponse(task: GenerationTask) {
     user: latestUser ? publicUser(latestUser) : null,
     responseMeta: {
       pending: task.status === 'running',
+      generationTimeoutSeconds: readStoredGenerationTimeoutSeconds(task.params),
       squareUploadError: null,
       imageResults: normalizeTaskImageResults(task.outputImages, task.error, task.params),
       appliedImageParams: {
@@ -180,6 +194,9 @@ async function buildGenerationTaskResponse(task: GenerationTask) {
 
 function getGenerationFailureMessage(error: unknown): string {
   if (error instanceof HttpError) {
+    if (isGenerationTimeoutError(error)) {
+      return error.message
+    }
     if (error.status === 400) {
       return error.message || '请求参数不正确，请调整后重试'
     }
@@ -392,9 +409,10 @@ async function remoteImageUrlToDataUrl(
   url: string,
   fallbackMimeType: string,
   upstreamBaseUrl: string,
+  signal: AbortSignal,
 ): Promise<GeneratedImagePayload> {
   const resolvedUrl = resolveUpstreamImageUrl(url, upstreamBaseUrl)
-  const response = await fetch(resolvedUrl)
+  const response = await fetch(resolvedUrl, { signal })
   if (!response.ok) {
     throw new HttpError(response.status, 'upstream_image_download_failed', '上游图片下载失败，请稍后重试')
   }
@@ -420,7 +438,11 @@ async function remoteImageUrlToDataUrl(
   }
 }
 
-async function normalizeImageResponse(payload: unknown, upstreamBaseUrl: string): Promise<GeneratedImagePayload[]> {
+async function normalizeImageResponse(
+  payload: unknown,
+  upstreamBaseUrl: string,
+  signal: AbortSignal,
+): Promise<GeneratedImagePayload[]> {
   const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
   const data = Array.isArray(record.data) ? record.data : []
   const upstreamResponse = sanitizeUpstreamPayload(payload)
@@ -442,7 +464,7 @@ async function normalizeImageResponse(payload: unknown, upstreamBaseUrl: string)
   return Promise.all(
     images.map((image) => (
       /^(https?:\/\/|\/)/i.test(image.dataUrl)
-        ? remoteImageUrlToDataUrl(image.dataUrl, image.mimeType, upstreamBaseUrl).then((nextImage) => ({
+        ? remoteImageUrlToDataUrl(image.dataUrl, image.mimeType, upstreamBaseUrl, signal).then((nextImage) => ({
             ...nextImage,
             upstreamResponse: image.upstreamResponse,
           }))
@@ -578,6 +600,7 @@ function logUpstreamRequest(context: {
 async function callImagesApiOnce(
   input: GenerationInput,
   upstream: GenerationUpstream,
+  signal: AbortSignal,
 ) {
   if (!upstream.apiKey) {
     throw new HttpError(500, 'missing_upstream_key', '服务端尚未配置 OPENAI_API_KEY')
@@ -624,6 +647,7 @@ async function callImagesApiOnce(
       method: 'POST',
       headers,
       body: form,
+      signal,
     })
     const payload = await readUpstreamJsonWithLog(response, {
       endpoint: '/v1/images/edits',
@@ -636,7 +660,7 @@ async function callImagesApiOnce(
         : '上游图像编辑请求失败'
       throw new HttpError(response.status, 'upstream_error', message)
     }
-    return normalizeImageResponse(payload, baseUrl)
+    return normalizeImageResponse(payload, baseUrl, signal)
   }
 
   const body: Record<string, unknown> = {
@@ -666,6 +690,7 @@ async function callImagesApiOnce(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
+    signal,
   })
   const payload = await readUpstreamJsonWithLog(response, {
     endpoint: '/v1/images/generations',
@@ -678,17 +703,22 @@ async function callImagesApiOnce(
       : '上游图像生成请求失败'
     throw new HttpError(response.status, 'upstream_error', message)
   }
-  return normalizeImageResponse(payload, baseUrl)
+  return normalizeImageResponse(payload, baseUrl, signal)
 }
 
 async function callSingleImageApi(
   input: GenerationInput,
   upstream: GenerationUpstream,
+  signal: AbortSignal,
+  timeoutSeconds: number,
 ): Promise<GeneratedImagePayload> {
   let lastError: unknown = null
   for (let attempt = 0; attempt <= UPSTREAM_FALLBACK_RETRY_COUNT; attempt += 1) {
     try {
-      const images = await callImagesApiOnce(withImageCount(input, 1), upstream)
+      if (signal.aborted) {
+        throw createGenerationTimeoutError(timeoutSeconds)
+      }
+      const images = await callImagesApiOnce(withImageCount(input, 1), upstream, signal)
       const image = images[0]
       if (!image) {
         throw new HttpError(502, 'upstream_no_images', GENERIC_GENERATION_FAILURE_MESSAGE)
@@ -696,6 +726,9 @@ async function callSingleImageApi(
       return image
     } catch (error) {
       lastError = error
+      if (signal.aborted) {
+        throw createGenerationTimeoutError(timeoutSeconds)
+      }
       if (attempt >= UPSTREAM_FALLBACK_RETRY_COUNT || !shouldFallbackRetryGeneration(error)) {
         throw error
       }
@@ -714,15 +747,21 @@ async function callSingleImageApi(
 async function callImagesApi(
   input: GenerationInput,
   upstream: GenerationUpstream,
+  signal: AbortSignal,
+  timeoutSeconds: number,
 ) {
   const requestedCount = clampImageCount(input.params.n)
   const settled = await Promise.allSettled(
     Array.from({ length: requestedCount }, (_item, index) => (
-      callSingleImageApi(input, upstream).then((image) => ({ image, index }))
+      callSingleImageApi(input, upstream, signal, timeoutSeconds).then((image) => ({ image, index }))
     )),
   )
   const imageResults: GenerationImageResult[] = []
   const images: GeneratedImagePayload[] = []
+
+  if (signal.aborted) {
+    throw createGenerationTimeoutError(timeoutSeconds)
+  }
 
   settled.forEach((result, fallbackIndex) => {
     const index = result.status === 'fulfilled' ? result.value.index : fallbackIndex
@@ -777,11 +816,19 @@ async function refundFailedGeneration(input: {
   userId: string
 }) {
   await prisma.$transaction(async (tx) => {
-    const currentTask = await tx.generationTask.findFirst({
-      where: { id: input.taskId, userId: input.userId },
-      select: { status: true },
+    const failed = await tx.generationTask.updateMany({
+      where: {
+        id: input.taskId,
+        userId: input.userId,
+        status: 'running',
+      },
+      data: {
+        status: 'error',
+        error: getGenerationFailureMessage(input.error),
+        finishedAt: new Date(),
+      },
     })
-    if (!currentTask || currentTask.status !== 'running') {
+    if (failed.count === 0) {
       return
     }
 
@@ -794,17 +841,9 @@ async function refundFailedGeneration(input: {
       data: {
         userId: input.userId,
         delta: input.costCredits,
-        reason: '生成失败退回积分',
+        reason: isGenerationTimeoutError(input.error) ? '生成超时退回积分' : '生成失败退回积分',
         taskId: input.taskId,
         balanceAfter: latestUser.creditBalance,
-      },
-    })
-    await tx.generationTask.update({
-      where: { id: input.taskId },
-      data: {
-        status: 'error',
-        error: getGenerationFailureMessage(input.error),
-        finishedAt: new Date(),
       },
     })
   })
@@ -812,13 +851,35 @@ async function refundFailedGeneration(input: {
 
 async function runGenerationTask(input: {
   costCredits: number
+  generationDeadlineAt: number
   generationInput: GenerationInput
+  generationTimeoutSeconds: number
   model: GenerationModel
   taskId: string
   userId: string
 }) {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => {
+    controller.abort()
+  }, Math.max(0, input.generationDeadlineAt - Date.now()))
+
   try {
-    const generationResult = await callImagesApi(input.generationInput, resolveGenerationUpstream(input.model))
+    const currentTask = await prisma.generationTask.findUnique({
+      where: { id: input.taskId },
+      select: { status: true },
+    })
+    if (!currentTask || currentTask.status !== 'running') {
+      return
+    }
+    const generationResult = await callImagesApi(
+      input.generationInput,
+      resolveGenerationUpstream(input.model),
+      controller.signal,
+      input.generationTimeoutSeconds,
+    )
+    if (controller.signal.aborted) {
+      throw createGenerationTimeoutError(input.generationTimeoutSeconds)
+    }
     const imagePayloads = await Promise.all(generationResult.images.map(async (image, index) => ({
       image: {
         ...image,
@@ -827,6 +888,9 @@ async function runGenerationTask(input: {
       } satisfies StoredGenerationImageResult,
       previewDataUrl: await createGeneratedImagePreview(image.dataUrl),
     })))
+    if (controller.signal.aborted) {
+      throw createGenerationTimeoutError(input.generationTimeoutSeconds)
+    }
     const images = imagePayloads.map((item) => item.image)
     const failedImages = generationResult.imageResults
       .filter((item): item is Extract<GenerationImageResult, { status: 'error' }> => item.status === 'error')
@@ -850,6 +914,9 @@ async function runGenerationTask(input: {
       : 0
     const chargedCredits = input.costCredits - refundCredits
 
+    if (controller.signal.aborted) {
+      throw createGenerationTimeoutError(input.generationTimeoutSeconds)
+    }
     await prisma.$transaction(async (tx) => {
       const currentTask = await tx.generationTask.findUnique({
         where: { id: input.taskId },
@@ -860,6 +927,27 @@ async function runGenerationTask(input: {
           taskId: input.taskId,
           status: currentTask?.status ?? 'missing',
         })
+        return
+      }
+      if (controller.signal.aborted) {
+        throw createGenerationTimeoutError(input.generationTimeoutSeconds)
+      }
+      const completed = await tx.generationTask.updateMany({
+        where: {
+          id: input.taskId,
+          status: 'running',
+        },
+        data: {
+          status: 'done',
+          costCredits: chargedCredits,
+          error: null,
+          params: mergeAdminReturnParams(currentTask.params, generationResult),
+          outputImages,
+          outputPreviews,
+          finishedAt: new Date(),
+        },
+      })
+      if (completed.count === 0) {
         return
       }
       if (refundCredits > 0) {
@@ -878,35 +966,28 @@ async function runGenerationTask(input: {
           },
         })
       }
-      await tx.generationTask.update({
-        where: { id: input.taskId },
-        data: {
-          status: 'done',
-          costCredits: chargedCredits,
-          error: null,
-          params: mergeAdminReturnParams(currentTask?.params ?? input.generationInput.params, generationResult),
-          outputImages,
-          outputPreviews,
-          finishedAt: new Date(),
-        },
-      })
     })
   } catch (error) {
+    const taskError = controller.signal.aborted
+      ? createGenerationTimeoutError(input.generationTimeoutSeconds)
+      : error
     console.error('[generation] async task failed', {
       taskId: input.taskId,
-      error,
+      error: taskError,
     })
     await refundFailedGeneration({
       taskId: input.taskId,
       userId: input.userId,
       costCredits: input.costCredits,
-      error,
+      error: taskError,
     }).catch((refundError: unknown) => {
       console.error('[generation] failed to refund failed task', {
         taskId: input.taskId,
         refundError,
       })
     })
+  } finally {
+    clearTimeout(timeoutId)
   }
 }
 
@@ -964,7 +1045,10 @@ router.post('/', requireUser, async (req, res, next) => {
         quality: resolveEffectiveQuality(model, input.params.quality),
       },
     }
-    const adminTaskMeta = await createAdminTaskMeta(generationInput)
+    const adminTaskMeta = {
+      ...await createAdminTaskMeta(generationInput),
+      generationTimeoutSeconds: settings.generationTimeoutSeconds,
+    }
     const requestedCount = clampImageCount(generationInput.params.n)
     const costCredits = resolveModelCostForSize(model, generationInput.params.size, generationInput.params.quality) * requestedCount
     let shouldStartGeneration = true
@@ -1048,6 +1132,7 @@ router.post('/', requireUser, async (req, res, next) => {
       user: latestUser ? publicUser(latestUser) : null,
       responseMeta: {
         pending: true,
+        generationTimeoutSeconds: settings.generationTimeoutSeconds,
         appliedImageParams: {
           size: generationInput.params.size,
           quality: generationInput.params.quality,
@@ -1060,7 +1145,9 @@ router.post('/', requireUser, async (req, res, next) => {
       void runGenerationTask({
         taskId: task.id,
         userId: user.id,
+        generationDeadlineAt: task.createdAt.getTime() + settings.generationTimeoutSeconds * 1000,
         generationInput,
+        generationTimeoutSeconds: settings.generationTimeoutSeconds,
         model,
         costCredits,
       })
