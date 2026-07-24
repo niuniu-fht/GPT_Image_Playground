@@ -193,6 +193,26 @@ describe('callTaskImageApi recovery', () => {
     expect(result.responseMeta?.generationTaskId).toBe('remote-task-2')
   })
 
+  it('downloads a same-origin temporary image path as a Blob', async () => {
+    platformMocks.getGenerationTask.mockResolvedValueOnce({
+      ...createDoneResult('remote-task-file'),
+      images: [{ dataUrl: '/api/generations/remote-task-file/images/0', mimeType: 'image/png' }],
+    })
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'image/png' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await callTaskImageApi(
+      createTask({ generationTaskId: 'remote-task-file' }),
+      {} as never,
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/generations/remote-task-file/images/0')
+    expect(result.images[0]).toMatchObject({ mimeType: 'image/png' })
+    expect('blob' in result.images[0]!).toBe(true)
+  })
+
   it('waits for the browser to come back online before resuming', async () => {
     vi.stubGlobal('navigator', { onLine: false })
     platformMocks.getGenerationTask.mockResolvedValueOnce(createDoneResult('remote-task-3'))

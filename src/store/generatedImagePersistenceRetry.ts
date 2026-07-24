@@ -71,11 +71,24 @@ async function persistGeneratedImageFromServer(
     return false
   }
 
-  await storeImage(image.dataUrl, {
-    id: item.imageId,
-    source: 'generated',
-    mimeType: image.mimeType || null,
-  })
+  if (image.dataUrl.startsWith('/')) {
+    const response = await fetch(image.dataUrl, { credentials: 'same-origin' })
+    if (!response.ok) {
+      throw new Error(`生成图片读取失败：HTTP ${response.status}`)
+    }
+    const blob = await response.blob()
+    await storeImage(blob, {
+      id: item.imageId,
+      source: 'generated',
+      mimeType: blob.type || image.mimeType || null,
+    })
+  } else {
+    await storeImage(image.dataUrl, {
+      id: item.imageId,
+      source: 'generated',
+      mimeType: image.mimeType || null,
+    })
+  }
   return true
 }
 

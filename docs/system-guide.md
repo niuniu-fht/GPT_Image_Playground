@@ -9,8 +9,10 @@
 ```text
 React 前端
   -> Node Server
-     -> Postgres：用户、积分、模型、任务、广场分享记录
-     -> Cloudflare R2：生成图片、广场图片文件
+     -> Postgres：用户、积分、模型、任务元数据、广场分享记录
+     -> 本机临时目录：生成结果的短期交付文件
+     -> Cloudflare R2：用户主动发布的广场图片文件
+  -> IndexedDB：生成原图与本地任务历史
   -> assets.code2alita.com：公开访问 R2 图片
 ```
 
@@ -48,7 +50,8 @@ http://127.0.0.1:8080
 - 积分、兑换码、套餐、订单
 - 调用上游图片模型
 - 下载上游返回的图片 URL
-- 上传图片到 Cloudflare R2
+- 将生成结果短期写入本机交付目录
+- 将用户主动发布的广场图片上传到 Cloudflare R2
 - 生成任务记录
 - 内置广场 API
 - 广场分享、列表、详情、举报、审核
@@ -116,23 +119,22 @@ https://assets.code2alita.com
 
 ```text
 上游返回图片
-  -> Node Server 读取图片
-  -> Node Server 上传到 Cloudflare R2
-  -> 返回自己的图片地址
-  -> 前端保存自己的远程图片 URL
+  -> Node Server 单次解码为 Buffer
+  -> 写入本机临时交付目录
+  -> Postgres 只记录受控下载路径和图片元数据
+  -> 前端下载 Blob 并保存到浏览器 IndexedDB
+  -> 服务端延迟删除已交付文件，定时清理未领取文件
 ```
 
-最终前端应该拿到：
+任务轮询返回的短期交付地址形如：
 
 ```text
-https://assets.code2alita.com/generated/{taskId}/{index}.png
+/api/generations/{taskId}/images/{index}
 ```
 
-而不是长期依赖：
+生成原图不写入 PostgreSQL，也不自动上传 R2。R2 只服务于用户主动发布到广场的图片。
 
-```text
-https://img.code2alita.com/generated-images/xxx.png
-```
+数据库迁移会以 `NOT VALID` 检查约束阻止新任务写入 data URL，同时保留历史任务可读。历史 base64 需要在维护窗口单独清理，清理后再验证约束并整理 PostgreSQL 表空间。
 
 ## 4. 广场 API 与图片域名的区别
 
@@ -241,21 +243,13 @@ https://assets.code2alita.com
 
 ### 启用 R2 存储
 
-建议开启。
+发布图片分享广场时开启；普通生成流程不依赖此开关。
 
 ```text
 启用 R2 存储：开启
 ```
 
-### 生成后自动同步到广场存储
-
-建议开启。
-
-```text
-生成后自动同步到广场存储：开启
-```
-
-开启后，生成接口会把上游图片搬到 R2，再返回自己的图片地址。
+生成完成后只保存到浏览器 IndexedDB。用户主动发布分享时，广场接口才把选中的图片上传到 R2。
 
 ## 6. Cloudflare 需要准备什么
 

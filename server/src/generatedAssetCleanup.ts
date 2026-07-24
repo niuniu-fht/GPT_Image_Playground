@@ -1,6 +1,7 @@
 import { DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { HttpError } from './http.js'
 import { prisma } from './prisma.js'
+import { deleteGeneratedImageFilesForTasks } from './generatedImageFiles.js'
 import { getSquareRuntimeConfig, type SquareRuntimeConfig } from './squareConfig.js'
 
 interface GeneratedAssetForCleanup {
@@ -11,6 +12,7 @@ interface GeneratedAssetForCleanup {
 
 export interface GeneratedAssetCleanupResult {
   assetRecords: number
+  localFiles: number
   r2Objects: number
   skippedAssets: number
 }
@@ -107,7 +109,7 @@ async function collectSquareReferencedKeys(keys: string[]): Promise<Set<string>>
 export async function cleanupGeneratedAssetsForTasks(taskIds: string[]): Promise<GeneratedAssetCleanupResult> {
   const uniqueTaskIds = Array.from(new Set(taskIds.filter(Boolean)))
   if (!uniqueTaskIds.length) {
-    return { assetRecords: 0, r2Objects: 0, skippedAssets: 0 }
+    return { assetRecords: 0, localFiles: 0, r2Objects: 0, skippedAssets: 0 }
   }
 
   const assets = await prisma.generatedAsset.findMany({
@@ -122,9 +124,11 @@ export async function cleanupGeneratedAssetsForTasks(taskIds: string[]): Promise
     && !squareReferencedKeys.has(key)
   ))
   const deletedObjects = await deleteR2Keys(deletableKeys)
+  const deletedLocalFiles = await deleteGeneratedImageFilesForTasks(uniqueTaskIds)
 
   return {
     assetRecords: assets.length,
+    localFiles: deletedLocalFiles,
     r2Objects: deletedObjects,
     skippedAssets: Math.max(0, assets.length - deletedObjects),
   }

@@ -25,6 +25,8 @@ services:
         NODE_IMAGE: ${SERVER_NODE_IMAGE:-node:20-bookworm-slim}
     container_name: gpt-image-server
     restart: unless-stopped
+    mem_limit: ${SERVER_MEMORY_LIMIT:-2300m}
+    mem_reservation: ${SERVER_MEMORY_RESERVATION:-512m}
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,11 +37,18 @@ services:
       PORT: "8787"
       FRONTEND_ORIGIN: http://localhost:8080,http://127.0.0.1:8080
       SKIP_DB_SEED: ${SKIP_DB_SEED:-false}
+      GENERATED_IMAGE_DIR: /app/data/generated
+      GENERATED_IMAGE_RETENTION_SECONDS: ${GENERATED_IMAGE_RETENTION_SECONDS:-21600}
+      GENERATED_IMAGE_DELIVERY_GRACE_SECONDS: ${GENERATED_IMAGE_DELIVERY_GRACE_SECONDS:-900}
+      GENERATION_TASK_CONCURRENCY: ${GENERATION_TASK_CONCURRENCY:-2}
+      GENERATION_UPSTREAM_CONCURRENCY: ${GENERATION_UPSTREAM_CONCURRENCY:-4}
+      NODE_OPTIONS: ${SERVER_NODE_OPTIONS:---max-old-space-size=512}
     ports:
       - "8787:8787"
     volumes:
       - ./server/.env:/app/.env:ro
       - ./logs/server:/app/logs
+      - ./server-data/generated:/app/data/generated
 
   web:
     build:

@@ -87,7 +87,21 @@ class AsyncSemaphore {
 }
 
 const upstreamSemaphore = new AsyncSemaphore(env.generationUpstreamConcurrency)
-const previewSemaphore = new AsyncSemaphore(env.generationPreviewConcurrency)
+let activeTasks = 0
+
+export function reserveGenerationTaskSlot(): (() => void) | null {
+  if (activeTasks >= env.generationTaskConcurrency) {
+    return null
+  }
+
+  activeTasks += 1
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    activeTasks = Math.max(0, activeTasks - 1)
+  }
+}
 
 export function withGenerationUpstreamSlot<T>(
   signal: AbortSignal,
@@ -96,16 +110,12 @@ export function withGenerationUpstreamSlot<T>(
   return upstreamSemaphore.run(operation, signal)
 }
 
-export function withGenerationPreviewSlot<T>(
-  operation: () => Promise<T>,
-  signal?: AbortSignal,
-): Promise<T> {
-  return previewSemaphore.run(operation, signal)
-}
-
 export function getGenerationConcurrencySnapshot() {
   return {
+    tasks: {
+      active: activeTasks,
+      limit: env.generationTaskConcurrency,
+    },
     upstream: upstreamSemaphore.snapshot(),
-    preview: previewSemaphore.snapshot(),
   }
 }

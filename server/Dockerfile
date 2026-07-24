@@ -30,7 +30,7 @@ FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-RUN apt-get update -y && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update -y && apt-get install -y --no-install-recommends openssl ca-certificates libjemalloc2 && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules

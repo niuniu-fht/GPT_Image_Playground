@@ -11,6 +11,10 @@ function readConcurrency(name: string, fallback: number): number {
   return Math.max(1, Math.min(100, Math.floor(readNumber(name, fallback))))
 }
 
+function readPositiveInteger(name: string, fallback: number): number {
+  return Math.max(1, Math.floor(readNumber(name, fallback)))
+}
+
 export const env = {
   port: readNumber('PORT', 8787),
   databaseUrl: process.env.DATABASE_URL || '',
@@ -29,6 +33,9 @@ export const env = {
     .map((item) => item.trim())
     .filter(Boolean),
   registerBonusCredits: readNumber('REGISTER_BONUS_CREDITS', 100),
-  generationUpstreamConcurrency: readConcurrency('GENERATION_UPSTREAM_CONCURRENCY', 30),
-  generationPreviewConcurrency: readConcurrency('GENERATION_PREVIEW_CONCURRENCY', 2),
+  generationTaskConcurrency: readConcurrency('GENERATION_TASK_CONCURRENCY', 2),
+  generationUpstreamConcurrency: readConcurrency('GENERATION_UPSTREAM_CONCURRENCY', 4),
+  generatedImageDir: process.env.GENERATED_IMAGE_DIR || './data/generated',
+  generatedImageRetentionSeconds: readPositiveInteger('GENERATED_IMAGE_RETENTION_SECONDS', 6 * 60 * 60),
+  generatedImageDeliveryGraceSeconds: readPositiveInteger('GENERATED_IMAGE_DELIVERY_GRACE_SECONDS', 15 * 60),
 }

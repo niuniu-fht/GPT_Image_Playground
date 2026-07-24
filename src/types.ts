@@ -457,6 +457,7 @@ export interface AdminGeneratedAsset {
 
 export interface AdminGeneratedAssetCleanupResult {
   assetRecords: number
+  localFiles: number
   r2Objects: number
   skippedAssets: number
 }

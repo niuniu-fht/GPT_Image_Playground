@@ -151,7 +151,7 @@ function getAssetHost(publicUrl: string): string {
 }
 
 function formatTaskCleanupSummary(cleanup: AdminGeneratedAssetCleanupResult): string {
-  const parts = [`云端对象 ${cleanup.r2Objects} 个`]
+  const parts = [`临时文件 ${cleanup.localFiles ?? 0} 个`, `云端对象 ${cleanup.r2Objects} 个`]
   if (cleanup.skippedAssets > 0) {
     parts.push(`${cleanup.skippedAssets} 个外置资产未处理`)
   }

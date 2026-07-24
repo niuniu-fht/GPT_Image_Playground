@@ -1,7 +1,6 @@
 import { Router } from 'express'
 import type { GenerationTask, Prisma } from '@prisma/client'
 import crypto from 'node:crypto'
-import sharp from 'sharp'
 import { z } from 'zod'
 import { requireUser, resLocals } from '../auth.js'
 import { env } from '../env.js'
@@ -14,12 +13,22 @@ import { isGptImage2Model, resolveModelCostForSize, supportsHighQualityPricing }
 import { prisma } from '../prisma.js'
 import { getPlatformSettings } from '../settings.js'
 import {
-  withGenerationPreviewSlot,
+  reserveGenerationTaskSlot,
   withGenerationUpstreamSlot,
 } from '../generationConcurrency.js'
+import {
+  deleteGeneratedImageFilesForTasks,
+  getGeneratedImageFilePath,
+  scheduleGeneratedImageFileDeletion,
+  writeGeneratedImageFile,
+} from '../generatedImageFiles.js'
 
 const router = Router()
 const MAX_UPSTREAM_IMAGE_COUNT = 10
+const MAX_INPUT_IMAGE_COUNT = 16
+const MAX_INPUT_IMAGE_BYTES = 50 * 1024 * 1024
+const MAX_TOTAL_INPUT_BYTES = 128 * 1024 * 1024
+const MAX_UPSTREAM_JSON_BYTES = 80 * 1024 * 1024
 
 const taskParamsSchema = z.object({
   size: z.string().default('auto'),
@@ -35,7 +44,7 @@ const generationSchema = z.object({
   modelConfigId: z.string().min(1),
   prompt: z.string().min(1, '请输入提示词'),
   params: taskParamsSchema,
-  inputImages: z.array(z.object({ id: z.string(), dataUrl: z.string() })).default([]),
+  inputImages: z.array(z.object({ id: z.string(), dataUrl: z.string() })).max(MAX_INPUT_IMAGE_COUNT).default([]),
   editMask: z
     .object({
       dataUrl: z.string(),
@@ -49,11 +58,31 @@ const generationSchema = z.object({
 type GenerationInput = z.infer<typeof generationSchema>
 type GenerationModel = Prisma.ModelConfigGetPayload<{ include: { upstreamProvider: true } }>
 type GenerationUpstream = { model: string; baseUrl: string; apiKey: string }
+type PreparedGenerationImage = {
+  byteSize: number
+  file: File
+  id: string
+  mimeType: string
+  sha256: string
+}
+type PreparedGenerationMask = {
+  byteSize: number
+  file: File
+  mimeType: string
+  sha256: string
+  selection?: unknown
+  sourceImageId?: string | null
+}
+type PreparedGenerationInput = Omit<GenerationInput, 'editMask' | 'inputImages'> & {
+  editMask?: PreparedGenerationMask | null
+  inputImages: PreparedGenerationImage[]
+}
+type TaskImagePayload = { dataUrl: string; index?: number; mimeType: string }
 type GenerationResponseTask = Pick<
   GenerationTask,
   'id' | 'userId' | 'modelConfigId' | 'status' | 'error' | 'outputImages' | 'costCredits' | 'params'
 >
-type GeneratedImagePayload = { dataUrl: string; index?: number; mimeType: string; upstreamResponse?: unknown }
+type GeneratedImagePayload = { bytes: Buffer; index?: number; mimeType: string; upstreamResponse?: unknown }
 type GenerationImageResult =
   | { index: number; status: 'done'; mimeType: string; upstreamResponse?: unknown }
   | { error: string; httpStatus?: number; index: number; status: 'error' }
@@ -96,7 +125,7 @@ function resolveGenerationUpstream(model: GenerationModel): GenerationUpstream {
       }
 }
 
-function normalizeTaskImages(outputImages: unknown): GeneratedImagePayload[] {
+function normalizeTaskImages(outputImages: unknown): TaskImagePayload[] {
   if (!Array.isArray(outputImages)) return []
   return outputImages.flatMap((item) => {
     if (!item || typeof item !== 'object') return []
@@ -252,126 +281,102 @@ function shouldFallbackRetryGeneration(error: unknown): boolean {
   return /fetch failed|network|timeout|timed out|abort|ECONN|ENOTFOUND|EAI_AGAIN|socket|TLS|certificate/i.test(message)
 }
 
-function parseDataUrl(dataUrl: string): { mimeType: string; bytes: Uint8Array } {
+function parseDataUrl(dataUrl: string): { mimeType: string; bytes: Buffer } {
   const match = /^data:([^;,]+)(?:;base64)?,(.*)$/s.exec(dataUrl)
   if (!match) throw new HttpError(400, 'invalid_image', '参考图格式无效')
   const mimeType = match[1] || 'image/png'
   const body = match[2] || ''
   const bytes = dataUrl.includes(';base64,')
-    ? Uint8Array.from(atob(body), (char) => char.charCodeAt(0))
-    : new TextEncoder().encode(decodeURIComponent(body))
+    ? Buffer.from(body, 'base64')
+    : Buffer.from(decodeURIComponent(body), 'utf8')
   return { mimeType, bytes }
 }
 
-function dataUrlToFile(dataUrl: string, filename: string): File {
-  const { mimeType, bytes } = parseDataUrl(dataUrl)
-  return new File([Buffer.from(bytes)], filename, { type: mimeType })
+function prepareGenerationInput(input: GenerationInput): PreparedGenerationInput {
+  let totalBytes = 0
+  const accountForBytes = (bytes: Buffer, label: string) => {
+    if (bytes.byteLength > MAX_INPUT_IMAGE_BYTES) {
+      throw new HttpError(413, 'input_image_too_large', `${label}超过 50 MiB`)
+    }
+    totalBytes += bytes.byteLength
+    if (totalBytes > MAX_TOTAL_INPUT_BYTES) {
+      throw new HttpError(413, 'input_images_too_large', '参考图与蒙版总大小超过 128 MiB')
+    }
+  }
+
+  const inputImages = input.inputImages.map((image, index): PreparedGenerationImage => {
+    const { mimeType, bytes } = parseDataUrl(image.dataUrl)
+    accountForBytes(bytes, `第 ${index + 1} 张参考图`)
+    return {
+      id: image.id,
+      mimeType,
+      byteSize: bytes.byteLength,
+      file: new File([Uint8Array.from(bytes)], `input-${index}.png`, { type: mimeType }),
+      sha256: crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 16),
+    }
+  })
+  const editMask = input.editMask?.dataUrl
+    ? (() => {
+        const { mimeType, bytes } = parseDataUrl(input.editMask!.dataUrl)
+        accountForBytes(bytes, '编辑蒙版')
+        return {
+          byteSize: bytes.byteLength,
+          file: new File([Uint8Array.from(bytes)], 'mask.png', { type: mimeType }),
+          mimeType,
+          sha256: crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 16),
+          sourceImageId: input.editMask!.sourceImageId,
+          selection: input.editMask!.selection,
+        } satisfies PreparedGenerationMask
+      })()
+    : null
+
+  return {
+    clientRequestId: input.clientRequestId,
+    modelConfigId: input.modelConfigId,
+    prompt: input.prompt,
+    params: input.params,
+    inputImages,
+    editMask,
+  }
 }
 
 function summarizeReferenceImage(
-  image: { id: string; dataUrl: string },
+  image: PreparedGenerationImage,
   index: number,
 ): Record<string, unknown> {
-  try {
-    const { mimeType, bytes } = parseDataUrl(image.dataUrl)
-    const hash = crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 16)
-    return {
-      index,
-      id: image.id,
-      mimeType,
-      byteSize: bytes.byteLength,
-      sha256: hash,
-    }
-  } catch (error) {
-    return {
-      index,
-      id: image.id,
-      invalid: true,
-      error: error instanceof Error ? error.message : String(error),
-    }
+  return {
+    index,
+    id: image.id,
+    mimeType: image.mimeType,
+    byteSize: image.byteSize,
+    sha256: image.sha256,
   }
 }
 
-function summarizeMaskImage(mask: GenerationInput['editMask']): Record<string, unknown> | null {
-  if (!mask?.dataUrl) return null
-  try {
-    const { mimeType, bytes } = parseDataUrl(mask.dataUrl)
-    const hash = crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 16)
-    return {
-      sourceImageId: mask.sourceImageId ?? null,
-      mimeType,
-      byteSize: bytes.byteLength,
-      sha256: hash,
-      hasSelection: Boolean(mask.selection),
-    }
-  } catch (error) {
-    return {
-      sourceImageId: mask.sourceImageId ?? null,
-      invalid: true,
-      error: error instanceof Error ? error.message : String(error),
-    }
+function summarizeMaskImage(mask: PreparedGenerationInput['editMask']): Record<string, unknown> | null {
+  if (!mask) return null
+  return {
+    sourceImageId: mask.sourceImageId ?? null,
+    mimeType: mask.mimeType,
+    byteSize: mask.byteSize,
+    sha256: mask.sha256,
+    hasSelection: Boolean(mask.selection),
   }
 }
 
-async function createReferenceImagePreview(
-  image: { id: string; dataUrl: string },
-  index: number,
-): Promise<Record<string, unknown>> {
-  const summary = summarizeReferenceImage(image, index)
-  if (summary.invalid) return summary
-
-  try {
-    const { bytes } = parseDataUrl(image.dataUrl)
-    const thumbnail = await withGenerationPreviewSlot(() => (
-      sharp(Buffer.from(bytes))
-        .rotate()
-        .resize({ width: 96, height: 96, fit: 'inside', withoutEnlargement: true })
-        .webp({ quality: 62 })
-        .toBuffer()
-    ))
-    return {
-      ...summary,
-      previewDataUrl: `data:image/webp;base64,${thumbnail.toString('base64')}`,
-    }
-  } catch (error) {
-    return {
-      ...summary,
-      previewError: error instanceof Error ? error.message : String(error),
-    }
-  }
-}
-
-async function createGeneratedImagePreview(
-  dataUrl: string,
-  signal?: AbortSignal,
-): Promise<string | undefined> {
-  try {
-    const { bytes } = parseDataUrl(dataUrl)
-    const thumbnail = await withGenerationPreviewSlot(() => (
-      sharp(Buffer.from(bytes))
-        .rotate()
-        .resize({ width: 320, height: 320, fit: 'inside', withoutEnlargement: true })
-        .webp({ quality: 68, effort: 4 })
-        .toBuffer()
-    ), signal)
-    return `data:image/webp;base64,${thumbnail.toString('base64')}`
-  } catch {
-    return undefined
-  }
-}
-
-async function createAdminTaskMeta(input: GenerationInput): Promise<Record<string, unknown>> {
+function createAdminTaskMeta(input: PreparedGenerationInput): Record<string, unknown> {
   const operation = input.inputImages.length > 0 ? 'edit' : 'generation'
   const referenceImages = operation === 'edit'
-    ? await Promise.all(input.inputImages.map(createReferenceImagePreview))
+    ? input.inputImages.map(summarizeReferenceImage)
     : []
+  const mask = summarizeMaskImage(input.editMask)
 
   return {
     operation,
     operationLabel: operation === 'edit' ? '编辑' : '生成',
     referenceImageCount: input.inputImages.length,
     referenceImages,
-    mask: summarizeMaskImage(input.editMask),
+    mask,
   }
 }
 
@@ -431,7 +436,7 @@ function resolveUpstreamImageUrl(url: string, baseUrl: string): string {
   throw new HttpError(502, 'upstream_image_download_failed', '上游返回了无效图片地址')
 }
 
-async function remoteImageUrlToDataUrl(
+async function remoteImageUrlToBuffer(
   url: string,
   fallbackMimeType: string,
   upstreamBaseUrl: string,
@@ -443,8 +448,14 @@ async function remoteImageUrlToDataUrl(
     throw new HttpError(response.status, 'upstream_image_download_failed', '上游图片下载失败，请稍后重试')
   }
 
-  const arrayBuffer = await response.arrayBuffer()
-  const buffer = Buffer.from(arrayBuffer)
+  const contentLength = Number(response.headers.get('content-length'))
+  if (Number.isFinite(contentLength) && contentLength > MAX_INPUT_IMAGE_BYTES) {
+    throw new HttpError(502, 'upstream_image_too_large', '上游返回的图片超过 50 MiB')
+  }
+  const buffer = Buffer.from(await response.arrayBuffer())
+  if (buffer.byteLength > MAX_INPUT_IMAGE_BYTES) {
+    throw new HttpError(502, 'upstream_image_too_large', '上游返回的图片超过 50 MiB')
+  }
   const responseMimeType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() || ''
   const sniffedMimeType = sniffImageMimeType(buffer)
   const mimeType = sniffedMimeType || (responseMimeType.startsWith('image/') ? responseMimeType : '')
@@ -457,9 +468,8 @@ async function remoteImageUrlToDataUrl(
     })
     throw new HttpError(502, 'upstream_image_download_failed', '上游返回的图片地址不是有效图片')
   }
-  const base64 = buffer.toString('base64')
   return {
-    dataUrl: `data:${mimeType || fallbackMimeType};base64,${base64}`,
+    bytes: buffer,
     mimeType: mimeType || fallbackMimeType,
   }
 }
@@ -472,31 +482,33 @@ async function normalizeImageResponse(
   const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
   const data = Array.isArray(record.data) ? record.data : []
   const upstreamResponse = sanitizeUpstreamPayload(payload)
-  const images = data.flatMap((item) => {
-    if (!item || typeof item !== 'object') return []
+  const images: GeneratedImagePayload[] = []
+  for (const item of data) {
+    if (!item || typeof item !== 'object') continue
     const image = item as Record<string, unknown>
     if (typeof image.b64_json === 'string') {
-      return [{ dataUrl: `data:image/png;base64,${image.b64_json}`, mimeType: 'image/png', upstreamResponse }]
+      const bytes = Buffer.from(image.b64_json, 'base64')
+      if (bytes.byteLength > MAX_INPUT_IMAGE_BYTES) {
+        throw new HttpError(502, 'upstream_image_too_large', '上游返回的图片超过 50 MiB')
+      }
+      images.push({
+        bytes,
+        mimeType: sniffImageMimeType(bytes) || 'image/png',
+        upstreamResponse,
+      })
+      continue
     }
-    if (typeof image.url === 'string') {
-      return [{ dataUrl: image.url, mimeType: 'image/png', upstreamResponse }]
+    const remoteUrl = typeof image.url === 'string'
+      ? image.url
+      : typeof image.image_url === 'string'
+        ? image.image_url
+        : ''
+    if (remoteUrl) {
+      const downloaded = await remoteImageUrlToBuffer(remoteUrl, 'image/png', upstreamBaseUrl, signal)
+      images.push({ ...downloaded, upstreamResponse })
     }
-    if (typeof image.image_url === 'string') {
-      return [{ dataUrl: image.image_url, mimeType: 'image/png', upstreamResponse }]
-    }
-    return []
-  })
-
-  return Promise.all(
-    images.map((image) => (
-      /^(https?:\/\/|\/)/i.test(image.dataUrl)
-        ? remoteImageUrlToDataUrl(image.dataUrl, image.mimeType, upstreamBaseUrl, signal).then((nextImage) => ({
-            ...nextImage,
-            upstreamResponse: image.upstreamResponse,
-          }))
-        : image
-    )),
-  )
+  }
+  return images
 }
 
 async function checkModerationRules(prompt: string) {
@@ -532,7 +544,7 @@ function clampImageCount(value: number): number {
   return Math.max(1, Math.min(Math.floor(value), MAX_UPSTREAM_IMAGE_COUNT))
 }
 
-function withImageCount(input: GenerationInput, n: number): GenerationInput {
+function withImageCount(input: PreparedGenerationInput, n: number): PreparedGenerationInput {
   return {
     ...input,
     params: {
@@ -585,22 +597,19 @@ async function readUpstreamJsonWithLog(response: Response, context: {
   request: Record<string, unknown>
 }): Promise<unknown> {
   const contentType = response.headers.get('content-type') || ''
-  const text = await response.text().catch((error: unknown) => {
-    console.warn('[generation] failed to read upstream response body', {
+  const contentLength = Number(response.headers.get('content-length'))
+  if (Number.isFinite(contentLength) && contentLength > MAX_UPSTREAM_JSON_BYTES) {
+    await response.body?.cancel().catch(() => undefined)
+    throw new HttpError(502, 'upstream_response_too_large', '上游响应超过 80 MiB')
+  }
+  const payload = await response.json().catch((error: unknown) => {
+    console.warn('[generation] failed to parse upstream response body', {
       endpoint: context.endpoint,
       status: response.status,
       error: error instanceof Error ? error.message : String(error),
     })
-    return ''
+    return {}
   })
-  let payload: unknown = {}
-  if (text) {
-    try {
-      payload = JSON.parse(text)
-    } catch {
-      payload = { raw: text.slice(0, 1200) }
-    }
-  }
 
   console.info('[generation] upstream response', {
     endpoint: context.endpoint,
@@ -624,7 +633,7 @@ function logUpstreamRequest(context: {
 }
 
 async function callImagesApiOnce(
-  input: GenerationInput,
+  input: PreparedGenerationInput,
   upstream: GenerationUpstream,
   signal: AbortSignal,
 ) {
@@ -645,11 +654,11 @@ async function callImagesApiOnce(
     form.set('quality', input.params.quality)
     form.set('n', String(input.params.n))
     if (requestExplicitBase64) form.set('response_format', 'b64_json')
-    input.inputImages.forEach((image, index) => {
-      form.append('image[]', dataUrlToFile(image.dataUrl, `input-${index}.png`))
+    input.inputImages.forEach((image) => {
+      form.append('image[]', image.file)
     })
-    if (input.editMask?.dataUrl) {
-      form.set('mask', dataUrlToFile(input.editMask.dataUrl, 'mask.png'))
+    if (input.editMask) {
+      form.set('mask', input.editMask.file)
     }
 
     const endpoint = `${baseUrl}/v1/images/edits`
@@ -733,7 +742,7 @@ async function callImagesApiOnce(
 }
 
 async function callSingleImageApi(
-  input: GenerationInput,
+  input: PreparedGenerationInput,
   upstream: GenerationUpstream,
   signal: AbortSignal,
   timeoutSeconds: number,
@@ -774,19 +783,34 @@ async function callSingleImageApi(
 }
 
 async function callImagesApi(
-  input: GenerationInput,
+  input: PreparedGenerationInput,
   upstream: GenerationUpstream,
   signal: AbortSignal,
   timeoutSeconds: number,
+  persistImage: (
+    image: GeneratedImagePayload,
+    index: number,
+  ) => Promise<Extract<StoredGenerationImageResult, { status: 'done' }>>,
 ) {
   const requestedCount = clampImageCount(input.params.n)
   const settled = await Promise.allSettled(
     Array.from({ length: requestedCount }, (_item, index) => (
-      callSingleImageApi(input, upstream, signal, timeoutSeconds).then((image) => ({ image, index }))
+      callSingleImageApi(input, upstream, signal, timeoutSeconds).then(async (image) => {
+        try {
+          return {
+            image: await persistImage(image, index),
+            index,
+            mimeType: image.mimeType,
+            upstreamResponse: image.upstreamResponse,
+          }
+        } finally {
+          image.bytes = Buffer.alloc(0)
+        }
+      })
     )),
   )
   const imageResults: GenerationImageResult[] = []
-  const images: GeneratedImagePayload[] = []
+  const images: Array<Extract<StoredGenerationImageResult, { status: 'done' }>> = []
 
   if (signal.aborted) {
     throw createGenerationTimeoutError(timeoutSeconds)
@@ -795,12 +819,12 @@ async function callImagesApi(
   settled.forEach((result, fallbackIndex) => {
     const index = result.status === 'fulfilled' ? result.value.index : fallbackIndex
     if (result.status === 'fulfilled') {
-      images.push({ ...result.value.image, index })
+      images.push(result.value.image)
       imageResults.push({
         index,
         status: 'done',
-        mimeType: result.value.image.mimeType,
-        upstreamResponse: result.value.image.upstreamResponse,
+        mimeType: result.value.mimeType,
+        upstreamResponse: result.value.upstreamResponse,
       })
       return
     }
@@ -881,9 +905,10 @@ async function refundFailedGeneration(input: {
 async function runGenerationTask(input: {
   costCredits: number
   generationDeadlineAt: number
-  generationInput: GenerationInput
+  generationInput: PreparedGenerationInput
   generationTimeoutSeconds: number
   model: GenerationModel
+  releaseTaskSlot: () => void
   taskId: string
   userId: string
 }) {
@@ -905,22 +930,28 @@ async function runGenerationTask(input: {
       resolveGenerationUpstream(input.model),
       controller.signal,
       input.generationTimeoutSeconds,
+      async (image, index) => {
+        if (controller.signal.aborted) {
+          throw createGenerationTimeoutError(input.generationTimeoutSeconds)
+        }
+        const dataUrl = await writeGeneratedImageFile({
+          taskId: input.taskId,
+          index,
+          mimeType: image.mimeType,
+          bytes: image.bytes,
+        })
+        return {
+          dataUrl,
+          index,
+          mimeType: image.mimeType,
+          status: 'done',
+        }
+      },
     )
     if (controller.signal.aborted) {
       throw createGenerationTimeoutError(input.generationTimeoutSeconds)
     }
-    const imagePayloads = await Promise.all(generationResult.images.map(async (image, index) => ({
-      image: {
-        ...image,
-        index: image.index ?? index,
-        status: 'done' as const,
-      } satisfies StoredGenerationImageResult,
-      previewDataUrl: await createGeneratedImagePreview(image.dataUrl, controller.signal),
-    })))
-    if (controller.signal.aborted) {
-      throw createGenerationTimeoutError(input.generationTimeoutSeconds)
-    }
-    const images = imagePayloads.map((item) => item.image)
+    const images = generationResult.images
     const failedImages = generationResult.imageResults
       .filter((item): item is Extract<GenerationImageResult, { status: 'error' }> => item.status === 'error')
       .map((item): StoredGenerationImageResult => ({
@@ -930,11 +961,10 @@ async function runGenerationTask(input: {
       }))
     const outputImages = [...images, ...failedImages].sort((left, right) => left.index - right.index)
     const outputPreviews = [
-      ...imagePayloads.map((item) => ({
-        index: item.image.index,
-        status: item.image.status,
-        mimeType: item.image.mimeType,
-        previewDataUrl: item.previewDataUrl,
+      ...images.map((image) => ({
+        index: image.index,
+        status: image.status,
+        mimeType: image.mimeType,
       })),
       ...failedImages,
     ].sort((left, right) => left.index - right.index)
@@ -946,6 +976,7 @@ async function runGenerationTask(input: {
     if (controller.signal.aborted) {
       throw createGenerationTimeoutError(input.generationTimeoutSeconds)
     }
+    let completedTask = false
     await prisma.$transaction(async (tx) => {
       const currentTask = await tx.generationTask.findUnique({
         where: { id: input.taskId },
@@ -979,6 +1010,7 @@ async function runGenerationTask(input: {
       if (completed.count === 0) {
         return
       }
+      completedTask = true
       if (refundCredits > 0) {
         const latestUser = await tx.user.update({
           where: { id: input.userId },
@@ -996,6 +1028,9 @@ async function runGenerationTask(input: {
         })
       }
     })
+    if (!completedTask) {
+      await deleteGeneratedImageFilesForTasks([input.taskId])
+    }
   } catch (error) {
     const taskError = controller.signal.aborted
       ? createGenerationTimeoutError(input.generationTimeoutSeconds)
@@ -1003,6 +1038,9 @@ async function runGenerationTask(input: {
     console.error('[generation] async task failed', {
       taskId: input.taskId,
       error: taskError,
+    })
+    await deleteGeneratedImageFilesForTasks([input.taskId]).catch((cleanupError: unknown) => {
+      console.error('[generation-files] failed to clean up failed task files', cleanupError)
     })
     await refundFailedGeneration({
       taskId: input.taskId,
@@ -1017,8 +1055,45 @@ async function runGenerationTask(input: {
     })
   } finally {
     clearTimeout(timeoutId)
+    input.releaseTaskSlot()
   }
 }
+
+router.get('/:taskId/images/:imageIndex', requireUser, async (req, res, next) => {
+  const user = resLocals(req).user!
+  try {
+    const taskId = typeof req.params.taskId === 'string' ? req.params.taskId : ''
+    const imageIndex = Number(req.params.imageIndex)
+    if (!Number.isInteger(imageIndex) || imageIndex < 0) {
+      throw new HttpError(400, 'invalid_image_index', '图片序号无效')
+    }
+
+    const task = await prisma.generationTask.findFirst({
+      where: { id: taskId, userId: user.id },
+      select: { outputImages: true },
+    })
+    if (!task) throw new HttpError(404, 'task_not_found', '生成任务不存在或已被清理')
+    const image = normalizeTaskImages(task.outputImages).find((item) => item.index === imageIndex)
+    if (!image) throw new HttpError(404, 'generated_image_not_found', '生成图片不存在或已过期')
+
+    const filePath = getGeneratedImageFilePath(taskId, imageIndex, image.mimeType)
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.type(image.mimeType)
+    res.sendFile(filePath, (error) => {
+      if (error) {
+        if (!res.headersSent) {
+          next(new HttpError(404, 'generated_image_not_found', '生成图片不存在或已过期'))
+        } else {
+          next(error)
+        }
+        return
+      }
+      scheduleGeneratedImageFileDeletion({ filePath, taskId })
+    })
+  } catch (error) {
+    next(error)
+  }
+})
 
 router.get('/:taskId', requireUser, async (req, res, next) => {
   const user = resLocals(req).user!
@@ -1052,6 +1127,7 @@ router.get('/:taskId', requireUser, async (req, res, next) => {
 
 router.post('/', requireUser, async (req, res, next) => {
   const user = resLocals(req).user!
+  let releaseTaskSlot: (() => void) | null = null
 
   try {
     const input = generationSchema.parse(req.body)
@@ -1082,15 +1158,20 @@ router.post('/', requireUser, async (req, res, next) => {
     }
     await checkModerationRules(input.prompt)
 
-    const generationInput: GenerationInput = {
+    releaseTaskSlot = reserveGenerationTaskSlot()
+    if (!releaseTaskSlot) {
+      throw new HttpError(429, 'generation_busy', '生成服务繁忙，请稍后重试')
+    }
+
+    const generationInput = prepareGenerationInput({
       ...input,
       params: {
         ...input.params,
         quality: resolveEffectiveQuality(model, input.params.quality),
       },
-    }
+    })
     const adminTaskMeta = {
-      ...await createAdminTaskMeta(generationInput),
+      ...createAdminTaskMeta(generationInput),
       generationTimeoutSeconds: settings.generationTimeoutSeconds,
     }
     const requestedCount = clampImageCount(generationInput.params.n)
@@ -1155,6 +1236,8 @@ router.post('/', requireUser, async (req, res, next) => {
     }
 
     if (!shouldStartGeneration) {
+      releaseTaskSlot()
+      releaseTaskSlot = null
       sendOk(res, await buildGenerationTaskResponse(task))
       return
     }
@@ -1185,6 +1268,8 @@ router.post('/', requireUser, async (req, res, next) => {
       },
     })
 
+    const taskSlotRelease = releaseTaskSlot
+    releaseTaskSlot = null
     setImmediate(() => {
       void runGenerationTask({
         taskId: task.id,
@@ -1194,9 +1279,11 @@ router.post('/', requireUser, async (req, res, next) => {
         generationTimeoutSeconds: settings.generationTimeoutSeconds,
         model,
         costCredits,
+        releaseTaskSlot: taskSlotRelease,
       })
     })
   } catch (error) {
+    releaseTaskSlot?.()
     next(error)
   }
 })

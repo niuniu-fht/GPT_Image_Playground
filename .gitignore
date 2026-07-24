@@ -3,6 +3,8 @@ dist/
 .env.local
 .env.local.bak
 server/.env
+server/data/
+server-data/
 docker-data/
 logs/*
 !logs/.gitkeep
