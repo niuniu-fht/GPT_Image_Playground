@@ -7,6 +7,7 @@ import pg from 'pg'
 import { ZodError } from 'zod'
 import { env } from './env.js'
 import { startGenerationTimeoutSweep } from './generationTimeout.js'
+import { getGenerationConcurrencySnapshot } from './generationConcurrency.js'
 import { HttpError, sendError } from './http.js'
 import authRouter from './routes/auth.js'
 import adminRouter from './routes/admin.js'
@@ -60,7 +61,12 @@ app.use(
 )
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'gpt-image-playground-server', now: Date.now() })
+  res.json({
+    ok: true,
+    service: 'gpt-image-playground-server',
+    now: Date.now(),
+    generationConcurrency: getGenerationConcurrencySnapshot(),
+  })
 })
 app.use('/api/v1', squareRouter)
 app.use('/api/auth', authRouter)

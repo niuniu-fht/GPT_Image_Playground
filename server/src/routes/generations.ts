@@ -13,6 +13,10 @@ import { HttpError, sendOk } from '../http.js'
 import { isGptImage2Model, resolveModelCostForSize, supportsHighQualityPricing } from '../modelCost.js'
 import { prisma } from '../prisma.js'
 import { getPlatformSettings } from '../settings.js'
+import {
+  withGenerationPreviewSlot,
+  withGenerationUpstreamSlot,
+} from '../generationConcurrency.js'
 
 const router = Router()
 const MAX_UPSTREAM_IMAGE_COUNT = 10
@@ -45,6 +49,10 @@ const generationSchema = z.object({
 type GenerationInput = z.infer<typeof generationSchema>
 type GenerationModel = Prisma.ModelConfigGetPayload<{ include: { upstreamProvider: true } }>
 type GenerationUpstream = { model: string; baseUrl: string; apiKey: string }
+type GenerationResponseTask = Pick<
+  GenerationTask,
+  'id' | 'userId' | 'modelConfigId' | 'status' | 'error' | 'outputImages' | 'costCredits' | 'params'
+>
 type GeneratedImagePayload = { dataUrl: string; index?: number; mimeType: string; upstreamResponse?: unknown }
 type GenerationImageResult =
   | { index: number; status: 'done'; mimeType: string; upstreamResponse?: unknown }
@@ -149,17 +157,28 @@ function normalizeTaskImageResults(
   return Array.from(resultsByIndex.values()).sort((left, right) => left.index - right.index)
 }
 
-async function buildGenerationTaskResponse(task: GenerationTask) {
-  const [latestUser, model] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: task.userId },
-      select: { id: true, email: true, role: true, creditBalance: true },
-    }),
-    prisma.modelConfig.findUnique({
-      where: { id: task.modelConfigId },
-      select: { id: true, displayName: true },
-    }),
-  ])
+async function buildGenerationTaskResponse(
+  task: GenerationResponseTask,
+  related?: {
+    user: { id: string; email: string; role: string; creditBalance: number }
+    model: { id: string; displayName: string }
+  },
+) {
+  const responseRelations = related ?? await (async () => {
+    const [user, model] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: task.userId },
+        select: { id: true, email: true, role: true, creditBalance: true },
+      }),
+      prisma.modelConfig.findUnique({
+        where: { id: task.modelConfigId },
+        select: { id: true, displayName: true },
+      }),
+    ])
+    return { user, model }
+  })()
+  const latestUser = responseRelations.user
+  const model = responseRelations.model
 
   return {
     taskId: task.id,
@@ -303,11 +322,13 @@ async function createReferenceImagePreview(
 
   try {
     const { bytes } = parseDataUrl(image.dataUrl)
-    const thumbnail = await sharp(Buffer.from(bytes))
-      .rotate()
-      .resize({ width: 96, height: 96, fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 62 })
-      .toBuffer()
+    const thumbnail = await withGenerationPreviewSlot(() => (
+      sharp(Buffer.from(bytes))
+        .rotate()
+        .resize({ width: 96, height: 96, fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 62 })
+        .toBuffer()
+    ))
     return {
       ...summary,
       previewDataUrl: `data:image/webp;base64,${thumbnail.toString('base64')}`,
@@ -320,14 +341,19 @@ async function createReferenceImagePreview(
   }
 }
 
-async function createGeneratedImagePreview(dataUrl: string): Promise<string | undefined> {
+async function createGeneratedImagePreview(
+  dataUrl: string,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
   try {
     const { bytes } = parseDataUrl(dataUrl)
-    const thumbnail = await sharp(Buffer.from(bytes))
-      .rotate()
-      .resize({ width: 320, height: 320, fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 68, effort: 4 })
-      .toBuffer()
+    const thumbnail = await withGenerationPreviewSlot(() => (
+      sharp(Buffer.from(bytes))
+        .rotate()
+        .resize({ width: 320, height: 320, fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 68, effort: 4 })
+        .toBuffer()
+    ), signal)
     return `data:image/webp;base64,${thumbnail.toString('base64')}`
   } catch {
     return undefined
@@ -718,7 +744,10 @@ async function callSingleImageApi(
       if (signal.aborted) {
         throw createGenerationTimeoutError(timeoutSeconds)
       }
-      const images = await callImagesApiOnce(withImageCount(input, 1), upstream, signal)
+      const images = await withGenerationUpstreamSlot(
+        signal,
+        () => callImagesApiOnce(withImageCount(input, 1), upstream, signal),
+      )
       const image = images[0]
       if (!image) {
         throw new HttpError(502, 'upstream_no_images', GENERIC_GENERATION_FAILURE_MESSAGE)
@@ -886,7 +915,7 @@ async function runGenerationTask(input: {
         index: image.index ?? index,
         status: 'done' as const,
       } satisfies StoredGenerationImageResult,
-      previewDataUrl: await createGeneratedImagePreview(image.dataUrl),
+      previewDataUrl: await createGeneratedImagePreview(image.dataUrl, controller.signal),
     })))
     if (controller.signal.aborted) {
       throw createGenerationTimeoutError(input.generationTimeoutSeconds)
@@ -997,10 +1026,25 @@ router.get('/:taskId', requireUser, async (req, res, next) => {
     const taskId = typeof req.params.taskId === 'string' ? req.params.taskId : ''
     const task = await prisma.generationTask.findFirst({
       where: { id: taskId, userId: user.id },
+      select: {
+        id: true,
+        userId: true,
+        modelConfigId: true,
+        status: true,
+        error: true,
+        outputImages: true,
+        costCredits: true,
+        params: true,
+        user: { select: { id: true, email: true, role: true, creditBalance: true } },
+        modelConfig: { select: { id: true, displayName: true } },
+      },
     })
     if (!task) throw new HttpError(404, 'task_not_found', '生成任务不存在或已被清理')
 
-    sendOk(res, await buildGenerationTaskResponse(task))
+    sendOk(res, await buildGenerationTaskResponse(task, {
+      user: task.user,
+      model: task.modelConfig,
+    }))
   } catch (error) {
     next(error)
   }

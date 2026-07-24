@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { platformApi } from '../../lib/platformApi'
 import { useStore } from '../../store'
 import { ThemeToggle } from '../../shared/components'
-import type { CreditOrder, CreditPackage, SupportTicket } from '../../types'
+import type { CreditLedgerEntry, CreditLedgerFilter, CreditLedgerSummary, CreditOrder, CreditPackage, SupportTicket } from '../../types'
 import {
   ChangePasswordDialog,
   type ChangePasswordDraft,
   type ChangePasswordErrors,
 } from './header/ChangePasswordDialog'
+import { CreditHistoryDialog } from './header/CreditHistoryDialog'
 import { FeedbackDialog, type FeedbackDraft } from './header/FeedbackDialog'
 import { HeaderAccountActions } from './header/HeaderAccountActions'
 import { HeaderProductNav } from './header/HeaderProductNav'
@@ -100,6 +101,17 @@ export default function Header() {
   const [changePasswordErrors, setChangePasswordErrors] = useState<ChangePasswordErrors>({})
   const [changePasswordSubmitting, setChangePasswordSubmitting] = useState(false)
   const [redeemDescription, setRedeemDescription] = useState(defaultRedeemDescription)
+  const [creditHistoryOpen, setCreditHistoryOpen] = useState(false)
+  const [creditHistoryItems, setCreditHistoryItems] = useState<CreditLedgerEntry[]>([])
+  const [creditHistorySummary, setCreditHistorySummary] = useState<CreditLedgerSummary | null>(null)
+  const [creditHistoryFilter, setCreditHistoryFilter] = useState<CreditLedgerFilter>('all')
+  const [creditHistoryQuery, setCreditHistoryQuery] = useState('')
+  const [creditHistoryPage, setCreditHistoryPage] = useState(1)
+  const [creditHistoryPageSize, setCreditHistoryPageSize] = useState(20)
+  const [creditHistoryTotal, setCreditHistoryTotal] = useState(0)
+  const [creditHistoryLoading, setCreditHistoryLoading] = useState(false)
+  const [creditHistoryError, setCreditHistoryError] = useState('')
+  const creditHistoryRequestRef = useRef(0)
 
   async function refreshPublicSettings() {
     try {
@@ -127,6 +139,41 @@ export default function Header() {
   function openRedeemDialog() {
     setRedeemOpen(true)
     void refreshPublicSettings()
+  }
+
+  async function loadCreditHistory(filter: CreditLedgerFilter, page: number, query: string) {
+    const requestId = creditHistoryRequestRef.current + 1
+    creditHistoryRequestRef.current = requestId
+    setCreditHistoryLoading(true)
+    setCreditHistoryError('')
+    try {
+      const result = await platformApi.listCreditLedger({ type: filter, q: query.trim(), page, pageSize: 20 })
+      if (creditHistoryRequestRef.current !== requestId) return
+      setCreditHistoryItems(result.items)
+      setCreditHistorySummary(result.summary)
+      setCreditHistoryTotal(result.total)
+      setCreditHistoryPage(result.page)
+      setCreditHistoryPageSize(result.pageSize)
+    } catch (error) {
+      if (creditHistoryRequestRef.current !== requestId) return
+      const message = error instanceof Error ? error.message : '积分记录加载失败'
+      setCreditHistoryError(message)
+      showToast(message, 'error')
+    } finally {
+      if (creditHistoryRequestRef.current === requestId) setCreditHistoryLoading(false)
+    }
+  }
+
+  function openCreditHistory() {
+    if (!currentUser) {
+      openAuthModal('login')
+      return
+    }
+    setCreditHistoryOpen(true)
+    setCreditHistoryFilter('all')
+    setCreditHistoryQuery('')
+    setCreditHistoryPage(1)
+    void loadCreditHistory('all', 1, '')
   }
 
   async function handleLogout() {
@@ -297,6 +344,7 @@ export default function Header() {
               onAdmin={openAdminConsole}
               onChangePassword={openChangePassword}
               onFeedback={() => void openFeedback()}
+              onCreditHistory={openCreditHistory}
               onLogin={() => openAuthModal('login')}
               onLogout={() => void handleLogout()}
               onRedeem={openRedeemDialog}
@@ -314,6 +362,40 @@ export default function Header() {
           onChangeRedeemCode={setRedeemCode}
           onClose={() => setRedeemOpen(false)}
           onSubmit={(event) => void submitRedeem(event)}
+        />
+      )}
+
+      {creditHistoryOpen && currentUser && (
+        <CreditHistoryDialog
+          items={creditHistoryItems}
+          summary={creditHistorySummary}
+          filter={creditHistoryFilter}
+          query={creditHistoryQuery}
+          page={creditHistoryPage}
+          pageSize={creditHistoryPageSize}
+          total={creditHistoryTotal}
+          loading={creditHistoryLoading}
+          error={creditHistoryError}
+          onChangeFilter={(filter) => {
+            setCreditHistoryFilter(filter)
+            setCreditHistoryPage(1)
+            setCreditHistoryItems([])
+            void loadCreditHistory(filter, 1, creditHistoryQuery)
+          }}
+          onChangeQuery={setCreditHistoryQuery}
+          onSearch={(query) => {
+            setCreditHistoryQuery(query)
+            setCreditHistoryPage(1)
+            setCreditHistoryItems([])
+            void loadCreditHistory(creditHistoryFilter, 1, query)
+          }}
+          onChangePage={(page) => void loadCreditHistory(creditHistoryFilter, page, creditHistoryQuery)}
+          onClose={() => setCreditHistoryOpen(false)}
+          onRedeem={() => {
+            setCreditHistoryOpen(false)
+            openRedeemDialog()
+          }}
+          onRefresh={() => void loadCreditHistory(creditHistoryFilter, creditHistoryPage, creditHistoryQuery)}
         />
       )}
 

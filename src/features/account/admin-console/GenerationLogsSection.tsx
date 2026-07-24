@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
 import type { AdminGenerationTask, ModelConfig } from '../../../types'
+import { useSecondClock } from '../../../hooks/useSecondClock'
 import {
   AdminTableShell,
   cx,
@@ -59,6 +59,15 @@ function taskDuration(task: AdminGenerationTask, now: number): string {
   return formatDuration(finishedAt - startedAt)
 }
 
+function TaskDurationValue({ task }: { task: AdminGenerationTask }) {
+  const now = useSecondClock(task.status === 'running')
+  return (
+    <span className={cx('text-xs font-medium', task.status === 'running' ? 'text-blue-600 dark:text-blue-300' : 'text-gray-500')}>
+      {taskDuration(task, now)}
+    </span>
+  )
+}
+
 function readTaskAdminMeta(task: AdminGenerationTask): Record<string, unknown> {
   const params = task.params && typeof task.params === 'object' && !Array.isArray(task.params)
     ? task.params as Record<string, unknown>
@@ -113,16 +122,6 @@ export function GenerationLogsSection(props: GenerationLogsSectionProps) {
     setPage, onToggleTask, onTogglePage, onClearSelection, onBatchDelete, onClearAll, onOpenDetail, onDelete,
   } = props
   const hasFilters = Boolean(query || status !== 'all' || modelFilter !== 'all' || from || to)
-  const hasRunningTask = tasks.some((task) => task.status === 'running')
-  const [now, setNow] = useState(() => Date.now())
-
-  useEffect(() => {
-    if (!hasRunningTask) return
-    setNow(Date.now())
-    const timer = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(timer)
-  }, [hasRunningTask])
-
   function resetFilters() {
     setQuery('')
     setStatus('all')
@@ -181,7 +180,7 @@ export function GenerationLogsSection(props: GenerationLogsSectionProps) {
                 <div className="min-w-0"><div className="truncate font-medium text-gray-900 dark:text-gray-100">{task.prompt}</div><div className="mt-1 truncate text-xs text-gray-400">ID {task.id.slice(0, 12)} · 云端资产 {task.generatedAssets?.length ?? 0}</div><div className="mt-2"><ImageStrip taskId={task.id} images={outputImages} kind="output" /></div></div>
                 <div className="min-w-0"><div className="flex items-center gap-2"><StatusBadge tone={isEdit ? 'purple' : 'blue'}>{isEdit ? '编辑' : '生成'}</StatusBadge>{isEdit && <span className="text-xs text-gray-400">{referenceImages.length} 张参考图</span>}</div>{isEdit && <div className="mt-1.5"><ImageStrip taskId={task.id} images={referenceImages} kind="reference" /></div>}</div>
                 <span className="truncate text-xs text-gray-500">{task.user?.email ?? '-'}</span><span className="truncate text-xs text-gray-500">{task.modelConfig?.displayName ?? '-'}</span><span className="truncate text-xs text-gray-500">{taskParamsSummary(task.params)}</span>
-                <StatusBadge tone={taskTone(task.status)}>{task.status}</StatusBadge><div className="font-semibold text-amber-700">{task.costCredits}</div><span className={cx('text-xs font-medium', task.status === 'running' ? 'text-blue-600 dark:text-blue-300' : 'text-gray-500')}>{taskDuration(task, now)}</span><span className="text-xs text-gray-400">{formatTime(task.createdAt)}</span>
+                <StatusBadge tone={taskTone(task.status)}>{task.status}</StatusBadge><div className="font-semibold text-amber-700">{task.costCredits}</div><TaskDurationValue task={task} /><span className="text-xs text-gray-400">{formatTime(task.createdAt)}</span>
                 <div className="flex justify-end gap-1.5"><button type="button" onClick={() => onOpenDetail(task.id)} className="h-8 rounded-lg border border-gray-200 px-2.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]">详情</button><button type="button" disabled={task.status === 'running'} onClick={() => onDelete(task.id)} className="h-8 rounded-lg border border-rose-200 px-2.5 text-xs font-medium text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-rose-400/20 dark:hover:bg-rose-400/10">清理</button></div>
               </div>
             )

@@ -31,6 +31,9 @@ interface TaskPlatformApiResult {
 }
 
 const GENERATION_POLL_INTERVAL_MS = 1800
+const GENERATION_POLL_BUSY_INTERVAL_MS = 3200
+const GENERATION_POLL_SATURATED_INTERVAL_MS = 5000
+const GENERATION_POLL_HIDDEN_INTERVAL_MS = 8000
 const GENERATION_RETRY_BASE_DELAY_MS = 2000
 const GENERATION_RETRY_MAX_DELAY_MS = 30_000
 const GENERATION_REQUEST_TIMEOUT_MS = 60_000
@@ -112,6 +115,35 @@ async function loadTaskEditMaskDataUrl(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, ms))
+}
+
+function countRunningGenerationTasks(): number {
+  return (useStore.getState().tasks ?? []).reduce((count, task) => (
+    task.status === 'running' && task.taskKind !== 'image' && task.deletedAt == null
+      ? count + 1
+      : count
+  ), 0)
+}
+
+function taskPollJitter(taskId: string): number {
+  let hash = 0
+  for (let index = 0; index < taskId.length; index += 1) {
+    hash = ((hash * 31) + taskId.charCodeAt(index)) | 0
+  }
+  return Math.abs(hash) % 700
+}
+
+export function resolveGenerationPollInterval(taskId: string): number {
+  const runningCount = countRunningGenerationTasks()
+  const baseInterval =
+    typeof document !== 'undefined' && document.visibilityState === 'hidden'
+      ? GENERATION_POLL_HIDDEN_INTERVAL_MS
+      : runningCount >= 20
+        ? GENERATION_POLL_SATURATED_INTERVAL_MS
+        : runningCount >= 10
+          ? GENERATION_POLL_BUSY_INTERVAL_MS
+          : GENERATION_POLL_INTERVAL_MS
+  return baseInterval + taskPollJitter(taskId)
 }
 
 async function waitWithAbortChecks(
@@ -277,9 +309,17 @@ async function runGenerationRequestWithRetry<T>(
 }
 
 function syncGenerationUser(result: PlatformGenerationResult) {
-  if (result.user) {
-    useStore.getState().setCurrentUser(result.user)
-  }
+  if (!result.user) return
+  const snapshot = useStore.getState()
+  const currentUser = snapshot.currentUser
+  if (
+    currentUser?.id === result.user.id &&
+    currentUser.email === result.user.email &&
+    currentUser.role === result.user.role &&
+    currentUser.status === result.user.status &&
+    currentUser.creditBalance === result.user.creditBalance
+  ) return
+  snapshot.setCurrentUser(result.user)
 }
 
 function resolveTerminalGenerationResult(
@@ -309,7 +349,7 @@ async function waitForGenerationResult(
 
   while (true) {
     if (shouldWait) {
-      await waitWithAbortChecks(GENERATION_POLL_INTERVAL_MS, throwIfAborted)
+      await waitWithAbortChecks(resolveGenerationPollInterval(taskId), throwIfAborted)
     }
     shouldWait = true
 
@@ -443,9 +483,7 @@ export async function callTaskImageApi(
     }),
   )
 
-  if (completedResult.user) {
-    useStore.getState().setCurrentUser(completedResult.user)
-  }
+  syncGenerationUser(completedResult)
   await handlers.onFinalImages?.(images)
 
   return {

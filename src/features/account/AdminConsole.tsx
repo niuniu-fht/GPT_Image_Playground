@@ -793,18 +793,20 @@ export default function AdminConsole() {
     const timer = window.setInterval(() => {
       if (refreshing) return
       refreshing = true
-      void platformApi.listAdminTasks({
-        status: taskStatus,
-        q: taskQuery,
-        modelConfigId: taskModelFilter,
-        from: taskFrom ? `${taskFrom}T00:00:00.000` : undefined,
-        to: taskTo ? `${taskTo}T23:59:59.999` : undefined,
-        page: tasksPage,
-        pageSize: adminPageSize,
-      }).then((result) => {
-        setTasks(result.items)
-        setTasksTotal(result.total)
-        setSelectedTaskIds((prev) => prev.filter((id) => result.items.some((item) => item.id === id)))
+      void platformApi.listAdminTaskStatuses(tasks.map((task) => task.id)).then((result) => {
+        const statusById = new Map(result.items.map((item) => [item.id, item]))
+        const hasFilterTransition = taskStatus !== 'all' && tasks.some((task) => {
+          const nextStatus = statusById.get(task.id)?.status
+          return nextStatus != null && nextStatus !== task.status
+        })
+        if (hasFilterTransition) {
+          void loadAll('tasks')
+          return
+        }
+        setTasks((current) => current.map((task) => {
+          const status = statusById.get(task.id)
+          return status ? { ...task, ...status } : task
+        }))
       }).catch((error) => {
         console.warn('[admin] failed to refresh running generation tasks', error)
       }).finally(() => {
@@ -812,7 +814,7 @@ export default function AdminConsole() {
       })
     }, 5_000)
     return () => window.clearInterval(timer)
-  }, [open, tab, tasks.some((task) => task.status === 'running'), tasksPage, taskStatus, taskQuery, taskModelFilter, taskFrom, taskTo])
+  }, [open, tab, tasks.map((task) => `${task.id}:${task.status}`).join('|'), tasksPage, taskStatus, taskQuery, taskModelFilter, taskFrom, taskTo])
 
   useEffect(() => {
     if (open && tab === 'models') void loadAll('models')

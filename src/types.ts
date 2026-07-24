@@ -357,6 +357,28 @@ export interface AdminUpstreamProvider {
   }>
 }
 
+export type CreditLedgerFilter = 'all' | 'redeem' | 'consume' | 'refund'
+
+export interface CreditLedgerEntry {
+  id: string
+  userId: string
+  delta: number
+  reason: string
+  taskId?: string | null
+  promptPreview?: string | null
+  balanceAfter: number
+  createdAt: string
+}
+
+export interface CreditLedgerSummary {
+  currentBalance: number
+  recordCount: number
+  totalIncome: number
+  totalSpent: number
+  totalRedeemed: number
+  totalRefunded: number
+}
+
 export interface AdminUserRedemption {
   id: string
   redeemCodeId: string

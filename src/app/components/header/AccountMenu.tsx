@@ -7,6 +7,7 @@ interface AccountMenuProps {
   onAdmin: () => void
   onChangePassword: () => void
   onFeedback: () => void
+  onCreditHistory: () => void
   onLogout: () => void
   onRedeem: () => void
 }
@@ -33,6 +34,7 @@ export function AccountMenu({
   onAdmin,
   onChangePassword,
   onFeedback,
+  onCreditHistory,
   onLogout,
   onRedeem,
 }: AccountMenuProps) {
@@ -74,6 +76,7 @@ export function AccountMenu({
   }
 
   const primaryActions: MenuAction[] = [
+    { label: '积分记录', description: '查看兑换、消耗和失败返还', onClick: onCreditHistory },
     { label: '兑换码', description: '输入兑换码增加余额', onClick: onRedeem },
     { label: '反馈与工单', description: '查看处理进度，提交问题', onClick: onFeedback },
     { label: '修改密码', description: '更新当前账号登录密码', onClick: onChangePassword },

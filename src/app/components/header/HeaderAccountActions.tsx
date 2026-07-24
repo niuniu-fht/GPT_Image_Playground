@@ -6,6 +6,7 @@ interface HeaderAccountActionsProps {
   onAdmin: () => void
   onChangePassword: () => void
   onFeedback: () => void
+  onCreditHistory: () => void
   onLogin: () => void
   onLogout: () => void
   onRedeem: () => void
@@ -16,6 +17,7 @@ export function HeaderAccountActions({
   onAdmin,
   onChangePassword,
   onFeedback,
+  onCreditHistory,
   onLogin,
   onLogout,
   onRedeem,
@@ -36,9 +38,9 @@ export function HeaderAccountActions({
     <div className="ml-1 flex items-center gap-1.5">
       <button
         type="button"
-        onClick={onRedeem}
+        onClick={onCreditHistory}
         className="hidden rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 transition hover:-translate-y-px hover:border-amber-300 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-300/50 sm:inline-flex dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-200 dark:hover:bg-amber-300/15 dark:focus:ring-amber-200/20"
-        title="点击输入兑换码"
+        title="查看积分使用记录"
       >
         积分 {currentUser.creditBalance}
       </button>
@@ -47,6 +49,7 @@ export function HeaderAccountActions({
         onAdmin={onAdmin}
         onChangePassword={onChangePassword}
         onFeedback={onFeedback}
+        onCreditHistory={onCreditHistory}
         onLogout={onLogout}
         onRedeem={onRedeem}
       />

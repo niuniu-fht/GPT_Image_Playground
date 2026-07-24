@@ -19,6 +19,9 @@ import type {
   AdminUserDetail,
   AdminUserSummary,
   CreditOrder,
+  CreditLedgerEntry,
+  CreditLedgerFilter,
+  CreditLedgerSummary,
   CreditPackage,
   CurrentUser,
   ModelConfig,
@@ -428,6 +431,21 @@ export const platformApi = {
     })
   },
 
+  listCreditLedger(params: { type?: CreditLedgerFilter; q?: string; page?: number; pageSize?: number } = {}) {
+    const query = new URLSearchParams()
+    if (params.type) query.set('type', params.type)
+    if (params.q) query.set('q', params.q)
+    if (params.page) query.set('page', String(params.page))
+    if (params.pageSize) query.set('pageSize', String(params.pageSize))
+    return request<{
+      items: CreditLedgerEntry[]
+      total: number
+      page: number
+      pageSize: number
+      summary: CreditLedgerSummary
+    }>(`/api/credits/ledger?${query}`)
+  },
+
   importAdminRedeemCodes(input: Omit<AdminRedeemCode, 'id' | 'code' | 'createdAt' | 'updatedAt' | 'usedCount' | '_count' | 'redemptions'> & {
     codes: string[]
   }) {
@@ -546,6 +564,13 @@ export const platformApi = {
     return request<{ items: AdminGenerationTask[]; total: number; page: number; pageSize: number }>(
       `/api/admin/tasks?${query}`,
     )
+  },
+
+  listAdminTaskStatuses(ids: string[]) {
+    const query = new URLSearchParams({ ids: ids.join(',') })
+    return request<{
+      items: Array<Pick<AdminGenerationTask, 'id' | 'status' | 'costCredits' | 'error' | 'finishedAt'>>
+    }>(`/api/admin/tasks/statuses?${query}`)
   },
 
   deleteAdminTask(id: string) {

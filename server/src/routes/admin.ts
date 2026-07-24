@@ -958,6 +958,33 @@ router.get('/tasks', async (req, res, next) => {
   }
 })
 
+router.get('/tasks/statuses', async (req, res, next) => {
+  try {
+    const ids = (typeof req.query.ids === 'string' ? req.query.ids : '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean)
+      .slice(0, 50)
+    if (!ids.length) {
+      sendOk(res, { items: [] })
+      return
+    }
+    const items = await prisma.generationTask.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        status: true,
+        costCredits: true,
+        error: true,
+        finishedAt: true,
+      },
+    })
+    sendOk(res, { items })
+  } catch (error) {
+    next(error)
+  }
+})
+
 router.get('/tasks/:id', async (req, res, next) => {
   try {
     const id = readParam(req.params.id)

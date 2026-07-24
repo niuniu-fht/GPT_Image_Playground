@@ -4,6 +4,7 @@ import { formatImageRatio } from '../../../../lib/size'
 import { TOUCH_ACTION_REVEAL_DELAY } from './shared'
 import { useImageAssetView } from '../../../../hooks/useImageAssetView'
 import { useNearViewport } from '../../../../hooks/useNearViewport'
+import { useSecondClock } from '../../../../hooks/useSecondClock'
 
 interface UseTaskCardStateOptions {
   preferredImageVariant?: 'thumbnail' | 'original'
@@ -20,7 +21,7 @@ export function useTaskCardState(task: TaskRecord, options: UseTaskCardStateOpti
 
   const [coverRatio, setCoverRatio] = useState('')
   const [coverSize, setCoverSize] = useState('')
-  const [now, setNow] = useState(Date.now())
+  const now = useSecondClock(task.status === 'running')
   const [touchActionsVisible, setTouchActionsVisible] = useState(false)
   const preferredImageVariant = options.preferredImageVariant ?? 'thumbnail'
   const loadPreferredImageWhenVisible = Boolean(options.loadPreferredImageWhenVisible)
@@ -65,13 +66,6 @@ export function useTaskCardState(task: TaskRecord, options: UseTaskCardStateOpti
     preferredImageVariant === 'original'
       ? preferredMetadata ?? thumbnailMetadata
       : thumbnailMetadata
-
-  useEffect(() => {
-    if (task.status !== 'running') return
-
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [task.status])
 
   useEffect(() => {
     if (!displaySrc || !coverImageId || !coverMetadata) {
