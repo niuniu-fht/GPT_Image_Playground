@@ -59,6 +59,7 @@ export interface AppState {
   inputImages: InputImage[]
   addInputImage: (image: InputImage) => void
   removeInputImage: (index: number) => void
+  moveInputImage: (fromIndex: number, toIndex: number) => void
   clearInputImages: () => void
   setInputImages: (images: InputImage[]) => void
 

@@ -49,6 +49,7 @@ export interface ReferenceImagesSectionViewModel {
   onOpenFilePicker: () => void
   onPreviewImage: (imageId: string) => void
   onRemoveInputImage: (index: number) => void
+  onMoveInputImage: (fromIndex: number, toIndex: number) => void
   onRequestClearAllImages: () => void
   onReopenMaskedEdit: () => void
   onClearMaskedEdit: () => void
@@ -114,6 +115,7 @@ export function useInputBarState(): InputBarViewModel {
   const setPrompt = useStore((state) => state.setPrompt)
   const inputImages = useStore((state) => state.inputImages)
   const removeInputImage = useStore((state) => state.removeInputImage)
+  const moveInputImage = useStore((state) => state.moveInputImage)
   const clearInputImages = useStore((state) => state.clearInputImages)
   const categories = useStore((state) => state.categories)
   const activeCategoryFilter = useStore((state) => state.activeCategoryFilter)
@@ -191,6 +193,7 @@ export function useInputBarState(): InputBarViewModel {
     mobileDrawerOpen,
     onPreviewImage: (imageId) => openLightbox(imageId, inputImages.map((image) => image.id)),
     onRemoveInputImage: removeInputImage,
+    onMoveInputImage: moveInputImage,
     onRequestClearAllImages: requestClearInputImages,
   })
 

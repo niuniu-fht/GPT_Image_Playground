@@ -21,6 +21,7 @@ interface ReferenceImagesSectionProps {
   onOpenFilePicker: () => void
   onPreviewImage: (imageId: string) => void
   onRemoveInputImage: (index: number) => void
+  onMoveInputImage: (fromIndex: number, toIndex: number) => void
   onRequestClearAllImages: () => void
   onReopenMaskedEdit: () => void
   onClearMaskedEdit: () => void
@@ -43,6 +44,7 @@ export default function ReferenceImagesSection({
   onOpenFilePicker,
   onPreviewImage,
   onRemoveInputImage,
+  onMoveInputImage,
   onRequestClearAllImages,
   onReopenMaskedEdit,
   onClearMaskedEdit,
@@ -72,6 +74,7 @@ export default function ReferenceImagesSection({
             inputImages={inputImages}
             onPreviewImage={onPreviewImage}
             onRemoveInputImage={onRemoveInputImage}
+            onMoveInputImage={onMoveInputImage}
             onRequestClearAllImages={onRequestClearAllImages}
           />
         </div>

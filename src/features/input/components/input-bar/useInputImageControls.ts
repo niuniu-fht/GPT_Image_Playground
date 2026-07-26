@@ -28,6 +28,7 @@ interface UseInputImageControlsOptions {
   mobileDrawerOpen: boolean
   onPreviewImage: (imageId: string) => void
   onRemoveInputImage: (index: number) => void
+  onMoveInputImage: (fromIndex: number, toIndex: number) => void
   onRequestClearAllImages: () => void
 }
 
@@ -52,6 +53,7 @@ export function useInputImageControls(
     mobileDrawerOpen,
     onPreviewImage,
     onRemoveInputImage,
+    onMoveInputImage,
     onRequestClearAllImages,
   } = options
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -250,6 +252,7 @@ export function useInputImageControls(
       },
       onPreviewImage,
       onRemoveInputImage,
+      onMoveInputImage,
       onRequestClearAllImages,
       onReopenMaskedEdit: () => {
         if (primaryMaskedInput) {

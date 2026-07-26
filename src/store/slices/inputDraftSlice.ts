@@ -16,11 +16,35 @@ type InputDraftSliceState = Pick<
   | 'inputImages'
   | 'addInputImage'
   | 'removeInputImage'
+  | 'moveInputImage'
   | 'clearInputImages'
   | 'setInputImages'
   | 'params'
   | 'setParams'
 >
+
+export function reorderInputImages(
+  inputImages: InputImage[],
+  fromIndex: number,
+  toIndex: number,
+): InputImage[] {
+  if (
+    !Number.isInteger(fromIndex) ||
+    !Number.isInteger(toIndex) ||
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= inputImages.length ||
+    toIndex >= inputImages.length ||
+    fromIndex === toIndex
+  ) {
+    return inputImages
+  }
+
+  const nextInputImages = [...inputImages]
+  const [movedImage] = nextInputImages.splice(fromIndex, 1)
+  nextInputImages.splice(toIndex, 0, movedImage)
+  return nextInputImages
+}
 
 export function createInputDraftSlice(set: StoreSet): InputDraftSliceState {
   return {
@@ -51,6 +75,12 @@ export function createInputDraftSlice(set: StoreSet): InputDraftSliceState {
     },
     removeInputImage(index: number) {
       set((state) => ({ inputImages: state.inputImages.filter((_, i) => i !== index) }))
+    },
+    moveInputImage(fromIndex: number, toIndex: number) {
+      set((state) => {
+        const inputImages = reorderInputImages(state.inputImages, fromIndex, toIndex)
+        return inputImages === state.inputImages ? state : { inputImages }
+      })
     },
     clearInputImages() {
       set((state) => {
