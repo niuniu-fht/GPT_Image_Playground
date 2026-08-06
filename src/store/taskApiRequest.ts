@@ -5,7 +5,7 @@ import {
   platformApi,
   type PlatformGenerationResult,
 } from '../lib/platformApi'
-import type { AppSettings, TaskRecord, TaskResponseMeta } from '../types'
+import type { AppSettings, TaskImageResult, TaskRecord, TaskResponseMeta } from '../types'
 import { getImageView } from './imageAssets'
 import { useStore } from './state'
 
@@ -325,6 +325,9 @@ function syncGenerationUser(result: PlatformGenerationResult) {
 function resolveTerminalGenerationResult(
   result: PlatformGenerationResult,
 ): PlatformGenerationResult | null {
+  if (result.images.length > 0) {
+    return result
+  }
   if (result.status === 'error') {
     if (result.error && /生成超过\s*\d+\s*秒/.test(result.error)) {
       throw new GenerationTaskTimeoutError(
@@ -334,7 +337,7 @@ function resolveTerminalGenerationResult(
     }
     throw new Error(result.error || '生成失败，请稍后重试')
   }
-  if (result.status === 'done' || result.images.length > 0) {
+  if (result.status === 'done') {
     return result
   }
   return null
@@ -377,6 +380,76 @@ function mergeGenerationResponseMeta(
   return {
     ...baseMeta,
     generationTaskId,
+  }
+}
+
+interface ImageLoadError {
+  error: string
+  index: number
+}
+
+function mergeImageLoadErrorsIntoResponseMeta(
+  responseMeta: TaskResponseMeta,
+  imageLoadErrors: ImageLoadError[],
+): TaskResponseMeta {
+  if (imageLoadErrors.length === 0) {
+    return responseMeta
+  }
+
+  const imageResultsByIndex = new Map<number, TaskImageResult>()
+  for (const item of responseMeta.imageResults ?? []) {
+    imageResultsByIndex.set(item.index, item)
+  }
+  for (const item of imageLoadErrors) {
+    imageResultsByIndex.set(item.index, {
+      index: item.index,
+      status: 'error',
+      error: item.error,
+    })
+  }
+
+  return {
+    ...responseMeta,
+    imageResults: Array.from(imageResultsByIndex.values()).sort((left, right) => left.index - right.index),
+  }
+}
+
+async function resolveGeneratedOutputImageAsset(
+  completedResult: PlatformGenerationResult,
+  image: PlatformGenerationResult['images'][number],
+  fallbackIndex: number,
+): Promise<TaskApiOutputImageAsset> {
+  const outputUrl = image.dataUrl.trim()
+  const outputIndex = typeof image.index === 'number' ? image.index : fallbackIndex
+  const outputMeta = {
+    generationTaskId: completedResult.taskId,
+    outputIndex,
+  }
+  if (isRemoteImageUrl(outputUrl)) {
+    return {
+      remoteUrl: outputUrl,
+      mimeType: image.mimeType || 'image/png',
+      ...outputMeta,
+    }
+  }
+  if (/^data:[^,]+,.+/i.test(outputUrl)) {
+    return {
+      dataUrl: outputUrl,
+      mimeType: image.mimeType || outputUrl.match(/^data:([^;,]+)/i)?.[1] || 'image/png',
+      ...outputMeta,
+    }
+  }
+
+  const response = await fetch(outputUrl)
+  if (!response.ok) {
+    throw new Error(`图片读取失败：HTTP ${response.status}`)
+  }
+  const blob = await response.blob()
+  return {
+    blob,
+    sourceUrl: outputUrl,
+    mimeType: image.mimeType || blob.type || 'image/png',
+    ...outputMeta,
   }
 }
 
@@ -448,46 +521,41 @@ export async function callTaskImageApi(
       ?? await waitForGenerationResult(result.taskId, throwIfTaskStopped)
   }
 
-  const images: TaskApiOutputImageAsset[] = await Promise.all(
-    completedResult.images.map(async (image, index) => {
-      const outputUrl = image.dataUrl.trim()
-      const outputMeta = {
-        generationTaskId: completedResult.taskId,
-        outputIndex: index,
-      }
-      if (isRemoteImageUrl(outputUrl)) {
-        return {
-          remoteUrl: outputUrl,
-          mimeType: image.mimeType || 'image/png',
-          ...outputMeta,
-        }
-      }
-      if (/^data:[^,]+,.+/i.test(outputUrl)) {
-        return {
-          dataUrl: outputUrl,
-          mimeType: image.mimeType || outputUrl.match(/^data:([^;,]+)/i)?.[1] || 'image/png',
-          ...outputMeta,
-        }
-      }
-
-      const response = await fetch(outputUrl)
-      if (!response.ok) {
-        throw new Error(`图片读取失败：HTTP ${response.status}`)
-      }
-      const blob = await response.blob()
-      return {
-        blob,
-        mimeType: image.mimeType || blob.type || 'image/png',
-        ...outputMeta,
-      }
-    }),
+  const settledImages = await Promise.allSettled(
+    completedResult.images.map((image, index) => resolveGeneratedOutputImageAsset(
+      completedResult,
+      image,
+      index,
+    )),
   )
+  const images: TaskApiOutputImageAsset[] = []
+  const imageLoadErrors: ImageLoadError[] = []
+  settledImages.forEach((result, fallbackIndex) => {
+    const sourceImage = completedResult.images[fallbackIndex]
+    const outputIndex = typeof sourceImage?.index === 'number' ? sourceImage.index : fallbackIndex
+    if (result.status === 'fulfilled') {
+      images.push(result.value)
+      return
+    }
+    imageLoadErrors.push({
+      index: outputIndex,
+      error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+    })
+  })
+  if (images.length === 0 && imageLoadErrors.length > 0) {
+    throw new Error(imageLoadErrors[0]?.error || '图片读取失败')
+  }
 
   syncGenerationUser(completedResult)
   await handlers.onFinalImages?.(images)
 
+  const responseMeta = mergeImageLoadErrorsIntoResponseMeta(
+    mergeGenerationResponseMeta(completedResult.responseMeta, completedResult.taskId),
+    imageLoadErrors,
+  )
+
   return {
     images,
-    responseMeta: mergeGenerationResponseMeta(completedResult.responseMeta, completedResult.taskId),
+    responseMeta,
   }
 }

@@ -739,6 +739,11 @@ export interface TaskResponseMeta {
   generationTimeoutSeconds?: number | null
   appliedImageParams?: AppliedImageParams | null
   imageResults?: TaskImageResult[] | null
+  localPersistenceWarnings?: Array<{
+    imageIndex: number
+    imageUrl: string
+    message: string
+  }> | null
   revisedPrompt?: string | null
   transport?: AppliedTransportMeta | null
   squareUpload?: {

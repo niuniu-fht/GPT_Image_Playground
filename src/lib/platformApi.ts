@@ -139,7 +139,7 @@ export interface GenerationInputImagePayload {
 export interface PlatformGenerationResult {
   taskId: string
   status?: 'running' | 'done' | 'error'
-  images: Array<{ dataUrl: string; mimeType: string }>
+  images: Array<{ dataUrl: string; index?: number; mimeType: string }>
   error?: string | null
   model: { id: string; displayName: string; costCredits: number }
   user: CurrentUser | null

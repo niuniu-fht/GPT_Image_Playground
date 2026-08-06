@@ -2,6 +2,7 @@ import {
   clearImages,
   deleteImage,
   getAllImageRecords,
+  hashBlobContent,
   hashDataUrl,
   storeImageBlob,
   storeLegacyDataUrl,
@@ -231,6 +232,15 @@ export async function stageImageAssetReference(
   return imageId
 }
 
+export async function stageImageAssetBlob(
+  blob: Blob,
+  id?: string,
+): Promise<string> {
+  const imageId = id?.trim() || await hashBlobContent(blob)
+  setCachedImage(imageId, blob, 'original')
+  return imageId
+}
+
 export function getCachedImageAssetUrl(
   imageId: string,
   variant: ImageAssetVariant = 'original',
@@ -361,6 +371,9 @@ export async function storeImage(
 ): Promise<string> {
   const { stageOnly, thumbnailBlob, thumbnailMimeType, thumbnailWidth, thumbnailHeight, ...baseOptions } = options
   if (input instanceof Blob) {
+    if (stageOnly) {
+      return stageImageAssetBlob(input, baseOptions.id)
+    }
     return saveImageAssetBlob(input, { ...baseOptions, thumbnailBlob, thumbnailMimeType, thumbnailWidth, thumbnailHeight })
   }
   if (stageOnly) {

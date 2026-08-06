@@ -45,6 +45,11 @@ export default function DetailImagePanel({
 }: DetailImagePanelProps) {
   const runOutcome = resolveTaskRunOutcome(task)
   const isExceptional = isTaskRunExceptional(task)
+  const localPersistenceWarnings = task.responseMeta?.localPersistenceWarnings ?? []
+  const localPersistenceWarning =
+    localPersistenceWarnings.find((item) => item.imageIndex === imageIndex) ??
+    localPersistenceWarnings[imageIndex] ??
+    null
 
   return (
     <div
@@ -134,21 +139,51 @@ export default function DetailImagePanel({
             </div>
           )}
 
-          {task.status === 'done' && currentOutputImageSrc && (
-            <button
-              type="button"
-              onClick={onDownloadImage}
-              className="absolute right-3 top-3 inline-flex h-9 items-center gap-1.5 rounded-full border border-white/15 bg-black/45 px-3 text-xs font-semibold text-white shadow-lg backdrop-blur-md transition hover:bg-black/65"
-              aria-label="下载当前图片"
-              title="下载当前图片"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <path d="M7 10l5 5 5-5" />
-                <path d="M12 15V3" />
-              </svg>
-              下载
-            </button>
+          {task.status === 'done' && (
+            <div className="absolute right-3 top-3 flex max-w-[19rem] flex-col items-end gap-2">
+              {localPersistenceWarning && (
+                <div className="rounded-2xl bg-orange-500/85 px-3 py-2 text-right text-xs leading-5 text-white shadow-lg backdrop-blur-sm">
+                  <p
+                    style={{
+                      display: '-webkit-box',
+                      WebkitBoxOrient: 'vertical',
+                      WebkitLineClamp: 3,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    本地保存失败，已触发浏览器下载
+                  </p>
+                  <button
+                    type="button"
+                    onClick={onCopyError}
+                    className="mt-2 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-1 text-[11px] text-white/90 transition hover:bg-white/25"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                    </svg>
+                    复制地址
+                  </button>
+                </div>
+              )}
+
+              {currentOutputImageSrc && (
+                <button
+                  type="button"
+                  onClick={onDownloadImage}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-full border border-white/15 bg-black/45 px-3 text-xs font-semibold text-white shadow-lg backdrop-blur-md transition hover:bg-black/65"
+                  aria-label="下载当前图片"
+                  title="下载当前图片"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <path d="M7 10l5 5 5-5" />
+                    <path d="M12 15V3" />
+                  </svg>
+                  下载
+                </button>
+              )}
+            </div>
           )}
 
           {outputLen > 1 && (

@@ -1,4 +1,4 @@
-import type { AppSettings, TaskErrorDebugInfo, TaskRecord } from '../types'
+import type { AppSettings, TaskErrorDebugInfo, TaskRecord, TaskResponseMeta } from '../types'
 import { DEFAULT_SETTINGS } from '../types'
 import {
   clearTaskAbortState,
@@ -74,10 +74,17 @@ function throwIfTaskAbortRequested(taskId: string) {
   throw error
 }
 
-const GENERATED_IMAGE_PERSIST_TIMEOUT_MS = 12_000
+const GENERATED_IMAGE_PERSIST_TIMEOUT_MS = 30_000
+
+interface LocalPersistenceWarning {
+  imageIndex: number
+  imageUrl: string
+  message: string
+}
 
 interface StoredGeneratedOutputImage {
   imageId: string
+  localPersistenceWarning?: LocalPersistenceWarning
   transient: boolean
 }
 
@@ -117,12 +124,120 @@ function persistGeneratedImage(
   )
 }
 
+function getMimeExtension(mimeType: string | null | undefined): string {
+  const subtype = mimeType?.split('/')[1]?.split(';')[0]?.trim().toLowerCase()
+  if (!subtype) return 'png'
+  if (subtype === 'jpeg') return 'jpg'
+  if (subtype === 'svg+xml') return 'svg'
+  return subtype.replace(/[^a-z0-9]/g, '') || 'png'
+}
+
+function toCopyableImageUrl(url: string): string {
+  if (/^(blob:|data:|https?:\/\/)/i.test(url)) {
+    return url
+  }
+
+  try {
+    return new URL(url, window.location.href).toString()
+  } catch {
+    return url
+  }
+}
+
+function triggerBrowserDownloadByUrl(
+  url: string,
+  input: {
+    filename: string
+    revokeAfterMs?: number
+  },
+) {
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = input.filename
+  anchor.rel = 'noopener noreferrer'
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+
+  if (input.revokeAfterMs != null) {
+    window.setTimeout(() => URL.revokeObjectURL(url), input.revokeAfterMs)
+  }
+}
+
+function createGeneratedImageDownloadUrl(
+  image: TaskApiOutputImageAsset,
+): { copyableUrl: string; downloadUrl: string; revokeAfterMs?: number } {
+  if ('remoteUrl' in image) {
+    return {
+      copyableUrl: toCopyableImageUrl(image.remoteUrl),
+      downloadUrl: image.remoteUrl,
+    }
+  }
+  if ('dataUrl' in image) {
+    return {
+      copyableUrl: image.dataUrl,
+      downloadUrl: image.dataUrl,
+    }
+  }
+  if (image.sourceUrl?.trim()) {
+    return {
+      copyableUrl: toCopyableImageUrl(image.sourceUrl),
+      downloadUrl: image.sourceUrl,
+    }
+  }
+
+  const objectUrl = URL.createObjectURL(image.blob)
+  return {
+    copyableUrl: objectUrl,
+    downloadUrl: objectUrl,
+    revokeAfterMs: 60_000,
+  }
+}
+
+function handleLocalPersistenceFailure(
+  image: TaskApiOutputImageAsset,
+  error: unknown,
+): LocalPersistenceWarning {
+  const imageIndex = typeof image.outputIndex === 'number' ? image.outputIndex : 0
+  const { copyableUrl, downloadUrl, revokeAfterMs } = createGeneratedImageDownloadUrl(image)
+  const message = error instanceof Error ? error.message : String(error)
+  triggerBrowserDownloadByUrl(downloadUrl, {
+    filename: `generated-${Date.now()}-${imageIndex + 1}.${getMimeExtension(image.mimeType)}`,
+    revokeAfterMs,
+  })
+
+  return {
+    imageIndex,
+    imageUrl: copyableUrl,
+    message: `${message}；已触发浏览器下载。图片地址：${copyableUrl}`,
+  }
+}
+
+function appendLocalPersistenceWarnings(
+  responseMeta: TaskResponseMeta | null | undefined,
+  warnings: LocalPersistenceWarning[],
+): TaskResponseMeta | null {
+  if (warnings.length === 0) {
+    return responseMeta ?? null
+  }
+
+  return {
+    ...(responseMeta ?? {}),
+    localPersistenceWarnings: [
+      ...(responseMeta?.localPersistenceWarnings ?? []),
+      ...warnings,
+    ],
+  }
+}
+
 async function stageGeneratedImageReference(
   referenceUrl: string,
+  preferredImageId?: string,
 ): Promise<StoredGeneratedOutputImage> {
   const imageId = await storeImage(referenceUrl, {
     source: 'generated',
     stageOnly: true,
+    id: preferredImageId,
   })
   return {
     imageId,
@@ -133,6 +248,8 @@ async function stageGeneratedImageReference(
 async function storeGeneratedDataUrlImage(
   dataUrl: string,
   mimeType: string,
+  preferredTransientImageId?: string,
+  outputIndex?: number,
 ): Promise<StoredGeneratedOutputImage> {
   try {
     const imageId = await withTimeout(
@@ -157,15 +274,28 @@ async function storeGeneratedDataUrlImage(
     }
   } catch (error) {
     console.warn('[generation] failed to persist generated data url locally; using session cache', error)
-    return stageGeneratedImageReference(dataUrl)
+    const fallback = await stageGeneratedImageReference(dataUrl, preferredTransientImageId)
+    return {
+      ...fallback,
+      localPersistenceWarning: handleLocalPersistenceFailure(
+        { dataUrl, mimeType, outputIndex },
+        error,
+      ),
+    }
   }
 }
 
 async function storeGeneratedOutputImage(
   image: TaskApiOutputImageAsset,
+  preferredTransientImageId?: string,
 ): Promise<StoredGeneratedOutputImage> {
   if ('dataUrl' in image) {
-    return storeGeneratedDataUrlImage(image.dataUrl, image.mimeType)
+    return storeGeneratedDataUrlImage(
+      image.dataUrl,
+      image.mimeType,
+      preferredTransientImageId,
+      image.outputIndex,
+    )
   }
 
   if ('remoteUrl' in image) {
@@ -189,16 +319,38 @@ async function storeGeneratedOutputImage(
           '[generation] failed to persist remote image reference locally; using session cache',
           fallbackError,
         )
-        return stageGeneratedImageReference(image.remoteUrl)
+        const fallback = await stageGeneratedImageReference(image.remoteUrl, preferredTransientImageId)
+        return {
+          ...fallback,
+          localPersistenceWarning: handleLocalPersistenceFailure(image, fallbackError),
+        }
       }
     }
   }
 
-  const imageId = await persistGeneratedImage(image.blob, image.mimeType || image.blob.type || null)
-  return {
-    imageId,
-    transient: false,
+  try {
+    const imageId = await persistGeneratedImage(image.blob, image.mimeType || image.blob.type || null)
+    return {
+      imageId,
+      transient: false,
+    }
+  } catch (error) {
+    console.warn('[generation] failed to persist generated blob locally; using session cache', error)
+    const imageId = await storeImage(image.blob, {
+      id: preferredTransientImageId,
+      source: 'generated',
+      stageOnly: true,
+    })
+    return {
+      imageId,
+      localPersistenceWarning: handleLocalPersistenceFailure(image, error),
+      transient: true,
+    }
   }
+}
+
+function buildTransientGeneratedImageId(taskId: string, imageIndex: number): string {
+  return `generated-transient-${taskId}-${imageIndex}`
 }
 
 const activeTaskExecutions = new Map<string, Promise<void>>()
@@ -219,6 +371,7 @@ async function executeTaskRun(taskId: string, requestSettings: AppSettings) {
   }
 
   const outputIds: string[] = []
+  const localPersistenceWarnings: LocalPersistenceWarning[] = []
   let transientOutputCount = 0
   let taskAccepted = Boolean(task.generationTaskId)
 
@@ -233,9 +386,18 @@ async function executeTaskRun(taskId: string, requestSettings: AppSettings) {
       for (const image of images) {
         throwIfTaskAbortRequested(taskId)
         const imageIndex = typeof image.outputIndex === 'number' ? image.outputIndex : outputIds.length
-        const storedImage = await storeGeneratedOutputImage(image)
+        const storedImage = await storeGeneratedOutputImage(
+          image,
+          buildTransientGeneratedImageId(taskId, imageIndex),
+        )
         throwIfTaskAbortRequested(taskId)
         outputIds.push(storedImage.imageId)
+        if (storedImage.localPersistenceWarning) {
+          localPersistenceWarnings.push({
+            ...storedImage.localPersistenceWarning,
+            imageIndex,
+          })
+        }
         if (storedImage.transient) {
           transientOutputCount += 1
           if (image.generationTaskId) {
@@ -281,14 +443,26 @@ async function executeTaskRun(taskId: string, requestSettings: AppSettings) {
     }
 
     throwIfTaskAbortRequested(taskId)
+    const responseMeta = appendLocalPersistenceWarnings(
+      result.responseMeta ?? null,
+      localPersistenceWarnings,
+    )
     succeedTaskRun(taskId, {
       outputImageIds: outputIds,
-      responseMeta: result.responseMeta ?? null,
+      responseMeta,
     })
 
     if (result.responseMeta?.squareUploadError) {
       console.warn('[square] generated image upload failed', result.responseMeta.squareUploadError)
       useStore.getState().showToast('生成完成，但图片云端同步失败，原图已保留；请稍后重试或联系管理员', 'error')
+      return
+    }
+
+    if (localPersistenceWarnings.length > 0) {
+      useStore.getState().showToast(
+        `生成完成，但 ${localPersistenceWarnings.length} 张图片本地保存失败，已触发浏览器下载；详情中可复制图片地址`,
+        'error',
+      )
       return
     }
 

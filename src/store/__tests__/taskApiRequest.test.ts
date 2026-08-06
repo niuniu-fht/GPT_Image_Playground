@@ -213,6 +213,42 @@ describe('callTaskImageApi recovery', () => {
     expect('blob' in result.images[0]!).toBe(true)
   })
 
+  it('keeps successful images when one temporary image path fails', async () => {
+    platformMocks.getGenerationTask.mockResolvedValueOnce({
+      ...createDoneResult('remote-task-partial-file'),
+      images: [
+        { dataUrl: '/api/generations/remote-task-partial-file/images/0', index: 0, mimeType: 'image/png' },
+        { dataUrl: '/api/generations/remote-task-partial-file/images/1', index: 1, mimeType: 'image/png' },
+      ],
+      responseMeta: {
+        generationTimeoutSeconds: 300,
+        imageResults: [
+          { index: 0, status: 'done', mimeType: 'image/png' },
+          { index: 1, status: 'done', mimeType: 'image/png' },
+        ],
+      },
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'image/png' } }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await callTaskImageApi(
+      createTask({ generationTaskId: 'remote-task-partial-file', params: { ...createTask().params, n: 2 } }),
+      {} as never,
+    )
+
+    expect(result.images).toHaveLength(1)
+    expect(result.images[0]).toMatchObject({ outputIndex: 0, sourceUrl: '/api/generations/remote-task-partial-file/images/0' })
+    expect(result.responseMeta?.imageResults).toContainEqual({
+      index: 1,
+      status: 'error',
+      error: '图片读取失败：HTTP 404',
+    })
+  })
+
   it('waits for the browser to come back online before resuming', async () => {
     vi.stubGlobal('navigator', { onLine: false })
     platformMocks.getGenerationTask.mockResolvedValueOnce(createDoneResult('remote-task-3'))
