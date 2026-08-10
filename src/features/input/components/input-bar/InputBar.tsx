@@ -20,7 +20,7 @@ export default function InputBar() {
 
   return (
     <>
-      <aside className="z-20 hidden w-80 flex-shrink-0 border-r border-gray-200 bg-white dark:border-white/[0.08] dark:bg-gray-900 md:flex md:flex-col">
+      <aside className="z-20 hidden w-[22rem] flex-shrink-0 border-r border-gray-200 bg-white dark:border-white/[0.08] dark:bg-gray-900 md:flex md:flex-col lg:w-[23rem] xl:w-[25rem]">
         <div className="flex h-full flex-col">
           <InputPanelContent content={inputContent} />
         </div>

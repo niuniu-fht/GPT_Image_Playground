@@ -56,7 +56,13 @@ const generationSchema = z.object({
 })
 
 type GenerationInput = z.infer<typeof generationSchema>
-type GenerationModel = Prisma.ModelConfigGetPayload<{ include: { upstreamProvider: true } }>
+type GenerationModel = Prisma.ModelConfigGetPayload<{
+  include: {
+    upstreamProvider: true
+    lowQualityUpstreamProvider: true
+    highQualityUpstreamProvider: true
+  }
+}>
 type GenerationUpstream = { model: string; baseUrl: string; apiKey: string }
 type PreparedGenerationImage = {
   byteSize: number
@@ -111,15 +117,28 @@ function publicUser(user: { id: string; email: string; role: string; creditBalan
   }
 }
 
-function resolveGenerationUpstream(model: GenerationModel): GenerationUpstream {
-  return model.upstreamProvider?.enabled
+function resolveQualityUpstreamModel(model: GenerationModel, quality: string): string {
+  if (quality === 'low') return model.lowQualityUpstreamModel?.trim() || model.upstreamModel
+  if (quality === 'high') return model.highQualityUpstreamModel?.trim() || model.upstreamModel
+  return model.upstreamModel
+}
+
+function resolveGenerationUpstream(model: GenerationModel, quality: string): GenerationUpstream {
+  const upstreamModel = resolveQualityUpstreamModel(model, quality)
+  const qualityProvider = quality === 'low'
+    ? model.lowQualityUpstreamProvider
+    : quality === 'high'
+      ? model.highQualityUpstreamProvider
+      : null
+  const upstreamProvider = qualityProvider?.enabled ? qualityProvider : model.upstreamProvider
+  return upstreamProvider?.enabled
     ? {
-        model: model.upstreamModel,
-        baseUrl: model.upstreamProvider.baseUrl,
-        apiKey: model.upstreamProvider.apiKey,
+        model: upstreamModel,
+        baseUrl: upstreamProvider.baseUrl,
+        apiKey: upstreamProvider.apiKey,
       }
     : {
-        model: model.upstreamModel,
+        model: upstreamModel,
         baseUrl: env.openaiBaseUrl,
         apiKey: env.openaiApiKey,
       }
@@ -927,7 +946,7 @@ async function runGenerationTask(input: {
     }
     const generationResult = await callImagesApi(
       input.generationInput,
-      resolveGenerationUpstream(input.model),
+      resolveGenerationUpstream(input.model, input.generationInput.params.quality),
       controller.signal,
       input.generationTimeoutSeconds,
       async (image, index) => {
@@ -1150,7 +1169,11 @@ router.post('/', requireUser, async (req, res, next) => {
     }
     const model = await prisma.modelConfig.findFirst({
       where: { id: input.modelConfigId, enabled: true },
-      include: { upstreamProvider: true },
+      include: {
+        upstreamProvider: true,
+        lowQualityUpstreamProvider: true,
+        highQualityUpstreamProvider: true,
+      },
     })
     if (!model) throw new HttpError(404, 'model_not_found', '模型不可用或不存在')
     if (model.apiProtocol !== 'images') {

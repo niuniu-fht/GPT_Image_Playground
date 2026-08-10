@@ -98,7 +98,11 @@ model ModelConfig {
   highQualityCostCredits2K Int   @default(0)
   highQualityCostCredits4K Int   @default(0)
   upstreamModel String
+  lowQualityUpstreamModel String?
+  highQualityUpstreamModel String?
   upstreamProviderId String?
+  lowQualityUpstreamProviderId String?
+  highQualityUpstreamProviderId String?
   apiProtocol   ApiProtocol      @default(images)
   enabled       Boolean          @default(true)
   isNew         Boolean          @default(false)
@@ -106,7 +110,12 @@ model ModelConfig {
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
   tasks         GenerationTask[]
-  upstreamProvider UpstreamProvider? @relation(fields: [upstreamProviderId], references: [id], onDelete: SetNull)
+  upstreamProvider UpstreamProvider? @relation("MediumQualityProvider", fields: [upstreamProviderId], references: [id], onDelete: SetNull)
+  lowQualityUpstreamProvider UpstreamProvider? @relation("LowQualityProvider", fields: [lowQualityUpstreamProviderId], references: [id], onDelete: SetNull)
+  highQualityUpstreamProvider UpstreamProvider? @relation("HighQualityProvider", fields: [highQualityUpstreamProviderId], references: [id], onDelete: SetNull)
+
+  @@index([lowQualityUpstreamProviderId])
+  @@index([highQualityUpstreamProviderId])
 }
 
 model UpstreamProvider {
@@ -125,7 +134,9 @@ model UpstreamProvider {
   lastHealthMessage String @default("")
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
-  models    ModelConfig[]
+  models    ModelConfig[] @relation("MediumQualityProvider")
+  lowQualityModels ModelConfig[] @relation("LowQualityProvider")
+  highQualityModels ModelConfig[] @relation("HighQualityProvider")
 
   @@index([enabled, priority])
 }

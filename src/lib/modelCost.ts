@@ -29,6 +29,16 @@ export function resolveFallbackQuality(model: ModelConfig | null): 'low' | 'medi
   return resolveAvailableQualities(model)[0] ?? 'medium'
 }
 
+export function resolveEffectiveModelQuality(
+  model: ModelConfig | null,
+  requestedQuality: string,
+): 'low' | 'medium' | 'high' {
+  if (requestedQuality !== 'auto' && isQualityEnabled(model, requestedQuality)) {
+    return requestedQuality as 'low' | 'medium' | 'high'
+  }
+  return resolveFallbackQuality(model)
+}
+
 function resolveMediumCostByTier(model: ModelConfig, tier: SizeTier): number {
   if (tier === '4K') return model.costCredits4K || model.costCredits * 4
   if (tier === '2K') return model.costCredits2K || model.costCredits * 2

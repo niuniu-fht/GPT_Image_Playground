@@ -142,7 +142,7 @@ export function ModelsSection({
               <span>标识</span>
               <span>上游渠道</span>
               <span>上游健康</span>
-              <span>上游模型</span>
+              <span>质量分组模型</span>
               <span>协议</span>
               <span>阶梯单价</span>
               <span>排序</span>
@@ -173,7 +173,17 @@ export function ModelsSection({
                     </div>
                   </div>
                   <div className="truncate text-xs font-medium text-gray-600 dark:text-gray-300">{model.name}</div>
-                  <div className="truncate text-gray-700 dark:text-gray-200">{model.upstreamProvider?.name ?? '环境变量默认'}</div>
+                  <div className="space-y-1 text-xs text-gray-700 dark:text-gray-200">
+                    <div className="truncate" title={model.lowQualityUpstreamProvider?.name ?? model.upstreamProvider?.name ?? '环境变量默认'}>
+                      低：{model.lowQualityUpstreamProvider?.name ?? model.upstreamProvider?.name ?? '环境变量默认'}
+                    </div>
+                    <div className="truncate" title={model.upstreamProvider?.name ?? '环境变量默认'}>
+                      中：{model.upstreamProvider?.name ?? '环境变量默认'}
+                    </div>
+                    <div className="truncate" title={model.highQualityUpstreamProvider?.name ?? model.upstreamProvider?.name ?? '环境变量默认'}>
+                      高：{model.highQualityUpstreamProvider?.name ?? model.upstreamProvider?.name ?? '环境变量默认'}
+                    </div>
+                  </div>
                   <div className="min-w-0 space-y-1">
                     {model.upstreamProvider ? (
                       <>
@@ -192,7 +202,11 @@ export function ModelsSection({
                       </>
                     )}
                   </div>
-                  <div className="truncate text-xs text-gray-500">{model.upstreamModel}</div>
+                  <div className="space-y-1 text-xs text-gray-500">
+                    <div className="truncate" title={model.lowQualityUpstreamModel || model.upstreamModel}>低：{model.lowQualityUpstreamModel || model.upstreamModel}</div>
+                    <div className="truncate" title={model.upstreamModel}>中：{model.upstreamModel}</div>
+                    <div className="truncate" title={model.highQualityUpstreamModel || model.upstreamModel}>高：{model.highQualityUpstreamModel || model.upstreamModel}</div>
+                  </div>
                   <StatusBadge tone="gray">{modelProtocolLabel(model.apiProtocol)}</StatusBadge>
                   <div className="space-y-1 text-xs font-semibold text-amber-700">
                     {isGptImageConfig(model) && (

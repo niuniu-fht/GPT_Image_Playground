@@ -147,7 +147,11 @@ export interface ModelConfig {
   highQualityCostCredits2K: number
   highQualityCostCredits4K: number
   upstreamModel: string
+  lowQualityUpstreamModel?: string | null
+  highQualityUpstreamModel?: string | null
   upstreamProviderId?: string | null
+  lowQualityUpstreamProviderId?: string | null
+  highQualityUpstreamProviderId?: string | null
   apiProtocol: ApiProtocol
   enabled: boolean
   isNew: boolean
@@ -165,6 +169,8 @@ export interface ModelConfig {
     lastHttpStatus?: number | null
     lastHealthMessage: string
   } | null
+  lowQualityUpstreamProvider?: ModelConfig['upstreamProvider']
+  highQualityUpstreamProvider?: ModelConfig['upstreamProvider']
 }
 
 export interface AdminUserSummary {

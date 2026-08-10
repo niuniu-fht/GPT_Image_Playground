@@ -25,7 +25,11 @@ const modelSchema = z.object({
   highQualityCostCredits2K: z.number().int().min(0).max(100000).default(0),
   highQualityCostCredits4K: z.number().int().min(0).max(100000).default(0),
   upstreamModel: z.string().min(1).max(120),
+  lowQualityUpstreamModel: z.string().trim().max(120).nullable().optional(),
+  highQualityUpstreamModel: z.string().trim().max(120).nullable().optional(),
   upstreamProviderId: z.string().nullable().optional(),
+  lowQualityUpstreamProviderId: z.string().nullable().optional(),
+  highQualityUpstreamProviderId: z.string().nullable().optional(),
   apiProtocol: z.enum(['images', 'responses']).default('images'),
   enabled: z.boolean().default(true),
   isNew: z.boolean().default(false),
@@ -59,7 +63,11 @@ router.get('/models', async (_req, res, next) => {
     const models = await prisma.modelConfig.findMany({
       where: { enabled: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-      include: { upstreamProvider: { select: upstreamProviderModelSelect } },
+      include: {
+        upstreamProvider: { select: upstreamProviderModelSelect },
+        lowQualityUpstreamProvider: { select: upstreamProviderModelSelect },
+        highQualityUpstreamProvider: { select: upstreamProviderModelSelect },
+      },
     })
     sendOk(res, { models })
   } catch (error) {
@@ -80,6 +88,8 @@ router.get('/admin/models', requireAdmin, async (req, res, next) => {
         { displayName: { contains: q, mode: 'insensitive' as const } },
         { upstreamModel: { contains: q, mode: 'insensitive' as const } },
         { upstreamProvider: { name: { contains: q, mode: 'insensitive' as const } } },
+        { lowQualityUpstreamProvider: { name: { contains: q, mode: 'insensitive' as const } } },
+        { highQualityUpstreamProvider: { name: { contains: q, mode: 'insensitive' as const } } },
       ] } : {}),
       ...(status === 'enabled' ? { enabled: true } : {}),
       ...(status === 'disabled' ? { enabled: false } : {}),
@@ -94,7 +104,11 @@ router.get('/admin/models', requireAdmin, async (req, res, next) => {
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         skip,
         take: pageSize,
-        include: { upstreamProvider: { select: upstreamProviderModelSelect } },
+        include: {
+          upstreamProvider: { select: upstreamProviderModelSelect },
+          lowQualityUpstreamProvider: { select: upstreamProviderModelSelect },
+          highQualityUpstreamProvider: { select: upstreamProviderModelSelect },
+        },
       }),
       prisma.modelConfig.count({ where }),
     ])
