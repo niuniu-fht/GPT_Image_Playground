@@ -792,6 +792,7 @@ export const platformApi = {
 
   getGenerationTask(taskId: string, signal?: AbortSignal) {
     return request<PlatformGenerationResult>(`/api/generations/${encodeURIComponent(taskId)}`, {
+      cache: 'no-store',
       signal,
     })
   },

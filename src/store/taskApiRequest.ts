@@ -388,6 +388,51 @@ interface ImageLoadError {
   index: number
 }
 
+const GENERATED_IMAGE_FETCH_ATTEMPTS = 3
+const GENERATED_IMAGE_FETCH_RETRY_DELAY_MS = 800
+
+function waitForGeneratedImageRetry(attempt: number): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, GENERATED_IMAGE_FETCH_RETRY_DELAY_MS * attempt)
+  })
+}
+
+async function fetchGeneratedImageBlob(outputUrl: string): Promise<Blob> {
+  let lastError: unknown
+
+  for (let attempt = 1; attempt <= GENERATED_IMAGE_FETCH_ATTEMPTS; attempt += 1) {
+    let response: Response | null = null
+    try {
+      response = await fetch(outputUrl, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
+    } catch (error) {
+      lastError = error
+    }
+
+    if (response?.ok) {
+      try {
+        return await response.blob()
+      } catch (error) {
+        lastError = error
+      }
+    } else if (response) {
+      const httpError = new Error(`图片读取失败：HTTP ${response.status}`)
+      if (response.status < 500 && response.status !== 408 && response.status !== 429) {
+        throw httpError
+      }
+      lastError = httpError
+    }
+
+    if (attempt < GENERATED_IMAGE_FETCH_ATTEMPTS) {
+      await waitForGeneratedImageRetry(attempt)
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('图片读取失败，请稍后重试')
+}
+
 function mergeImageLoadErrorsIntoResponseMeta(
   responseMeta: TaskResponseMeta,
   imageLoadErrors: ImageLoadError[],
@@ -440,11 +485,7 @@ async function resolveGeneratedOutputImageAsset(
     }
   }
 
-  const response = await fetch(outputUrl)
-  if (!response.ok) {
-    throw new Error(`图片读取失败：HTTP ${response.status}`)
-  }
-  const blob = await response.blob()
+  const blob = await fetchGeneratedImageBlob(outputUrl)
   return {
     blob,
     sourceUrl: outputUrl,

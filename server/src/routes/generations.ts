@@ -19,7 +19,6 @@ import {
 import {
   deleteGeneratedImageFilesForTasks,
   getGeneratedImageFilePath,
-  scheduleGeneratedImageFileDeletion,
   writeGeneratedImageFile,
 } from '../generatedImageFiles.js'
 
@@ -1105,9 +1104,7 @@ router.get('/:taskId/images/:imageIndex', requireUser, async (req, res, next) =>
         } else {
           next(error)
         }
-        return
       }
-      scheduleGeneratedImageFileDeletion({ filePath, taskId })
     })
   } catch (error) {
     next(error)
@@ -1135,6 +1132,7 @@ router.get('/:taskId', requireUser, async (req, res, next) => {
     })
     if (!task) throw new HttpError(404, 'task_not_found', '生成任务不存在或已被清理')
 
+    res.setHeader('Cache-Control', 'private, no-store')
     sendOk(res, await buildGenerationTaskResponse(task, {
       user: task.user,
       model: task.modelConfig,

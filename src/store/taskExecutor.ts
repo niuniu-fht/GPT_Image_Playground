@@ -336,11 +336,13 @@ async function storeGeneratedOutputImage(
     }
   } catch (error) {
     console.warn('[generation] failed to persist generated blob locally; using session cache', error)
-    const imageId = await storeImage(image.blob, {
-      id: preferredTransientImageId,
-      source: 'generated',
-      stageOnly: true,
-    })
+    const imageId = image.sourceUrl?.trim()
+      ? (await stageGeneratedImageReference(image.sourceUrl, preferredTransientImageId)).imageId
+      : await storeImage(image.blob, {
+          id: preferredTransientImageId,
+          source: 'generated',
+          stageOnly: true,
+        })
     return {
       imageId,
       localPersistenceWarning: handleLocalPersistenceFailure(image, error),

@@ -208,9 +208,35 @@ describe('callTaskImageApi recovery', () => {
       {} as never,
     )
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/generations/remote-task-file/images/0')
+    expect(fetchMock).toHaveBeenCalledWith('/api/generations/remote-task-file/images/0', {
+      cache: 'no-store',
+      credentials: 'same-origin',
+    })
     expect(result.images[0]).toMatchObject({ mimeType: 'image/png' })
     expect('blob' in result.images[0]!).toBe(true)
+  })
+
+  it('retries a temporary server failure while downloading a generated image', async () => {
+    platformMocks.getGenerationTask.mockResolvedValueOnce({
+      ...createDoneResult('remote-task-file-retry'),
+      images: [{ dataUrl: '/api/generations/remote-task-file-retry/images/0', mimeType: 'image/png' }],
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'image/png' } }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const pendingResult = callTaskImageApi(
+      createTask({ generationTaskId: 'remote-task-file-retry' }),
+      {} as never,
+    )
+    await vi.advanceTimersByTimeAsync(800)
+    const result = await pendingResult
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.images).toHaveLength(1)
   })
 
   it('keeps successful images when one temporary image path fails', async () => {
