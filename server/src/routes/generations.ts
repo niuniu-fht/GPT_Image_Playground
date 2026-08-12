@@ -87,7 +87,9 @@ type GenerationResponseTask = Pick<
   GenerationTask,
   'id' | 'userId' | 'modelConfigId' | 'status' | 'error' | 'outputImages' | 'costCredits' | 'params'
 >
-type GeneratedImagePayload = { bytes: Buffer; index?: number; mimeType: string; upstreamResponse?: unknown }
+type GeneratedImagePayload =
+  | { bytes: Buffer; index?: number; mimeType: string; upstreamResponse?: unknown }
+  | { remoteUrl: string; index?: number; mimeType: string; upstreamResponse?: unknown }
 type GenerationImageResult =
   | { index: number; status: 'done'; mimeType: string; upstreamResponse?: unknown }
   | { error: string; httpStatus?: number; index: number; status: 'error' }
@@ -454,44 +456,6 @@ function resolveUpstreamImageUrl(url: string, baseUrl: string): string {
   throw new HttpError(502, 'upstream_image_download_failed', '上游返回了无效图片地址')
 }
 
-async function remoteImageUrlToBuffer(
-  url: string,
-  fallbackMimeType: string,
-  upstreamBaseUrl: string,
-  signal: AbortSignal,
-): Promise<GeneratedImagePayload> {
-  const resolvedUrl = resolveUpstreamImageUrl(url, upstreamBaseUrl)
-  const response = await fetch(resolvedUrl, { signal })
-  if (!response.ok) {
-    throw new HttpError(response.status, 'upstream_image_download_failed', '上游图片下载失败，请稍后重试')
-  }
-
-  const contentLength = Number(response.headers.get('content-length'))
-  if (Number.isFinite(contentLength) && contentLength > MAX_INPUT_IMAGE_BYTES) {
-    throw new HttpError(502, 'upstream_image_too_large', '上游返回的图片超过 50 MiB')
-  }
-  const buffer = Buffer.from(await response.arrayBuffer())
-  if (buffer.byteLength > MAX_INPUT_IMAGE_BYTES) {
-    throw new HttpError(502, 'upstream_image_too_large', '上游返回的图片超过 50 MiB')
-  }
-  const responseMimeType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() || ''
-  const sniffedMimeType = sniffImageMimeType(buffer)
-  const mimeType = sniffedMimeType || (responseMimeType.startsWith('image/') ? responseMimeType : '')
-  if (!mimeType) {
-    const preview = buffer.subarray(0, 80).toString('utf8').replace(/\s+/g, ' ').trim()
-    console.warn('[generation] upstream image url returned non-image content', {
-      url: resolvedUrl,
-      contentType: responseMimeType || null,
-      preview,
-    })
-    throw new HttpError(502, 'upstream_image_download_failed', '上游返回的图片地址不是有效图片')
-  }
-  return {
-    bytes: buffer,
-    mimeType: mimeType || fallbackMimeType,
-  }
-}
-
 async function normalizeImageResponse(
   payload: unknown,
   upstreamBaseUrl: string,
@@ -522,8 +486,11 @@ async function normalizeImageResponse(
         ? image.image_url
         : ''
     if (remoteUrl) {
-      const downloaded = await remoteImageUrlToBuffer(remoteUrl, 'image/png', upstreamBaseUrl, signal)
-      images.push({ ...downloaded, upstreamResponse })
+      images.push({
+        remoteUrl: resolveUpstreamImageUrl(remoteUrl, upstreamBaseUrl),
+        mimeType: 'image/png',
+        upstreamResponse,
+      })
     }
   }
   return images
@@ -822,7 +789,7 @@ async function callImagesApi(
             upstreamResponse: image.upstreamResponse,
           }
         } finally {
-          image.bytes = Buffer.alloc(0)
+          if ('bytes' in image) image.bytes = Buffer.alloc(0)
         }
       })
     )),
@@ -952,12 +919,14 @@ async function runGenerationTask(input: {
         if (controller.signal.aborted) {
           throw createGenerationTimeoutError(input.generationTimeoutSeconds)
         }
-        const dataUrl = await writeGeneratedImageFile({
-          taskId: input.taskId,
-          index,
-          mimeType: image.mimeType,
-          bytes: image.bytes,
-        })
+        const dataUrl = 'remoteUrl' in image
+          ? image.remoteUrl
+          : await writeGeneratedImageFile({
+              taskId: input.taskId,
+              index,
+              mimeType: image.mimeType,
+              bytes: image.bytes,
+            })
         return {
           dataUrl,
           index,

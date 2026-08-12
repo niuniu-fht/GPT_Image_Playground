@@ -151,8 +151,9 @@ export function isTaskInRecycleBin(task: Pick<TaskRecord, 'deletedAt'>): boolean
 }
 
 export function resolveTaskStatusLabel(
-  task: Pick<TaskRecord, 'status' | 'isAborted'>,
-): '生成中' | '已完成' | '失败' | '已中止' | '异常' {
+  task: Pick<TaskRecord, 'status' | 'isAborted' | 'responseMeta'>,
+): '生成中' | '正在下载图片' | '已完成' | '失败' | '已中止' | '异常' {
+  if (task.responseMeta?.imageDownloadStatus === 'downloading') return '正在下载图片'
   if (task.status === 'done') return '已完成'
   if (task.isAborted) return '已中止'
   if (task.status === 'partial_error') return '异常'

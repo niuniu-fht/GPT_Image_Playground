@@ -151,19 +151,17 @@ export default function DetailImagePanel({
                       overflow: 'hidden',
                     }}
                   >
-                    本地保存失败，已触发浏览器下载
+                    图片下载失败
                   </p>
-                  <button
-                    type="button"
-                    onClick={onCopyError}
+                  <a
+                    href={localPersistenceWarning.imageUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(event) => event.stopPropagation()}
                     className="mt-2 inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-1 text-[11px] text-white/90 transition hover:bg-white/25"
                   >
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-                      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                    </svg>
-                    复制地址
-                  </button>
+                    图片链接
+                  </a>
                 </div>
               )}
 

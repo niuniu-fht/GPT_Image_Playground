@@ -12,7 +12,6 @@ import {
 } from './taskApiRequest'
 import type { StoreApiError } from './contracts'
 import { isRecord } from '../lib/guards'
-import { platformApi } from '../lib/platformApi'
 import { scheduleGeneratedImagePersistenceRetry } from './generatedImagePersistenceRetry'
 import { evictImage, storeImage } from './imageAssets'
 import { useStore } from './state'
@@ -75,6 +74,7 @@ function throwIfTaskAbortRequested(taskId: string) {
 }
 
 const GENERATED_IMAGE_PERSIST_TIMEOUT_MS = 30_000
+const GENERATED_IMAGE_DOWNLOAD_TIMEOUT_MS = 120_000
 
 interface LocalPersistenceWarning {
   imageIndex: number
@@ -124,14 +124,6 @@ function persistGeneratedImage(
   )
 }
 
-function getMimeExtension(mimeType: string | null | undefined): string {
-  const subtype = mimeType?.split('/')[1]?.split(';')[0]?.trim().toLowerCase()
-  if (!subtype) return 'png'
-  if (subtype === 'jpeg') return 'jpg'
-  if (subtype === 'svg+xml') return 'svg'
-  return subtype.replace(/[^a-z0-9]/g, '') || 'png'
-}
-
 function toCopyableImageUrl(url: string): string {
   if (/^(blob:|data:|https?:\/\/)/i.test(url)) {
     return url
@@ -144,54 +136,18 @@ function toCopyableImageUrl(url: string): string {
   }
 }
 
-function triggerBrowserDownloadByUrl(
-  url: string,
-  input: {
-    filename: string
-    revokeAfterMs?: number
-  },
-) {
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = input.filename
-  anchor.rel = 'noopener noreferrer'
-  document.body.appendChild(anchor)
-  anchor.click()
-  document.body.removeChild(anchor)
-
-  if (input.revokeAfterMs != null) {
-    window.setTimeout(() => URL.revokeObjectURL(url), input.revokeAfterMs)
-  }
-}
-
-function createGeneratedImageDownloadUrl(
-  image: TaskApiOutputImageAsset,
-): { copyableUrl: string; downloadUrl: string; revokeAfterMs?: number } {
+function resolveGeneratedImageSourceUrl(image: TaskApiOutputImageAsset): string {
   if ('remoteUrl' in image) {
-    return {
-      copyableUrl: toCopyableImageUrl(image.remoteUrl),
-      downloadUrl: image.remoteUrl,
-    }
+    return toCopyableImageUrl(image.remoteUrl)
   }
   if ('dataUrl' in image) {
-    return {
-      copyableUrl: image.dataUrl,
-      downloadUrl: image.dataUrl,
-    }
+    return image.dataUrl
   }
   if (image.sourceUrl?.trim()) {
-    return {
-      copyableUrl: toCopyableImageUrl(image.sourceUrl),
-      downloadUrl: image.sourceUrl,
-    }
+    return toCopyableImageUrl(image.sourceUrl)
   }
 
-  const objectUrl = URL.createObjectURL(image.blob)
-  return {
-    copyableUrl: objectUrl,
-    downloadUrl: objectUrl,
-    revokeAfterMs: 60_000,
-  }
+  return URL.createObjectURL(image.blob)
 }
 
 function handleLocalPersistenceFailure(
@@ -199,17 +155,13 @@ function handleLocalPersistenceFailure(
   error: unknown,
 ): LocalPersistenceWarning {
   const imageIndex = typeof image.outputIndex === 'number' ? image.outputIndex : 0
-  const { copyableUrl, downloadUrl, revokeAfterMs } = createGeneratedImageDownloadUrl(image)
+  const copyableUrl = resolveGeneratedImageSourceUrl(image)
   const message = error instanceof Error ? error.message : String(error)
-  triggerBrowserDownloadByUrl(downloadUrl, {
-    filename: `generated-${Date.now()}-${imageIndex + 1}.${getMimeExtension(image.mimeType)}`,
-    revokeAfterMs,
-  })
 
   return {
     imageIndex,
     imageUrl: copyableUrl,
-    message: `${message}；已触发浏览器下载。图片地址：${copyableUrl}`,
+    message: `${message}。图片链接：${copyableUrl}`,
   }
 }
 
@@ -300,30 +252,27 @@ async function storeGeneratedOutputImage(
 
   if ('remoteUrl' in image) {
     try {
-      const blob = await platformApi.fetchRemoteImage({ url: image.remoteUrl })
+      const blob = await withTimeout(
+        fetch(image.remoteUrl, { cache: 'no-store' }).then(async (response) => {
+          if (!response.ok) {
+            throw new Error(`图片下载失败：HTTP ${response.status}`)
+          }
+          return await response.blob()
+        }),
+        GENERATED_IMAGE_DOWNLOAD_TIMEOUT_MS,
+        '图片下载超时',
+      )
       const imageId = await persistGeneratedImage(blob, blob.type || image.mimeType || null)
       return {
         imageId,
         transient: false,
       }
     } catch (error) {
-      console.warn('[generation] failed to cache remote image locally', error)
-      try {
-        const imageId = await persistGeneratedImage(image.remoteUrl, image.mimeType || null)
-        return {
-          imageId,
-          transient: false,
-        }
-      } catch (fallbackError) {
-        console.warn(
-          '[generation] failed to persist remote image reference locally; using session cache',
-          fallbackError,
-        )
-        const fallback = await stageGeneratedImageReference(image.remoteUrl, preferredTransientImageId)
-        return {
-          ...fallback,
-          localPersistenceWarning: handleLocalPersistenceFailure(image, fallbackError),
-        }
+      console.warn('[generation] failed to download or persist remote image locally', error)
+      const fallback = await stageGeneratedImageReference(image.remoteUrl, preferredTransientImageId)
+      return {
+        ...fallback,
+        localPersistenceWarning: handleLocalPersistenceFailure(image, error),
       }
     }
   }
@@ -384,6 +333,13 @@ async function executeTaskRun(taskId: string, requestSettings: AppSettings) {
       if (!images.length) {
         return
       }
+
+      updateTaskInStore(taskId, {
+        responseMeta: {
+          ...(useStore.getState().tasks.find((item) => item.id === taskId)?.responseMeta ?? {}),
+          imageDownloadStatus: 'downloading',
+        },
+      })
 
       for (const image of images) {
         throwIfTaskAbortRequested(taskId)
@@ -449,9 +405,13 @@ async function executeTaskRun(taskId: string, requestSettings: AppSettings) {
       result.responseMeta ?? null,
       localPersistenceWarnings,
     )
+    const completedResponseMeta = {
+      ...(responseMeta ?? {}),
+      imageDownloadStatus: localPersistenceWarnings.length > 0 ? 'error' as const : 'ready' as const,
+    }
     succeedTaskRun(taskId, {
       outputImageIds: outputIds,
-      responseMeta,
+      responseMeta: completedResponseMeta,
     })
 
     if (result.responseMeta?.squareUploadError) {
@@ -462,7 +422,7 @@ async function executeTaskRun(taskId: string, requestSettings: AppSettings) {
 
     if (localPersistenceWarnings.length > 0) {
       useStore.getState().showToast(
-        `生成完成，但 ${localPersistenceWarnings.length} 张图片本地保存失败，已触发浏览器下载；详情中可复制图片地址`,
+        `生成完成，但 ${localPersistenceWarnings.length} 张图片下载或本地保存失败；详情中可打开图片链接`,
         'error',
       )
       return

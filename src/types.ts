@@ -750,6 +750,7 @@ export interface TaskResponseMeta {
     imageUrl: string
     message: string
   }> | null
+  imageDownloadStatus?: 'downloading' | 'ready' | 'error' | null
   revisedPrompt?: string | null
   transport?: AppliedTransportMeta | null
   squareUpload?: {
