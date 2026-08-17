@@ -8,6 +8,7 @@ import {
   type RefObject,
 } from 'react'
 import { openLightbox, resolveTaskParamSizeOrDefault, useStore, submitTask } from '../../../../store'
+import { resolveModelSwitchParams } from '../../../../store/taskParams'
 import { resolveModelCostForSize } from '../../../../lib/modelCost'
 import {
   ALL_CATEGORY_FILTER,
@@ -171,6 +172,13 @@ export function useInputBarState(): InputBarViewModel {
     setMobileDrawerOpen(false)
   }, [])
 
+  const handleActiveModelChange = useCallback((modelId: string) => {
+    if (modelId === activeModelId) return
+    const nextModel = models.find((model) => model.id === modelId) ?? null
+    setActiveModelId(modelId)
+    setParams(resolveModelSwitchParams(nextModel))
+  }, [activeModelId, models, setActiveModelId, setParams])
+
   // ===== Sub-ViewModel: PromptSection =====
   const promptSectionProps = usePromptInputController({
     prompt,
@@ -205,7 +213,7 @@ export function useInputBarState(): InputBarViewModel {
     models,
     normalizedSize,
     params,
-    onActiveModelChange: setActiveModelId,
+    onActiveModelChange: handleActiveModelChange,
     onSetParams: setParams,
   }
 

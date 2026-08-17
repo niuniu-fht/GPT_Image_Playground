@@ -36,11 +36,7 @@ export default function SubmitSection({
         <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300">
           {generationTargetLabel}
         </span>
-        {activeModel && (
-          <span className="ml-auto rounded-md bg-amber-50 px-1.5 py-0.5 font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
-            消耗 {estimatedCost} 积分
-          </span>
-        )}
+        {isLoggedIn && <span className="ml-auto">余额 {creditBalance} 积分</span>}
       </div>
 
       <div
@@ -76,7 +72,9 @@ export default function SubmitSection({
           <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
           </svg>
-          {isLoggedIn ? (isMobile ? '生成图像' : '生成图像 (Ctrl+Enter)') : '登录后生成'}
+          {isLoggedIn
+            ? `${isMobile ? '生成图像' : '生成图像'} · 扣 ${estimatedCost} 积分${isMobile ? '' : ' (Ctrl+Enter)'}`
+            : '登录后生成'}
         </button>
       </div>
     </div>

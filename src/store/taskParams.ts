@@ -1,5 +1,6 @@
 import { normalizeImageSize } from '../lib/size'
-import type { TaskParams } from '../types'
+import { resolveFallbackQuality } from '../lib/modelCost'
+import type { ModelConfig, TaskParams } from '../types'
 
 export const DEFAULT_PARAMS: TaskParams = {
   size: '1024x1024',
@@ -12,4 +13,14 @@ export const DEFAULT_PARAMS: TaskParams = {
 
 export function resolveTaskParamSizeOrDefault(size: string): string {
   return normalizeImageSize(size) || DEFAULT_PARAMS.size
+}
+
+export function resolveModelSwitchParams(
+  model: ModelConfig | null,
+): Pick<TaskParams, 'size' | 'quality' | 'n'> {
+  return {
+    size: DEFAULT_PARAMS.size,
+    quality: resolveFallbackQuality(model),
+    n: DEFAULT_PARAMS.n,
+  }
 }

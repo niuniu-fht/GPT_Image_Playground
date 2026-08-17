@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { resolveEffectiveModelQuality, resolveModelCostForSize } from '../../../../lib/modelCost'
+import { resolveEffectiveModelQuality, resolveFallbackQuality, resolveModelCostForSize } from '../../../../lib/modelCost'
+import { resolveImageSizeTier } from '../../../../lib/size'
 import { renderModelIcon } from '../../../../lib/modelIcon'
 import type { ModelConfig, TaskParams } from '../../../../types'
 
@@ -23,8 +24,10 @@ export default function ModelSelector({
   const activeModel = models.find((model) => model.id === activeModelId) ?? models[0] ?? null
   const activeQuality = resolveEffectiveModelQuality(activeModel, params.quality)
   const activeModelCost = activeModel
-    ? resolveModelCostForSize(activeModel, params.size, activeQuality)
+    ? resolveModelCostForSize(activeModel, params.size, activeQuality) * Math.max(1, Math.floor(params.n))
     : 0
+  const activeTier = resolveImageSizeTier(params.size)
+  const activeQualityLabel = activeQuality === 'low' ? '低' : activeQuality === 'high' ? '高' : '中'
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -58,7 +61,9 @@ export default function ModelSelector({
             )}
           </span>
           <span className="mt-0.5 block truncate text-xs text-gray-400 dark:text-gray-500">
-            {activeModel ? `${activeModelCost} 积分 / 次 · ${activeModel.description}` : '请联系管理员配置模型'}
+            {activeModel
+              ? `本次 ${activeModelCost} 积分 · ${activeQualityLabel} / ${activeTier} / ${Math.max(1, Math.floor(params.n))} 张`
+              : '请联系管理员配置模型'}
           </span>
         </span>
         <svg className={`h-4 w-4 text-gray-500 transition ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -70,8 +75,8 @@ export default function ModelSelector({
         <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-50 max-h-96 overflow-y-auto rounded-2xl border border-gray-200/90 bg-white p-2.5 shadow-2xl shadow-gray-900/12 dark:border-white/[0.08] dark:bg-gray-900">
           {models.map((model) => {
             const selected = model.id === activeModel?.id
-            const effectiveQuality = resolveEffectiveModelQuality(model, params.quality)
-            const modelCost = resolveModelCostForSize(model, params.size, effectiveQuality)
+            const starterQuality = resolveFallbackQuality(model)
+            const modelCost = resolveModelCostForSize(model, '1024x1024', starterQuality)
             return (
               <button
                 key={model.id}
@@ -93,7 +98,7 @@ export default function ModelSelector({
                       {model.displayName}
                     </span>
                     <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
-                      {modelCost} 积分
+                      {modelCost} 积分起
                     </span>
                     {model.isNew && (
                       <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
