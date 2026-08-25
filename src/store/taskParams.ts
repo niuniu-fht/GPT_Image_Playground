@@ -1,5 +1,6 @@
 import { normalizeImageSize } from '../lib/size'
-import { resolveFallbackQuality } from '../lib/modelCost'
+import { resolveFirstAvailableCombination } from '../lib/modelCost'
+import { calculateImageSize } from '../lib/size'
 import type { ModelConfig, TaskParams } from '../types'
 
 export const DEFAULT_PARAMS: TaskParams = {
@@ -18,9 +19,10 @@ export function resolveTaskParamSizeOrDefault(size: string): string {
 export function resolveModelSwitchParams(
   model: ModelConfig | null,
 ): Pick<TaskParams, 'size' | 'quality' | 'n'> {
+  const selection = resolveFirstAvailableCombination(model)
   return {
-    size: DEFAULT_PARAMS.size,
-    quality: resolveFallbackQuality(model),
+    size: calculateImageSize(selection.tier, '1:1') || DEFAULT_PARAMS.size,
+    quality: selection.quality,
     n: DEFAULT_PARAMS.n,
   }
 }

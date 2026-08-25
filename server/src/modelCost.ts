@@ -9,11 +9,20 @@ export interface ModelResolutionPricing {
   lowQualityCostCredits2K?: number
   lowQualityCostCredits4K?: number
   lowQualityEnabled?: boolean
+  lowQuality1KEnabled?: boolean
+  lowQuality2KEnabled?: boolean
+  lowQuality4KEnabled?: boolean
   mediumQualityEnabled?: boolean
+  mediumQuality1KEnabled?: boolean
+  mediumQuality2KEnabled?: boolean
+  mediumQuality4KEnabled?: boolean
   highQualityCostCredits?: number
   highQualityCostCredits2K?: number
   highQualityCostCredits4K?: number
   highQualityEnabled?: boolean
+  highQuality1KEnabled?: boolean
+  highQuality2KEnabled?: boolean
+  highQuality4KEnabled?: boolean
   upstreamModel?: string
 }
 
@@ -37,7 +46,32 @@ export function isGptImageModel(model: Pick<ModelResolutionPricing, 'name' | 'up
 }
 
 export function supportsHighQualityPricing(model: ModelResolutionPricing): boolean {
-  return Boolean(model.highQualityEnabled && isGptImageModel(model))
+  return Boolean(isGptImageModel(model) && (
+    isQualityTierEnabled(model, 'high', '1K') ||
+    isQualityTierEnabled(model, 'high', '2K') ||
+    isQualityTierEnabled(model, 'high', '4K')
+  ))
+}
+
+export function isQualityTierEnabled(
+  model: ModelResolutionPricing,
+  quality: string,
+  tier: ResolutionTier,
+): boolean {
+  if (!isGptImageModel(model) && quality !== 'medium') return false
+  if (quality === 'low') {
+    if (tier === '4K') return model.lowQuality4KEnabled ?? model.lowQualityEnabled !== false
+    if (tier === '2K') return model.lowQuality2KEnabled ?? model.lowQualityEnabled !== false
+    return model.lowQuality1KEnabled ?? model.lowQualityEnabled !== false
+  }
+  if (quality === 'high') {
+    if (tier === '4K') return model.highQuality4KEnabled ?? Boolean(model.highQualityEnabled)
+    if (tier === '2K') return model.highQuality2KEnabled ?? Boolean(model.highQualityEnabled)
+    return model.highQuality1KEnabled ?? Boolean(model.highQualityEnabled)
+  }
+  if (tier === '4K') return model.mediumQuality4KEnabled ?? model.mediumQualityEnabled !== false
+  if (tier === '2K') return model.mediumQuality2KEnabled ?? model.mediumQualityEnabled !== false
+  return model.mediumQuality1KEnabled ?? model.mediumQualityEnabled !== false
 }
 
 function resolveMediumTierCost(model: ModelResolutionPricing, tier: ResolutionTier): number {
@@ -67,8 +101,8 @@ export function resolveModelCostForSize(
 ): number {
   const tier = resolveResolutionTier(size)
   if (!isGptImageModel(model)) return resolveMediumTierCost(model, tier)
-  if (quality === 'low' && model.lowQualityEnabled !== false) return resolveLowTierCost(model, tier)
-  if (quality === 'high' && supportsHighQualityPricing(model)) return resolveHighTierCost(model, tier)
+  if (quality === 'low' && isQualityTierEnabled(model, 'low', tier)) return resolveLowTierCost(model, tier)
+  if (quality === 'high' && isQualityTierEnabled(model, 'high', tier)) return resolveHighTierCost(model, tier)
   return resolveMediumTierCost(model, tier)
 }
 

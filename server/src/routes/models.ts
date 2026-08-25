@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { writeAudit } from '../audit.js'
 import { requireAdmin } from '../auth.js'
 import { HttpError, sendOk } from '../http.js'
+import { isGptImageModel, isQualityTierEnabled } from '../modelCost.js'
 import { prisma } from '../prisma.js'
 
 const router = Router()
@@ -16,11 +17,20 @@ const modelSchema = z.object({
   costCredits2K: z.number().int().min(0).max(100000).default(0),
   costCredits4K: z.number().int().min(0).max(100000).default(0),
   lowQualityEnabled: z.boolean().default(true),
+  lowQuality1KEnabled: z.boolean().default(true),
+  lowQuality2KEnabled: z.boolean().default(true),
+  lowQuality4KEnabled: z.boolean().default(true),
   lowQualityCostCredits: z.number().int().min(0).max(100000).default(0),
   lowQualityCostCredits2K: z.number().int().min(0).max(100000).default(0),
   lowQualityCostCredits4K: z.number().int().min(0).max(100000).default(0),
   mediumQualityEnabled: z.boolean().default(true),
+  mediumQuality1KEnabled: z.boolean().default(true),
+  mediumQuality2KEnabled: z.boolean().default(true),
+  mediumQuality4KEnabled: z.boolean().default(true),
   highQualityEnabled: z.boolean().default(false),
+  highQuality1KEnabled: z.boolean().default(false),
+  highQuality2KEnabled: z.boolean().default(false),
+  highQuality4KEnabled: z.boolean().default(false),
   highQualityCostCredits: z.number().int().min(0).max(100000).default(0),
   highQualityCostCredits2K: z.number().int().min(0).max(100000).default(0),
   highQualityCostCredits4K: z.number().int().min(0).max(100000).default(0),
@@ -58,6 +68,13 @@ const upstreamProviderModelSelect = {
   lastHealthMessage: true,
 } as const
 
+function hasAvailableGenerationOption(model: Parameters<typeof isQualityTierEnabled>[0]): boolean {
+  const qualities = isGptImageModel(model) ? ['low', 'medium', 'high'] : ['medium']
+  return qualities.some((quality) => (
+    (['1K', '2K', '4K'] as const).some((tier) => isQualityTierEnabled(model, quality, tier))
+  ))
+}
+
 router.get('/models', async (_req, res, next) => {
   try {
     const models = await prisma.modelConfig.findMany({
@@ -69,7 +86,7 @@ router.get('/models', async (_req, res, next) => {
         highQualityUpstreamProvider: { select: upstreamProviderModelSelect },
       },
     })
-    sendOk(res, { models })
+    sendOk(res, { models: models.filter(hasAvailableGenerationOption) })
   } catch (error) {
     next(error)
   }

@@ -9,7 +9,12 @@ import {
   readStoredGenerationTimeoutSeconds,
 } from '../generationTimeout.js'
 import { HttpError, sendOk } from '../http.js'
-import { isGptImage2Model, resolveModelCostForSize, supportsHighQualityPricing } from '../modelCost.js'
+import {
+  isGptImage2Model,
+  isQualityTierEnabled,
+  resolveModelCostForSize,
+  resolveResolutionTier,
+} from '../modelCost.js'
 import { prisma } from '../prisma.js'
 import { getPlatformSettings } from '../settings.js'
 import {
@@ -543,15 +548,22 @@ function shouldRequestExplicitBase64(model: string): boolean {
   return !/^gpt-image(?:$|[-_:/.])/i.test(model.trim())
 }
 
-function resolveEffectiveQuality(model: GenerationModel, quality: string): string {
-  if (!isGptImage2Model(model)) return 'medium'
-  if (quality === 'low' && model.lowQualityEnabled !== false) return 'low'
-  if (quality === 'medium' && model.mediumQualityEnabled !== false) return 'medium'
-  if (quality === 'high' && supportsHighQualityPricing(model)) return 'high'
-  if (model.lowQualityEnabled !== false) return 'low'
-  if (model.mediumQualityEnabled !== false) return 'medium'
-  if (supportsHighQualityPricing(model)) return 'high'
-  return 'medium'
+function resolveEffectiveQuality(model: GenerationModel, quality: string, size: string): string {
+  const tier = resolveResolutionTier(size)
+  if (!isGptImage2Model(model)) {
+    if (isQualityTierEnabled(model, 'medium', tier)) return 'medium'
+    throw new HttpError(400, 'model_option_disabled', `当前模型未开放${tier}分辨率`)
+  }
+  if (quality !== 'auto') {
+    if (!isQualityTierEnabled(model, quality, tier)) {
+      throw new HttpError(400, 'model_option_disabled', `当前模型未开放${tier} ${quality}质量`)
+    }
+    return quality
+  }
+  for (const fallback of ['low', 'medium', 'high']) {
+    if (isQualityTierEnabled(model, fallback, tier)) return fallback
+  }
+  throw new HttpError(400, 'model_option_disabled', `当前模型未开放${tier}分辨率`)
 }
 
 function sanitizeUpstreamPayload(value: unknown, depth = 0): unknown {
@@ -1157,7 +1169,7 @@ router.post('/', requireUser, async (req, res, next) => {
       ...input,
       params: {
         ...input.params,
-        quality: resolveEffectiveQuality(model, input.params.quality),
+        quality: resolveEffectiveQuality(model, input.params.quality, input.params.size),
       },
     })
     const adminTaskMeta = {

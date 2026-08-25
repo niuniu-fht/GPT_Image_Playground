@@ -6,7 +6,13 @@ import {
   resolveImageSizeTier,
   type SizeTier,
 } from '../../../../lib/size'
-import { isQualityEnabled, resolveAvailableQualities, resolveFallbackQuality, supportsQualitySelection } from '../../../../lib/modelCost'
+import {
+  isQualityTierEnabled,
+  resolveAvailableQualities,
+  resolveAvailableTiers,
+  resolveFirstAvailableCombination,
+  supportsQualitySelection,
+} from '../../../../lib/modelCost'
 import type { ModelConfig, TaskParams } from '../../../../types'
 
 type AspectOption = {
@@ -148,10 +154,17 @@ export default function AspectQuantityPanel({
   const quantity = Math.min(Math.max(Math.round(params.n || 1), 1), 4)
   const summaryRatio = params.size === 'auto' || !activeRatio ? '自动' : activeRatio
   const qualitySelectionAvailable = supportsQualitySelection(activeModel)
-  const availableQualities = resolveAvailableQualities(activeModel)
   const activeQuality = qualitySelectionAvailable && ['low', 'medium', 'high'].includes(params.quality)
     ? params.quality
     : 'medium'
+  const availableQualities = resolveAvailableQualities(activeModel, activeTier)
+  const availableTiers = resolveAvailableTiers(activeModel, activeQuality)
+  const selectableQualities = QUALITY_OPTIONS.filter((option) => (
+    resolveAvailableTiers(activeModel, option.value).length > 0
+  ))
+  const selectableTiers = SIZE_TIER_OPTIONS.filter((tier) => (
+    resolveAvailableQualities(activeModel, tier).length > 0
+  ))
   const summaryQualityLabel = activeQuality === 'low' ? '低' : activeQuality === 'high' ? '高' : '中'
 
   useLayoutEffect(() => {
@@ -192,15 +205,23 @@ export default function AspectQuantityPanel({
   }, [open, qualitySelectionAvailable])
 
   useEffect(() => {
-    const fallbackQuality = resolveFallbackQuality(activeModel)
-    if (!qualitySelectionAvailable && params.quality !== fallbackQuality) {
-      onSetParams({ quality: fallbackQuality })
+    if (isQualityTierEnabled(activeModel, activeQuality, activeTier)) {
       return
     }
-    if (qualitySelectionAvailable && !isQualityEnabled(activeModel, params.quality)) {
-      onSetParams({ quality: fallbackQuality })
+
+    const qualityForCurrentTier = resolveAvailableQualities(activeModel, activeTier)[0]
+    if (qualityForCurrentTier) {
+      onSetParams({ quality: qualityForCurrentTier })
+      return
     }
-  }, [activeModel, onSetParams, params.quality, qualitySelectionAvailable])
+
+    const fallback = resolveFirstAvailableCombination(activeModel)
+    const size = calculateImageSize(fallback.tier, activeRatio ?? DEFAULT_RATIO)
+    onSetParams({
+      quality: fallback.quality,
+      ...(size ? { size } : {}),
+    })
+  }, [activeModel, activeQuality, activeRatio, activeTier, onSetParams])
 
   useEffect(() => {
     if (!open) return
@@ -230,7 +251,22 @@ export default function AspectQuantityPanel({
 
   const selectTier = (tier: SizeTier) => {
     const size = calculateImageSize(tier, activeRatio ?? DEFAULT_RATIO)
-    if (size) onSetParams({ size })
+    if (!size) return
+    const quality = availableTiers.includes(tier)
+      ? activeQuality
+      : resolveAvailableQualities(activeModel, tier)[0]
+    onSetParams({ size, ...(quality ? { quality } : {}) })
+  }
+
+  const selectQuality = (quality: 'low' | 'medium' | 'high') => {
+    if (availableQualities.includes(quality)) {
+      onSetParams({ quality })
+      return
+    }
+
+    const tier = resolveAvailableTiers(activeModel, quality)[0]
+    const size = tier ? calculateImageSize(tier, activeRatio ?? DEFAULT_RATIO) : null
+    onSetParams({ quality, ...(size ? { size } : {}) })
   }
 
   const panel = open && panelStyle
@@ -277,7 +313,7 @@ export default function AspectQuantityPanel({
             <div>
               <div className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-100">图像分辨率</div>
               <div className="grid grid-cols-3 gap-2">
-                {SIZE_TIER_OPTIONS.map((tier) => (
+                {selectableTiers.map((tier) => (
                   <button
                     key={tier}
                     type="button"
@@ -315,24 +351,16 @@ export default function AspectQuantityPanel({
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                  {QUALITY_OPTIONS.filter((option) => availableQualities.includes(option.value)).map((option) => {
-                    const disabled = false
-                    return (
+                  {selectableQualities.map((option) => (
                       <button
                         key={option.value}
                         type="button"
-                        disabled={disabled}
-                        title={disabled ? '后台未开启该质量' : undefined}
-                        onClick={() => onSetParams({ quality: option.value })}
-                        className={cx(
-                          buttonClass(activeQuality === option.value),
-                          disabled && 'cursor-not-allowed opacity-45 hover:border-slate-200 hover:bg-white dark:hover:bg-slate-900/60',
-                        )}
+                        onClick={() => selectQuality(option.value)}
+                        className={buttonClass(activeQuality === option.value)}
                       >
                         {option.label}
                       </button>
-                    )
-                  })}
+                  ))}
                 </div>
               </div>
             )}

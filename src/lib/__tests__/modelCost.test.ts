@@ -13,11 +13,20 @@ function createModel(overrides: Partial<ModelConfig> = {}): ModelConfig {
     costCredits2K: 6,
     costCredits4K: 8,
     lowQualityEnabled: true,
+    lowQuality1KEnabled: true,
+    lowQuality2KEnabled: true,
+    lowQuality4KEnabled: true,
     lowQualityCostCredits: 1,
     lowQualityCostCredits2K: 2,
     lowQualityCostCredits4K: 3,
     mediumQualityEnabled: true,
+    mediumQuality1KEnabled: true,
+    mediumQuality2KEnabled: true,
+    mediumQuality4KEnabled: true,
     highQualityEnabled: false,
+    highQuality1KEnabled: false,
+    highQuality2KEnabled: false,
+    highQuality4KEnabled: false,
     highQualityCostCredits: 10,
     highQualityCostCredits2K: 11,
     highQualityCostCredits4K: 12,
@@ -40,9 +49,16 @@ describe('model quality cost', () => {
   })
 
   it('keeps an enabled requested quality', () => {
-    const model = createModel({ highQualityEnabled: true })
+    const model = createModel({ highQualityEnabled: true, highQuality1KEnabled: true })
 
     expect(resolveEffectiveModelQuality(model, 'high')).toBe('high')
     expect(resolveModelCostForSize(model, '1024x1024', 'high')).toBe(10)
+  })
+
+  it('enables quality and resolution combinations independently', () => {
+    const model = createModel({ lowQuality2KEnabled: false })
+
+    expect(resolveEffectiveModelQuality(model, 'low', '2048x2048')).toBe('medium')
+    expect(resolveEffectiveModelQuality(model, 'low', '1024x1024')).toBe('low')
   })
 })

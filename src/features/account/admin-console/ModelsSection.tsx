@@ -210,16 +210,16 @@ export function ModelsSection({
                   <StatusBadge tone="gray">{modelProtocolLabel(model.apiProtocol)}</StatusBadge>
                   <div className="space-y-1 text-xs font-semibold text-amber-700">
                     {isGptImageConfig(model) && (
-                      <div className={model.lowQualityEnabled ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-400'}>
-                        低{model.lowQualityEnabled ? '' : '（关）'}：1K {model.lowQualityCostCredits} / 2K {model.lowQualityCostCredits2K} / 4K {model.lowQualityCostCredits4K}
+                      <div className="text-emerald-700 dark:text-emerald-300">
+                        低：1K {model.lowQuality1KEnabled ? model.lowQualityCostCredits : '关'} / 2K {model.lowQuality2KEnabled ? model.lowQualityCostCredits2K : '关'} / 4K {model.lowQuality4KEnabled ? model.lowQualityCostCredits4K : '关'}
                       </div>
                     )}
-                    <div className={!isGptImageConfig(model) || model.mediumQualityEnabled ? '' : 'text-gray-400'}>
-                      中{isGptImageConfig(model) && !model.mediumQualityEnabled ? '（关）' : ''}：1K {model.costCredits} / 2K {model.costCredits2K} / 4K {model.costCredits4K}
+                    <div>
+                      中：1K {model.mediumQuality1KEnabled ? model.costCredits : '关'} / 2K {model.mediumQuality2KEnabled ? model.costCredits2K : '关'} / 4K {model.mediumQuality4KEnabled ? model.costCredits4K : '关'}
                     </div>
                     {isGptImageConfig(model) && (
-                      <div className={model.highQualityEnabled ? 'text-blue-700 dark:text-blue-300' : 'text-gray-400'}>
-                        高{model.highQualityEnabled ? '' : '（关）'}：1K {model.highQualityCostCredits} / 2K {model.highQualityCostCredits2K} / 4K {model.highQualityCostCredits4K}
+                      <div className="text-blue-700 dark:text-blue-300">
+                        高：1K {model.highQuality1KEnabled ? model.highQualityCostCredits : '关'} / 2K {model.highQuality2KEnabled ? model.highQualityCostCredits2K : '关'} / 4K {model.highQuality4KEnabled ? model.highQualityCostCredits4K : '关'}
                       </div>
                     )}
                   </div>

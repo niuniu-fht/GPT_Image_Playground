@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import type { ModelDraft } from '../shared'
 import { StatusBadge } from '../shared'
 import type { ModelConfigDraftProps } from './modelConfigTypes'
@@ -16,22 +15,37 @@ type CostField = keyof Pick<
   | 'highQualityCostCredits4K'
 >
 
-const LOW_COST_FIELDS: Array<{ field: CostField; label: string }> = [
-  { field: 'lowQualityCostCredits', label: '1K' },
-  { field: 'lowQualityCostCredits2K', label: '2K' },
-  { field: 'lowQualityCostCredits4K', label: '4K' },
+type EnabledField = keyof Pick<
+  ModelDraft,
+  | 'lowQuality1KEnabled'
+  | 'lowQuality2KEnabled'
+  | 'lowQuality4KEnabled'
+  | 'mediumQuality1KEnabled'
+  | 'mediumQuality2KEnabled'
+  | 'mediumQuality4KEnabled'
+  | 'highQuality1KEnabled'
+  | 'highQuality2KEnabled'
+  | 'highQuality4KEnabled'
+>
+
+type BillingCell = { field: CostField; enabledField: EnabledField; label: string }
+
+const LOW_COST_FIELDS: BillingCell[] = [
+  { field: 'lowQualityCostCredits', enabledField: 'lowQuality1KEnabled', label: '1K' },
+  { field: 'lowQualityCostCredits2K', enabledField: 'lowQuality2KEnabled', label: '2K' },
+  { field: 'lowQualityCostCredits4K', enabledField: 'lowQuality4KEnabled', label: '4K' },
 ]
 
-const MEDIUM_COST_FIELDS: Array<{ field: CostField; label: string }> = [
-  { field: 'costCredits', label: '1K' },
-  { field: 'costCredits2K', label: '2K' },
-  { field: 'costCredits4K', label: '4K' },
+const MEDIUM_COST_FIELDS: BillingCell[] = [
+  { field: 'costCredits', enabledField: 'mediumQuality1KEnabled', label: '1K' },
+  { field: 'costCredits2K', enabledField: 'mediumQuality2KEnabled', label: '2K' },
+  { field: 'costCredits4K', enabledField: 'mediumQuality4KEnabled', label: '4K' },
 ]
 
-const HIGH_COST_FIELDS: Array<{ field: CostField; label: string }> = [
-  { field: 'highQualityCostCredits', label: '1K' },
-  { field: 'highQualityCostCredits2K', label: '2K' },
-  { field: 'highQualityCostCredits4K', label: '4K' },
+const HIGH_COST_FIELDS: BillingCell[] = [
+  { field: 'highQualityCostCredits', enabledField: 'highQuality1KEnabled', label: '1K' },
+  { field: 'highQualityCostCredits2K', enabledField: 'highQuality2KEnabled', label: '2K' },
+  { field: 'highQualityCostCredits4K', enabledField: 'highQuality4KEnabled', label: '4K' },
 ]
 
 function normalizeCost(value: string): number {
@@ -45,49 +59,47 @@ function isGptImage2Draft(draft: ModelDraft): boolean {
 
 function CostInput({
   draft,
+  enabledField,
   field,
   setDraft,
-}: ModelConfigDraftProps & { field: CostField }) {
+}: ModelConfigDraftProps & { enabledField: EnabledField; field: CostField }) {
+  const enabled = draft[enabledField]
   return (
-    <input
-      type="number"
-      min={0}
-      value={draft[field]}
-      onChange={(event) => setDraft((prev) => ({ ...prev, [field]: normalizeCost(event.target.value) }))}
-      className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2.5 text-center text-sm font-semibold text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
-    />
+    <div className="flex items-center gap-2">
+      <input
+        type="checkbox"
+        checked={enabled}
+        onChange={(event) => setDraft((prev) => ({ ...prev, [enabledField]: event.target.checked }))}
+        aria-label={`${enabledField} 开关`}
+      />
+      <input
+        type="number"
+        min={0}
+        value={draft[field]}
+        disabled={!enabled}
+        onChange={(event) => setDraft((prev) => ({ ...prev, [field]: normalizeCost(event.target.value) }))}
+        className="h-9 min-w-0 w-full rounded-lg border border-gray-200 bg-white px-2 text-center text-sm font-semibold text-gray-900 outline-none focus:border-blue-400 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:disabled:bg-gray-900 dark:disabled:text-gray-600"
+      />
+    </div>
   )
 }
 
 function CostRow({
   draft,
-  enabled,
   fields,
   label,
-  onEnabledChange,
   setDraft,
 }: ModelConfigDraftProps & {
-  enabled?: boolean
-  fields: Array<{ field: CostField; label: string }>
-  label: ReactNode
-  onEnabledChange?: (enabled: boolean) => void
+  fields: BillingCell[]
+  label: string
 }) {
   return (
     <div className="grid grid-cols-[88px_repeat(3,1fr)] items-center gap-2 border-b border-amber-100 p-2 last:border-b-0 dark:border-amber-400/15">
       <div className="px-1 text-xs font-semibold text-gray-600 dark:text-gray-300">
-        {typeof enabled === 'boolean' && onEnabledChange ? (
-          <label className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(event) => onEnabledChange(event.target.checked)}
-            />
-            {label}
-          </label>
-        ) : label}
+        {label}
       </div>
       {fields.map((item) => (
-        <CostInput key={item.field} draft={draft} field={item.field} setDraft={setDraft} />
+        <CostInput key={item.field} draft={draft} enabledField={item.enabledField} field={item.field} setDraft={setDraft} />
       ))}
     </div>
   )
@@ -122,24 +134,18 @@ export function ModelBillingFields({ draft, setDraft }: ModelConfigDraftProps) {
               draft={draft}
               setDraft={setDraft}
               label="低"
-              enabled={draft.lowQualityEnabled}
-              onEnabledChange={(value) => setDraft((prev) => ({ ...prev, lowQualityEnabled: value }))}
               fields={LOW_COST_FIELDS}
             />
             <CostRow
               draft={draft}
               setDraft={setDraft}
               label="中"
-              enabled={draft.mediumQualityEnabled}
-              onEnabledChange={(value) => setDraft((prev) => ({ ...prev, mediumQualityEnabled: value }))}
               fields={MEDIUM_COST_FIELDS}
             />
             <CostRow
               draft={draft}
               setDraft={setDraft}
               label="高"
-              enabled={draft.highQualityEnabled}
-              onEnabledChange={(value) => setDraft((prev) => ({ ...prev, highQualityEnabled: value }))}
               fields={HIGH_COST_FIELDS}
             />
           </>

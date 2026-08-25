@@ -17,7 +17,7 @@ export default function GenerationCostNotice({
 }: GenerationCostNoticeProps) {
   if (!activeModel) return null
 
-  const quality = resolveEffectiveModelQuality(activeModel, params.quality)
+  const quality = resolveEffectiveModelQuality(activeModel, params.quality, params.size)
   const qualityLabel = quality === 'low' ? '低质量' : quality === 'high' ? '高质量' : '中质量'
   const tier = resolveImageSizeTier(params.size)
   const quantity = Math.max(1, Math.floor(params.n))

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { resolveEffectiveModelQuality, resolveFallbackQuality, resolveModelCostForSize } from '../../../../lib/modelCost'
+import { resolveEffectiveModelQuality, resolveFirstAvailableCombination, resolveModelCostForSize } from '../../../../lib/modelCost'
 import { resolveImageSizeTier } from '../../../../lib/size'
 import { renderModelIcon } from '../../../../lib/modelIcon'
 import type { ModelConfig, TaskParams } from '../../../../types'
@@ -22,7 +22,7 @@ export default function ModelSelector({
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const activeModel = models.find((model) => model.id === activeModelId) ?? models[0] ?? null
-  const activeQuality = resolveEffectiveModelQuality(activeModel, params.quality)
+  const activeQuality = resolveEffectiveModelQuality(activeModel, params.quality, params.size)
   const activeModelCost = activeModel
     ? resolveModelCostForSize(activeModel, params.size, activeQuality) * Math.max(1, Math.floor(params.n))
     : 0
@@ -75,8 +75,9 @@ export default function ModelSelector({
         <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-50 max-h-96 overflow-y-auto rounded-2xl border border-gray-200/90 bg-white p-2.5 shadow-2xl shadow-gray-900/12 dark:border-white/[0.08] dark:bg-gray-900">
           {models.map((model) => {
             const selected = model.id === activeModel?.id
-            const starterQuality = resolveFallbackQuality(model)
-            const modelCost = resolveModelCostForSize(model, '1024x1024', starterQuality)
+            const starter = resolveFirstAvailableCombination(model)
+            const starterSize = starter.tier === '1K' ? '1024x1024' : starter.tier === '2K' ? '2048x2048' : '3840x3840'
+            const modelCost = resolveModelCostForSize(model, starterSize, starter.quality)
             return (
               <button
                 key={model.id}
