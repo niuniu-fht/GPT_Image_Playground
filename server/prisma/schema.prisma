@@ -113,6 +113,7 @@ model ModelConfig {
   upstreamProviderId String?
   lowQualityUpstreamProviderId String?
   highQualityUpstreamProviderId String?
+  unsupportedAspectRatios String[] @default([])
   apiProtocol   ApiProtocol      @default(images)
   enabled       Boolean          @default(true)
   isNew         Boolean          @default(false)

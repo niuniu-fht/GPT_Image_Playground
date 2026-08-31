@@ -40,6 +40,7 @@ const modelSchema = z.object({
   upstreamProviderId: z.string().nullable().optional(),
   lowQualityUpstreamProviderId: z.string().nullable().optional(),
   highQualityUpstreamProviderId: z.string().nullable().optional(),
+  unsupportedAspectRatios: z.array(z.enum(['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'])).max(10).default([]),
   apiProtocol: z.enum(['images', 'responses', 'gemini']).default('images'),
   enabled: z.boolean().default(true),
   isNew: z.boolean().default(false),

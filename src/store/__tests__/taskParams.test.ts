@@ -31,6 +31,7 @@ function createModel(overrides: Partial<ModelConfig> = {}): ModelConfig {
     highQualityCostCredits2K: 16,
     highQualityCostCredits4K: 32,
     upstreamModel: 'gpt-image-test',
+    unsupportedAspectRatios: [],
     apiProtocol: 'images',
     enabled: true,
     isNew: false,
@@ -63,6 +64,14 @@ describe('model switch params', () => {
       highQuality1KEnabled: false,
     }))).toEqual({
       size: '2048x2048',
+      quality: 'low',
+      n: 1,
+    })
+  })
+
+  it('uses the first allowed aspect ratio when 1:1 is restricted', () => {
+    expect(resolveModelSwitchParams(createModel({ unsupportedAspectRatios: ['1:1', '16:9'] }))).toEqual({
+      size: '1024x1824',
       quality: 'low',
       n: 1,
     })

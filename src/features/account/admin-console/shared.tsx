@@ -104,6 +104,7 @@ export const emptyModelDraft: ModelDraft = {
   upstreamProviderId: null,
   lowQualityUpstreamProviderId: null,
   highQualityUpstreamProviderId: null,
+  unsupportedAspectRatios: [],
   apiProtocol: 'images',
   enabled: true,
   isNew: false,

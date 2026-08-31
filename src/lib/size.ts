@@ -8,7 +8,7 @@ const MAX_PIXELS = 8_294_400
 
 export type SizeTier = '1K' | '2K' | '4K'
 
-const KNOWN_RATIOS = [
+export const KNOWN_ASPECT_RATIOS = [
   '1:1',
   '16:9',
   '9:16',
@@ -20,6 +20,7 @@ const KNOWN_RATIOS = [
   '4:5',
   '21:9',
 ] as const
+export type KnownAspectRatio = typeof KNOWN_ASPECT_RATIOS[number]
 
 function roundToMultiple(value: number, multiple: number) {
   return Math.max(multiple, Math.round(value / multiple) * multiple)
@@ -198,7 +199,7 @@ export function resolveImageSizeTier(size: string): SizeTier {
 
   const tiers: SizeTier[] = ['1K', '2K', '4K']
   for (const tier of tiers) {
-    for (const ratio of KNOWN_RATIOS) {
+    for (const ratio of KNOWN_ASPECT_RATIOS) {
       if (calculateImageSize(tier, ratio) === normalized) return tier
     }
   }
@@ -213,4 +214,27 @@ export function resolveImageSizeTier(size: string): SizeTier {
   if (pixels >= 6_000_000) return '4K'
   if (pixels >= 2_600_000) return '2K'
   return '1K'
+}
+
+export function resolveKnownAspectRatio(size: string): KnownAspectRatio | null {
+  const normalized = normalizeImageSize(size)
+  if (!normalized || normalized === 'auto') return null
+
+  for (const tier of ['1K', '2K', '4K'] as const) {
+    for (const ratio of KNOWN_ASPECT_RATIOS) {
+      if (calculateImageSize(tier, ratio) === normalized) return ratio
+    }
+  }
+
+  const match = normalized.match(SIZE_PATTERN)
+  if (!match) return null
+  const target = Number(match[1]) / Number(match[2])
+  if (!Number.isFinite(target) || target <= 0) return null
+  const nearest = KNOWN_ASPECT_RATIOS
+    .map((ratio) => {
+      const parsed = parseRatio(ratio)!
+      return { ratio, distance: Math.abs(Math.log(target / (parsed.width / parsed.height))) }
+    })
+    .sort((left, right) => left.distance - right.distance)[0]
+  return nearest && nearest.distance <= 0.01 ? nearest.ratio : null
 }

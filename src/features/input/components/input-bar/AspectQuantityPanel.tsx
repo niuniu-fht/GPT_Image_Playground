@@ -4,6 +4,7 @@ import {
   calculateImageSize,
   normalizeImageSize,
   resolveImageSizeTier,
+  type KnownAspectRatio,
   type SizeTier,
 } from '../../../../lib/size'
 import {
@@ -13,11 +14,12 @@ import {
   resolveFirstAvailableCombination,
   supportsQualitySelection,
 } from '../../../../lib/modelCost'
+import { isModelAspectRatioEnabled, isModelSizeAspectRatioEnabled, resolveEnabledModelAspectRatios } from '../../../../lib/modelAspectRatio'
 import type { ModelConfig, TaskParams } from '../../../../types'
 
 type AspectOption = {
   label: string
-  ratio: string
+  ratio: KnownAspectRatio
 }
 
 const ASPECT_OPTIONS: AspectOption[] = [
@@ -165,6 +167,7 @@ export default function AspectQuantityPanel({
   const selectableTiers = SIZE_TIER_OPTIONS.filter((tier) => (
     resolveAvailableQualities(activeModel, tier).length > 0
   ))
+  const selectableAspectOptions = ASPECT_OPTIONS.filter((option) => isModelAspectRatioEnabled(activeModel, option.ratio))
   const summaryQualityLabel = activeQuality === 'low' ? '低' : activeQuality === 'high' ? '高' : '中'
 
   useLayoutEffect(() => {
@@ -205,7 +208,17 @@ export default function AspectQuantityPanel({
   }, [open, qualitySelectionAvailable])
 
   useEffect(() => {
-    if (isQualityTierEnabled(activeModel, activeQuality, activeTier)) {
+    const qualityEnabled = isQualityTierEnabled(activeModel, activeQuality, activeTier)
+    const ratioEnabled = isModelSizeAspectRatioEnabled(activeModel, params.size)
+    if (qualityEnabled && ratioEnabled) {
+      return
+    }
+
+    if (!ratioEnabled) {
+      const fallback = resolveFirstAvailableCombination(activeModel)
+      const fallbackRatio = resolveEnabledModelAspectRatios(activeModel)[0]
+      const size = fallbackRatio ? calculateImageSize(fallback.tier, fallbackRatio) : 'auto'
+      onSetParams({ quality: fallback.quality, size: size || 'auto' })
       return
     }
 
@@ -216,12 +229,13 @@ export default function AspectQuantityPanel({
     }
 
     const fallback = resolveFirstAvailableCombination(activeModel)
-    const size = calculateImageSize(fallback.tier, activeRatio ?? DEFAULT_RATIO)
+    const fallbackRatio = resolveEnabledModelAspectRatios(activeModel)[0]
+    const size = fallbackRatio ? calculateImageSize(fallback.tier, fallbackRatio) : 'auto'
     onSetParams({
       quality: fallback.quality,
       ...(size ? { size } : {}),
     })
-  }, [activeModel, activeQuality, activeRatio, activeTier, onSetParams])
+  }, [activeModel, activeQuality, activeTier, onSetParams, params.size])
 
   useEffect(() => {
     if (!open) return
@@ -293,7 +307,7 @@ export default function AspectQuantityPanel({
                 >
                   自动
                 </button>
-                {ASPECT_OPTIONS.map((option) => {
+                {selectableAspectOptions.map((option) => {
                   const active = activeRatio === option.ratio && params.size !== 'auto'
                   return (
                     <button

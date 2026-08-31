@@ -161,6 +161,7 @@ export interface ModelConfig {
   upstreamProviderId?: string | null
   lowQualityUpstreamProviderId?: string | null
   highQualityUpstreamProviderId?: string | null
+  unsupportedAspectRatios: string[]
   apiProtocol: ApiProtocol
   enabled: boolean
   isNew: boolean

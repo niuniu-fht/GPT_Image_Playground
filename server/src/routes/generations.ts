@@ -10,6 +10,7 @@ import {
 } from '../generationTimeout.js'
 import { HttpError, sendOk } from '../http.js'
 import { callGeminiGenerateContent } from '../geminiApi.js'
+import { isModelAspectRatioEnabled, resolveKnownAspectRatio } from '../modelAspectRatio.js'
 import {
   isGptImage2Model,
   isQualityTierEnabled,
@@ -1209,6 +1210,10 @@ router.post('/', requireUser, async (req, res, next) => {
     if (!model) throw new HttpError(404, 'model_not_found', '模型不可用或不存在')
     if (model.apiProtocol !== 'images' && model.apiProtocol !== 'gemini') {
       throw new HttpError(400, 'unsupported_protocol', '当前平台生成任务支持 OpenAI Images 与 Gemini 原生协议')
+    }
+    if (!isModelAspectRatioEnabled(model, input.params.size)) {
+      const ratio = resolveKnownAspectRatio(input.params.size)
+      throw new HttpError(400, 'model_aspect_ratio_disabled', `当前模型未开放 ${ratio} 宽高比`)
     }
     await checkModerationRules(input.prompt)
 

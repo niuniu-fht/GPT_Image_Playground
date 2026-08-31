@@ -31,6 +31,7 @@ function createModel(overrides: Partial<ModelConfig> = {}): ModelConfig {
     highQualityCostCredits2K: 11,
     highQualityCostCredits4K: 12,
     upstreamModel: 'group-medium',
+    unsupportedAspectRatios: [],
     apiProtocol: 'images',
     enabled: true,
     isNew: false,

@@ -1,5 +1,6 @@
 import { normalizeImageSize } from '../lib/size'
 import { resolveFirstAvailableCombination } from '../lib/modelCost'
+import { resolveEnabledModelAspectRatios } from '../lib/modelAspectRatio'
 import { calculateImageSize } from '../lib/size'
 import type { ModelConfig, TaskParams } from '../types'
 
@@ -20,8 +21,9 @@ export function resolveModelSwitchParams(
   model: ModelConfig | null,
 ): Pick<TaskParams, 'size' | 'quality' | 'n'> {
   const selection = resolveFirstAvailableCombination(model)
+  const ratio = resolveEnabledModelAspectRatios(model)[0] ?? '1:1'
   return {
-    size: calculateImageSize(selection.tier, '1:1') || DEFAULT_PARAMS.size,
+    size: calculateImageSize(selection.tier, ratio) || DEFAULT_PARAMS.size,
     quality: selection.quality,
     n: DEFAULT_PARAMS.n,
   }

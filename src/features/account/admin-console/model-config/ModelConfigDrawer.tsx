@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react'
 import type { AdminUpstreamProvider } from '../../../../types'
 import { ModelBillingFields } from './ModelBillingFields'
+import { ModelAspectRatioFields } from './ModelAspectRatioFields'
 import { ModelDisplayFields } from './ModelDisplayFields'
 import { ModelUpstreamFields } from './ModelUpstreamFields'
 import type { ModelDraft } from '../shared'
@@ -30,6 +31,7 @@ export function ModelConfigDrawer({
     <form onSubmit={onSubmit} className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
       <ModelDisplayFields draft={draft} setDraft={setDraft} onError={onError} />
       <ModelUpstreamFields draft={draft} setDraft={setDraft} upstreams={upstreams} editingModelId={editingModelId} />
+      <ModelAspectRatioFields draft={draft} setDraft={setDraft} />
       <ModelBillingFields draft={draft} setDraft={setDraft} />
       <div className="sticky bottom-0 -mx-5 mt-6 flex gap-2 border-t border-gray-100 bg-white px-5 py-4 dark:border-white/[0.08] dark:bg-gray-900">
         {editingModelId && (
