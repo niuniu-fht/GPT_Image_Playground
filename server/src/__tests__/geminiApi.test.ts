@@ -30,6 +30,21 @@ describe('Gemini native image adapter', () => {
     })
   })
 
+  it.each([
+    ['1024x1024', '1:1'],
+    ['1824x1024', '16:9'],
+    ['1024x1824', '9:16'],
+    ['1360x1024', '4:3'],
+    ['1024x1360', '3:4'],
+    ['1536x1024', '3:2'],
+    ['1024x1536', '2:3'],
+    ['1280x1024', '5:4'],
+    ['1024x1280', '4:5'],
+    ['2384x1024', '21:9'],
+  ])('maps playground size %s to Gemini ratio %s', (size, ratio) => {
+    expect(resolveGeminiImageConfig(size).aspectRatio).toBe(ratio)
+  })
+
   it('sends reference images and extracts inline image output', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       candidates: [{
@@ -56,7 +71,7 @@ describe('Gemini native image adapter', () => {
     const body = JSON.parse(String(init.body))
     expect(body.generationConfig).toMatchObject({
       responseModalities: ['TEXT', 'IMAGE'],
-      responseFormat: { image: { aspectRatio: '16:9', imageSize: '2K' } },
+      imageConfig: { aspectRatio: '16:9', imageSize: '2K' },
     })
     expect(body.contents[0].parts[0].inlineData).toEqual({
       mimeType: 'image/jpeg',
@@ -66,9 +81,9 @@ describe('Gemini native image adapter', () => {
     expect(result.images[0]?.bytes).toEqual(Buffer.from([1, 2, 3]))
   })
 
-  it('retries with the legacy imageConfig shape for compatible relays', async () => {
+  it('retries with the responseFormat shape when the upstream rejects imageConfig', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'unknown responseFormat' } }), { status: 400 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'unknown imageConfig' } }), { status: 400 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         candidates: [{ content: { parts: [{ inline_data: { mime_type: 'image/jpeg', data: 'AQI=' } }] } }],
       }), { status: 200 }))
@@ -85,8 +100,10 @@ describe('Gemini native image adapter', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    const legacyBody = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))
-    expect(legacyBody.generationConfig.imageConfig).toEqual({ aspectRatio: '1:1', imageSize: '1K' })
+    const alternateBody = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))
+    expect(alternateBody.generationConfig.responseFormat).toEqual({
+      image: { aspectRatio: '1:1', imageSize: '1K' },
+    })
     expect(result.images[0]?.mimeType).toBe('image/jpeg')
   })
 })

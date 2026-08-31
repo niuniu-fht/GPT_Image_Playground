@@ -213,14 +213,14 @@ export async function callGeminiGenerateContent(input: GeminiGenerateInput): Pro
       contents,
       generationConfig: {
         responseModalities: ['TEXT', 'IMAGE'],
-        responseFormat: { image: imageConfig },
+        imageConfig,
       },
     },
     {
       contents,
       generationConfig: {
         responseModalities: ['TEXT', 'IMAGE'],
-        imageConfig,
+        responseFormat: { image: imageConfig },
       },
     },
   ]
@@ -247,8 +247,8 @@ export async function callGeminiGenerateContent(input: GeminiGenerateInput): Pro
     if (response.ok) {
       return { images: extractGeminiImages(payload), payload, request }
     }
-    const shouldRetryLegacyFormat = index === 0 && (response.status === 400 || response.status === 422)
-    if (!shouldRetryLegacyFormat) {
+    const shouldRetryAlternateFormat = index === 0 && (response.status === 400 || response.status === 422)
+    if (!shouldRetryAlternateFormat) {
       throw new HttpError(response.status, 'gemini_upstream_error', readGeminiError(payload, response.status))
     }
   }
