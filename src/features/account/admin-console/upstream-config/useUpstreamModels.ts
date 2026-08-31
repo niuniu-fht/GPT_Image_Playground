@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { platformApi, type AdminUpstreamModelOption } from '../../../../lib/platformApi'
+import type { ApiProtocol } from '../../../../types'
 
-export function useUpstreamModels(providerId: string | null | undefined) {
+export function useUpstreamModels(providerId: string | null | undefined, protocol: ApiProtocol = 'images') {
   const [models, setModels] = useState<AdminUpstreamModelOption[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -13,7 +14,7 @@ export function useUpstreamModels(providerId: string | null | undefined) {
     setError('')
     setCheckedAt(null)
     setLatencyMs(null)
-  }, [providerId])
+  }, [providerId, protocol])
 
   async function loadModels() {
     if (!providerId) {
@@ -23,7 +24,7 @@ export function useUpstreamModels(providerId: string | null | undefined) {
     setLoading(true)
     setError('')
     try {
-      const result = await platformApi.listAdminUpstreamModels(providerId)
+      const result = await platformApi.listAdminUpstreamModels(providerId, protocol)
       setModels(result.models)
       setCheckedAt(result.checkedAt)
       setLatencyMs(result.latencyMs)

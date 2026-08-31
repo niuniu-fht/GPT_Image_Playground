@@ -27,7 +27,7 @@ export function QualityUpstreamBinding({
   const [query, setQuery] = useState('')
   const providerId = draft[providerField]
   const selectedProvider = upstreams.find((provider) => provider.id === providerId) ?? null
-  const upstreamModels = useUpstreamModels(providerId)
+  const upstreamModels = useUpstreamModels(providerId, draft.apiProtocol)
   const filteredModelIds = useMemo(() => {
     const text = query.trim().toLowerCase()
     return upstreamModels.modelIds.filter((id) => !text || id.toLowerCase().includes(text))

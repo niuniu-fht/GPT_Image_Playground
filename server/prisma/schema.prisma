@@ -15,6 +15,7 @@ enum UserRole {
 enum ApiProtocol {
   images
   responses
+  gemini
 }
 
 enum TaskStatus {

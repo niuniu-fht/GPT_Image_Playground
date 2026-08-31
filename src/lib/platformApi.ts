@@ -18,6 +18,7 @@ import type {
   AdminUsageReport,
   AdminUserDetail,
   AdminUserSummary,
+  ApiProtocol,
   CreditOrder,
   CreditLedgerEntry,
   CreditLedgerFilter,
@@ -671,9 +672,9 @@ export const platformApi = {
     })
   },
 
-  listAdminUpstreamModels(id: string) {
+  listAdminUpstreamModels(id: string, protocol: ApiProtocol = 'images') {
     return request<{ models: AdminUpstreamModelOption[]; checkedAt: string; latencyMs: number }>(
-      `/api/admin/upstreams/${encodeURIComponent(id)}/models`,
+      `/api/admin/upstreams/${encodeURIComponent(id)}/models?protocol=${encodeURIComponent(protocol)}`,
     )
   },
 

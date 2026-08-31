@@ -10,6 +10,7 @@ import {
 } from '../adminGenerationTasks.js'
 import { requireAdmin, resLocals } from '../auth.js'
 import { cleanupGeneratedAssetsForTasks } from '../generatedAssetCleanup.js'
+import { buildGeminiModelsEndpoint } from '../geminiApi.js'
 import { HttpError, sendOk } from '../http.js'
 import { prisma } from '../prisma.js'
 import { getPlatformSettings, toAdminPlatformSettingsView, upsertPlatformSettings } from '../settings.js'
@@ -69,7 +70,29 @@ function readUpstreamModelOptions(payload: unknown): UpstreamModelOption[] {
     .filter((item): item is UpstreamModelOption => item !== null)
 }
 
-async function fetchUpstreamModels(provider: { baseUrl: string; apiKey: string; timeoutSeconds: number }) {
+function readGeminiModelOptions(payload: unknown): UpstreamModelOption[] {
+  if (!payload || typeof payload !== 'object' || !Array.isArray((payload as { models?: unknown }).models)) {
+    return []
+  }
+  return (payload as { models: unknown[] }).models
+    .map((item): UpstreamModelOption | null => {
+      if (!item || typeof item !== 'object') return null
+      const record = item as { name?: unknown; displayName?: unknown; supportedGenerationMethods?: unknown }
+      if (typeof record.name !== 'string' || !record.name.trim()) return null
+      const methods = Array.isArray(record.supportedGenerationMethods) ? record.supportedGenerationMethods : []
+      if (methods.length > 0 && !methods.includes('generateContent')) return null
+      return {
+        id: record.name.replace(/^models\//i, ''),
+        ownedBy: typeof record.displayName === 'string' ? record.displayName : 'google',
+      }
+    })
+    .filter((item): item is UpstreamModelOption => item !== null)
+}
+
+async function fetchUpstreamModels(
+  provider: { baseUrl: string; apiKey: string; timeoutSeconds: number },
+  protocol: 'images' | 'gemini' = 'images',
+) {
   if (!provider.apiKey) {
     throw new HttpError(400, 'missing_api_key', '渠道尚未配置 API Key，无法拉取模型列表')
   }
@@ -78,9 +101,14 @@ async function fetchUpstreamModels(provider: { baseUrl: string; apiKey: string; 
   const timeout = setTimeout(() => controller.abort(), Math.min(provider.timeoutSeconds, 20) * 1000)
   try {
     const baseUrl = provider.baseUrl.replace(/\/+$/, '')
-    const response = await fetch(`${baseUrl}/v1/models`, {
+    const response = await fetch(
+      protocol === 'gemini' ? buildGeminiModelsEndpoint(baseUrl) : `${baseUrl}/v1/models`,
+      {
       method: 'GET',
-      headers: {
+      headers: protocol === 'gemini' ? {
+        'x-goog-api-key': provider.apiKey,
+        Accept: 'application/json',
+      } : {
         Authorization: `Bearer ${provider.apiKey}`,
         Accept: 'application/json',
       },
@@ -90,7 +118,7 @@ async function fetchUpstreamModels(provider: { baseUrl: string; apiKey: string; 
     if (!response.ok) {
       throw new HttpError(response.status, 'upstream_models_failed', getUpstreamErrorMessage(payload, `渠道返回 HTTP ${response.status}`))
     }
-    return readUpstreamModelOptions(payload)
+    return protocol === 'gemini' ? readGeminiModelOptions(payload) : readUpstreamModelOptions(payload)
   } catch (error) {
     if (error instanceof HttpError) throw error
     const isAbort = error instanceof Error && error.name === 'AbortError'
@@ -115,24 +143,43 @@ async function testUpstreamProvider(provider: { baseUrl: string; apiKey: string;
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), Math.min(provider.timeoutSeconds, 15) * 1000)
   try {
-    const baseUrl = provider.baseUrl.replace(/\/+$/, '')
-    const response = await fetch(`${baseUrl}/v1/models`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${provider.apiKey}`,
-        Accept: 'application/json',
-      },
-      signal: controller.signal,
-    })
-    const payload = (await response.json().catch(() => null)) as unknown
-    const models = readUpstreamModelOptions(payload).length || undefined
+    let lastResponse: Response | null = null
+    let lastPayload: unknown = null
+    let models: number | undefined
+    let detectedProtocol = ''
+    for (const protocol of ['images', 'gemini'] as const) {
+      const baseUrl = provider.baseUrl.replace(/\/+$/, '')
+      const response = await fetch(
+        protocol === 'gemini' ? buildGeminiModelsEndpoint(baseUrl) : `${baseUrl}/v1/models`,
+        {
+          method: 'GET',
+          headers: protocol === 'gemini' ? {
+            'x-goog-api-key': provider.apiKey,
+            Accept: 'application/json',
+          } : {
+            Authorization: `Bearer ${provider.apiKey}`,
+            Accept: 'application/json',
+          },
+          signal: controller.signal,
+        },
+      )
+      const payload = (await response.json().catch(() => null)) as unknown
+      lastResponse = response
+      lastPayload = payload
+      if (response.ok) {
+        models = (protocol === 'gemini' ? readGeminiModelOptions(payload) : readUpstreamModelOptions(payload)).length || undefined
+        detectedProtocol = protocol === 'gemini' ? 'Gemini 原生' : 'OpenAI'
+        break
+      }
+    }
+    const response = lastResponse!
     return {
       ok: response.ok,
       status: response.status,
       latencyMs: Date.now() - startedAt,
       checkedAt: new Date().toISOString(),
       modelCount: models,
-      message: response.ok ? '连接成功，渠道可访问模型列表' : getUpstreamErrorMessage(payload, `渠道返回 HTTP ${response.status}`),
+      message: response.ok ? `连接成功，检测到${detectedProtocol}模型接口` : getUpstreamErrorMessage(lastPayload, `渠道返回 HTTP ${response.status}`),
     }
   } catch (error) {
     const isAbort = error instanceof Error && error.name === 'AbortError'
@@ -1939,7 +1986,8 @@ router.get('/upstreams/:id/models', async (req, res, next) => {
     const provider = await prisma.upstreamProvider.findUnique({ where: { id } })
     if (!provider) throw new HttpError(404, 'UPSTREAM_NOT_FOUND', '上游渠道不存在')
     const startedAt = Date.now()
-    const models = await fetchUpstreamModels(provider)
+    const protocol = req.query.protocol === 'gemini' ? 'gemini' : 'images'
+    const models = await fetchUpstreamModels(provider, protocol)
     await writeAudit(req, 'upstream.models.list', id, { modelCount: models.length })
     sendOk(res, {
       models,

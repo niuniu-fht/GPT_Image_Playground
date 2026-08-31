@@ -19,7 +19,7 @@ export interface AppSettings {
   requestMode: RequestMode
 }
 
-export type ApiProtocol = 'images' | 'responses'
+export type ApiProtocol = 'images' | 'responses' | 'gemini'
 export type RequestMode = 'direct' | 'local_proxy'
 export type ResponsesTransportMode = 'auto' | 'stream' | 'json'
 export type ResponsesImageInputMode = 'auto' | 'file_id'

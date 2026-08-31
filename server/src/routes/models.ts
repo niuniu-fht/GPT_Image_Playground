@@ -40,7 +40,7 @@ const modelSchema = z.object({
   upstreamProviderId: z.string().nullable().optional(),
   lowQualityUpstreamProviderId: z.string().nullable().optional(),
   highQualityUpstreamProviderId: z.string().nullable().optional(),
-  apiProtocol: z.enum(['images', 'responses']).default('images'),
+  apiProtocol: z.enum(['images', 'responses', 'gemini']).default('images'),
   enabled: z.boolean().default(true),
   isNew: z.boolean().default(false),
   sortOrder: z.number().int().default(0),

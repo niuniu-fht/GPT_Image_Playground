@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import type { GenerationTask, Prisma } from '@prisma/client'
+import type { ApiProtocol, GenerationTask, Prisma } from '@prisma/client'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import { requireUser, resLocals } from '../auth.js'
@@ -9,6 +9,7 @@ import {
   readStoredGenerationTimeoutSeconds,
 } from '../generationTimeout.js'
 import { HttpError, sendOk } from '../http.js'
+import { callGeminiGenerateContent } from '../geminiApi.js'
 import {
   isGptImage2Model,
   isQualityTierEnabled,
@@ -67,7 +68,7 @@ type GenerationModel = Prisma.ModelConfigGetPayload<{
     highQualityUpstreamProvider: true
   }
 }>
-type GenerationUpstream = { model: string; baseUrl: string; apiKey: string }
+type GenerationUpstream = { model: string; baseUrl: string; apiKey: string; protocol: ApiProtocol }
 type PreparedGenerationImage = {
   byteSize: number
   file: File
@@ -142,11 +143,13 @@ function resolveGenerationUpstream(model: GenerationModel, quality: string): Gen
         model: upstreamModel,
         baseUrl: upstreamProvider.baseUrl,
         apiKey: upstreamProvider.apiKey,
+        protocol: model.apiProtocol,
       }
     : {
         model: upstreamModel,
         baseUrl: env.openaiBaseUrl,
         apiKey: env.openaiApiKey,
+        protocol: model.apiProtocol,
       }
 }
 
@@ -738,6 +741,55 @@ async function callImagesApiOnce(
   return normalizeImageResponse(payload, baseUrl, signal)
 }
 
+async function callGeminiApiOnce(
+  input: PreparedGenerationInput,
+  upstream: GenerationUpstream,
+  signal: AbortSignal,
+): Promise<GeneratedImagePayload[]> {
+  const inputImages = await Promise.all(input.inputImages.map(async (image) => ({
+    data: Buffer.from(await image.file.arrayBuffer()),
+    mimeType: image.mimeType,
+  })))
+  const editMask = input.editMask
+    ? {
+        data: Buffer.from(await input.editMask.file.arrayBuffer()),
+        mimeType: input.editMask.mimeType,
+      }
+    : null
+  const result = await callGeminiGenerateContent({
+    apiKey: upstream.apiKey,
+    baseUrl: upstream.baseUrl,
+    editMask,
+    inputImages,
+    model: upstream.model,
+    prompt: input.prompt,
+    signal,
+    size: input.params.size,
+  })
+  console.info('[generation] Gemini upstream response', {
+    endpoint: '/v1beta/models/{model}:generateContent',
+    operation: input.inputImages.length > 0 ? 'edit' : 'generation',
+    request: result.request,
+    payload: sanitizeUpstreamPayload(result.payload),
+  })
+  const upstreamResponse = sanitizeUpstreamPayload(result.payload)
+  return result.images.map((image) => ({
+    bytes: image.bytes,
+    mimeType: image.mimeType,
+    upstreamResponse,
+  }))
+}
+
+function callUpstreamImageApiOnce(
+  input: PreparedGenerationInput,
+  upstream: GenerationUpstream,
+  signal: AbortSignal,
+): Promise<GeneratedImagePayload[]> {
+  return upstream.protocol === 'gemini'
+    ? callGeminiApiOnce(input, upstream, signal)
+    : callImagesApiOnce(input, upstream, signal)
+}
+
 async function callSingleImageApi(
   input: PreparedGenerationInput,
   upstream: GenerationUpstream,
@@ -752,7 +804,7 @@ async function callSingleImageApi(
       }
       const images = await withGenerationUpstreamSlot(
         signal,
-        () => callImagesApiOnce(withImageCount(input, 1), upstream, signal),
+        () => callUpstreamImageApiOnce(withImageCount(input, 1), upstream, signal),
       )
       const image = images[0]
       if (!image) {
@@ -1155,8 +1207,8 @@ router.post('/', requireUser, async (req, res, next) => {
       },
     })
     if (!model) throw new HttpError(404, 'model_not_found', '模型不可用或不存在')
-    if (model.apiProtocol !== 'images') {
-      throw new HttpError(400, 'unsupported_protocol', '当前后端第一版仅支持 Images API 模型')
+    if (model.apiProtocol !== 'images' && model.apiProtocol !== 'gemini') {
+      throw new HttpError(400, 'unsupported_protocol', '当前平台生成任务支持 OpenAI Images 与 Gemini 原生协议')
     }
     await checkModerationRules(input.prompt)
 
