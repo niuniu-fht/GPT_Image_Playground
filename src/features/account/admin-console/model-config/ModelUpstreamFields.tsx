@@ -12,6 +12,31 @@ export function ModelUpstreamFields({ draft, setDraft, upstreams }: ModelConfigS
         </div>
       </div>
 
+      <section className="rounded-xl border border-emerald-200/80 bg-white p-3 dark:border-emerald-400/20 dark:bg-gray-950">
+        <div className="text-xs font-semibold text-gray-600 dark:text-gray-300">API 协议</div>
+        <div className="mt-2 grid grid-cols-3 gap-2" role="group" aria-label="API 协议">
+          {API_PROTOCOL_OPTIONS.map((option) => {
+            const active = draft.apiProtocol === option.value
+            return (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setDraft((prev) => ({ ...prev, apiProtocol: option.value }))}
+                className={active
+                  ? 'min-h-10 rounded-lg border border-emerald-600 bg-emerald-600 px-2 py-2 text-xs font-semibold text-white shadow-sm'
+                  : 'min-h-10 rounded-lg border border-gray-200 bg-white px-2 py-2 text-xs font-semibold text-gray-600 transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-white/[0.1] dark:bg-gray-900 dark:text-gray-300 dark:hover:border-emerald-400/30 dark:hover:bg-emerald-400/10'}
+              >
+                {option.label}
+              </button>
+            )
+          })}
+        </div>
+        <div className="mt-2 font-mono text-[11px] leading-5 text-emerald-700 dark:text-emerald-300">
+          {API_PROTOCOL_OPTIONS.find((option) => option.value === draft.apiProtocol)?.hint}
+        </div>
+      </section>
+
       <div className="space-y-3">
         <QualityUpstreamBinding
           draft={draft}
@@ -42,18 +67,6 @@ export function ModelUpstreamFields({ draft, setDraft, upstreams }: ModelConfigS
         />
       </div>
 
-      <label className="block text-xs font-semibold text-gray-500">
-        API 协议
-        <select
-          value={draft.apiProtocol}
-          onChange={(event) => setDraft((prev) => ({ ...prev, apiProtocol: event.target.value as typeof draft.apiProtocol }))}
-          className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-emerald-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
-        >
-          {API_PROTOCOL_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>{option.label} - {option.hint}</option>
-          ))}
-        </select>
-      </label>
     </div>
   )
 }
