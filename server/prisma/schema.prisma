@@ -61,6 +61,7 @@ model User {
   squareShares  SquareShare[]
   squareReports SquareReport[]
   generatedAssets GeneratedAsset[]
+  announcementReads AnnouncementRead[]
 }
 
 model LoginLog {
@@ -107,12 +108,45 @@ model ModelConfig {
   highQualityCostCredits Int     @default(0)
   highQualityCostCredits2K Int   @default(0)
   highQualityCostCredits4K Int   @default(0)
+  xhighQualityEnabled Boolean @default(false)
+  xhighQuality1KEnabled Boolean @default(false)
+  xhighQuality2KEnabled Boolean @default(false)
+  xhighQuality4KEnabled Boolean @default(false)
+  xhighQualityCostCredits Int @default(0)
+  xhighQualityCostCredits2K Int @default(0)
+  xhighQualityCostCredits4K Int @default(0)
+  maxQualityEnabled Boolean @default(false)
+  maxQuality1KEnabled Boolean @default(false)
+  maxQuality2KEnabled Boolean @default(false)
+  maxQuality4KEnabled Boolean @default(false)
+  maxQualityCostCredits Int @default(0)
+  maxQualityCostCredits2K Int @default(0)
+  maxQualityCostCredits4K Int @default(0)
+  lowQualityMaxInputImages Int?
+  lowQualityMaxInputImages2K Int?
+  lowQualityMaxInputImages4K Int?
+  mediumQualityMaxInputImages Int?
+  mediumQualityMaxInputImages2K Int?
+  mediumQualityMaxInputImages4K Int?
+  highQualityMaxInputImages Int?
+  highQualityMaxInputImages2K Int?
+  highQualityMaxInputImages4K Int?
+  xhighQualityMaxInputImages Int?
+  xhighQualityMaxInputImages2K Int?
+  xhighQualityMaxInputImages4K Int?
+  maxQualityMaxInputImages Int?
+  maxQualityMaxInputImages2K Int?
+  maxQualityMaxInputImages4K Int?
   upstreamModel String
   lowQualityUpstreamModel String?
   highQualityUpstreamModel String?
+  xhighQualityUpstreamModel String?
+  maxQualityUpstreamModel String?
   upstreamProviderId String?
   lowQualityUpstreamProviderId String?
   highQualityUpstreamProviderId String?
+  xhighQualityUpstreamProviderId String?
+  maxQualityUpstreamProviderId String?
   unsupportedAspectRatios String[] @default([])
   apiProtocol   ApiProtocol      @default(images)
   enabled       Boolean          @default(true)
@@ -124,9 +158,13 @@ model ModelConfig {
   upstreamProvider UpstreamProvider? @relation("MediumQualityProvider", fields: [upstreamProviderId], references: [id], onDelete: SetNull)
   lowQualityUpstreamProvider UpstreamProvider? @relation("LowQualityProvider", fields: [lowQualityUpstreamProviderId], references: [id], onDelete: SetNull)
   highQualityUpstreamProvider UpstreamProvider? @relation("HighQualityProvider", fields: [highQualityUpstreamProviderId], references: [id], onDelete: SetNull)
+  xhighQualityUpstreamProvider UpstreamProvider? @relation("XHighQualityProvider", fields: [xhighQualityUpstreamProviderId], references: [id], onDelete: SetNull)
+  maxQualityUpstreamProvider UpstreamProvider? @relation("MaxQualityProvider", fields: [maxQualityUpstreamProviderId], references: [id], onDelete: SetNull)
 
   @@index([lowQualityUpstreamProviderId])
   @@index([highQualityUpstreamProviderId])
+  @@index([xhighQualityUpstreamProviderId])
+  @@index([maxQualityUpstreamProviderId])
 }
 
 model UpstreamProvider {
@@ -148,6 +186,8 @@ model UpstreamProvider {
   models    ModelConfig[] @relation("MediumQualityProvider")
   lowQualityModels ModelConfig[] @relation("LowQualityProvider")
   highQualityModels ModelConfig[] @relation("HighQualityProvider")
+  xhighQualityModels ModelConfig[] @relation("XHighQualityProvider")
+  maxQualityModels ModelConfig[] @relation("MaxQualityProvider")
 
   @@index([enabled, priority])
 }
@@ -439,6 +479,19 @@ model Announcement {
   endsAt      DateTime?
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
+  reads       AnnouncementRead[]
+}
+
+model AnnouncementRead {
+  id             String      @id @default(cuid())
+  userId         String
+  announcementId String
+  readAt         DateTime    @default(now())
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, announcementId])
+  @@index([announcementId])
 }
 
 model AuditLog {

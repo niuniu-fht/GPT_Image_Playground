@@ -1,0 +1,16 @@
+ALTER TABLE "ModelConfig"
+  ADD COLUMN "lowQualityMaxInputImages" INTEGER,
+  ADD COLUMN "lowQualityMaxInputImages2K" INTEGER,
+  ADD COLUMN "lowQualityMaxInputImages4K" INTEGER,
+  ADD COLUMN "mediumQualityMaxInputImages" INTEGER,
+  ADD COLUMN "mediumQualityMaxInputImages2K" INTEGER,
+  ADD COLUMN "mediumQualityMaxInputImages4K" INTEGER,
+  ADD COLUMN "highQualityMaxInputImages" INTEGER,
+  ADD COLUMN "highQualityMaxInputImages2K" INTEGER,
+  ADD COLUMN "highQualityMaxInputImages4K" INTEGER,
+  ADD COLUMN "xhighQualityMaxInputImages" INTEGER,
+  ADD COLUMN "xhighQualityMaxInputImages2K" INTEGER,
+  ADD COLUMN "xhighQualityMaxInputImages4K" INTEGER,
+  ADD COLUMN "maxQualityMaxInputImages" INTEGER,
+  ADD COLUMN "maxQualityMaxInputImages2K" INTEGER,
+  ADD COLUMN "maxQualityMaxInputImages4K" INTEGER;

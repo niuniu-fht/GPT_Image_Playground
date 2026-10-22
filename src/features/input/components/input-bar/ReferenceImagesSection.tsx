@@ -10,6 +10,7 @@ interface ReferenceImagesSectionProps {
   maskedInputCount: number
   primaryMaskedInput: InputImage | null
   atImageLimit: boolean
+  maxInputImages: number
   showImageUrlInput: boolean
   imageUrlInput: string
   imageUrlInputRef: RefObject<HTMLInputElement | null>
@@ -33,6 +34,7 @@ export default function ReferenceImagesSection({
   maskedInputCount,
   primaryMaskedInput,
   atImageLimit,
+  maxInputImages,
   showImageUrlInput,
   imageUrlInput,
   imageUrlInputRef,
@@ -53,6 +55,8 @@ export default function ReferenceImagesSection({
     <div className="flex flex-col gap-2">
       <ReferenceImagesToolbar
         atImageLimit={atImageLimit}
+        currentImageCount={inputImages.length}
+        maxInputImages={maxInputImages}
         showImageUrlInput={showImageUrlInput}
         imageUrlInput={imageUrlInput}
         imageUrlInputRef={imageUrlInputRef}

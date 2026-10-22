@@ -4,7 +4,7 @@ import { useGlobalRuntimeErrors } from './hooks/useGlobalRuntimeErrors'
 import { resolveAppViewFromPath, resolveAppViewPath, resolveAppViewTitle } from './app/appRoutes'
 import { Header } from './app/components'
 import FutureFeaturePage from './app/components/FutureFeaturePage'
-import { AdminConsole, AnnouncementStrip, AuthModal } from './features/account'
+import { AdminConsole, AnnouncementModal, AuthModal } from './features/account'
 import { ImageContextMenu, TaskGrid } from './features/gallery'
 import { InputBar, PromptLibraryDrawer, SearchBar } from './features/input'
 import { LandingPage } from './features/landing'
@@ -178,7 +178,6 @@ export default function App() {
               />
             ) : (
               <>
-                <AnnouncementStrip placement="workspace" />
                 <SearchBar />
                 <TaskGrid />
               </>
@@ -203,6 +202,7 @@ export default function App() {
       <ShareToSquareModal />
       <AuthModal />
       <AdminConsole />
+      <AnnouncementModal placement="workspace" />
       <ConfirmDialog />
       <Toast />
       <ImageContextMenu />

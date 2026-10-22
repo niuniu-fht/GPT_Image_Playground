@@ -11,6 +11,7 @@ interface ParamsSectionProps {
   models: ModelConfig[]
   normalizedSize: string
   params: TaskParams
+  inputImageCount: number
   onActiveModelChange: (modelId: string) => void
   onSetParams: (params: Partial<TaskParams>) => void
 }
@@ -22,6 +23,7 @@ export default function ParamsSection({
   models,
   normalizedSize,
   params,
+  inputImageCount,
   onActiveModelChange,
   onSetParams,
 }: ParamsSectionProps) {
@@ -58,6 +60,7 @@ export default function ParamsSection({
         activeModel={activeModel}
         estimatedCost={estimatedCost}
         params={params}
+        inputImageCount={inputImageCount}
         recentlyReset={recentlyReset}
       />
       <AspectQuantityPanel

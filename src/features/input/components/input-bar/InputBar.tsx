@@ -10,6 +10,7 @@ export default function InputBar() {
     promptPreview,
     isDragging,
     atImageLimit,
+    maxInputImages,
     mobileDrawerOpen,
     fileInputRef,
     inputContent,
@@ -36,7 +37,7 @@ export default function InputBar() {
         <InputPanelContent content={inputContent} />
       </MobilePromptDrawer>
 
-      <DragOverlay visible={isDragging} atImageLimit={atImageLimit} />
+      <DragOverlay visible={isDragging} atImageLimit={atImageLimit} maxInputImages={maxInputImages} />
 
       <input
         ref={fileInputRef}

@@ -3,6 +3,7 @@ import type { AdminUpstreamProvider } from '../../../../types'
 import { ModelBillingFields } from './ModelBillingFields'
 import { ModelAspectRatioFields } from './ModelAspectRatioFields'
 import { ModelDisplayFields } from './ModelDisplayFields'
+import { ModelInputImageLimitFields } from './ModelInputImageLimitFields'
 import { ModelUpstreamFields } from './ModelUpstreamFields'
 import type { ModelDraft } from '../shared'
 
@@ -33,6 +34,7 @@ export function ModelConfigDrawer({
       <ModelUpstreamFields draft={draft} setDraft={setDraft} upstreams={upstreams} editingModelId={editingModelId} />
       <ModelAspectRatioFields draft={draft} setDraft={setDraft} />
       <ModelBillingFields draft={draft} setDraft={setDraft} />
+      <ModelInputImageLimitFields draft={draft} setDraft={setDraft} />
       <div className="sticky bottom-0 -mx-5 mt-6 flex gap-2 border-t border-gray-100 bg-white px-5 py-4 dark:border-white/[0.08] dark:bg-gray-900">
         {editingModelId && (
           <button type="button" onClick={onDelete} className="h-10 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-600 hover:bg-rose-50 dark:border-rose-400/20 dark:hover:bg-rose-400/10">

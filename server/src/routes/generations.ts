@@ -14,6 +14,8 @@ import { isModelAspectRatioEnabled, resolveKnownAspectRatio } from '../modelAspe
 import {
   isGptImage2Model,
   isQualityTierEnabled,
+  MAX_INPUT_IMAGE_COUNT,
+  resolveMaxInputImages,
   resolveModelCostForSize,
   resolveResolutionTier,
 } from '../modelCost.js'
@@ -31,7 +33,6 @@ import {
 
 const router = Router()
 const MAX_UPSTREAM_IMAGE_COUNT = 10
-const MAX_INPUT_IMAGE_COUNT = 16
 const MAX_INPUT_IMAGE_BYTES = 50 * 1024 * 1024
 const MAX_TOTAL_INPUT_BYTES = 128 * 1024 * 1024
 const MAX_UPSTREAM_JSON_BYTES = 80 * 1024 * 1024
@@ -67,6 +68,8 @@ type GenerationModel = Prisma.ModelConfigGetPayload<{
     upstreamProvider: true
     lowQualityUpstreamProvider: true
     highQualityUpstreamProvider: true
+    ,xhighQualityUpstreamProvider: true
+    ,maxQualityUpstreamProvider: true
   }
 }>
 type GenerationUpstream = { model: string; baseUrl: string; apiKey: string; protocol: ApiProtocol }
@@ -127,6 +130,8 @@ function publicUser(user: { id: string; email: string; role: string; creditBalan
 
 function resolveQualityUpstreamModel(model: GenerationModel, quality: string): string {
   if (quality === 'low') return model.lowQualityUpstreamModel?.trim() || model.upstreamModel
+  if (quality === 'xhigh') return model.xhighQualityUpstreamModel?.trim() || model.upstreamModel
+  if (quality === 'max') return model.maxQualityUpstreamModel?.trim() || model.upstreamModel
   if (quality === 'high') return model.highQualityUpstreamModel?.trim() || model.upstreamModel
   return model.upstreamModel
 }
@@ -135,8 +140,12 @@ function resolveGenerationUpstream(model: GenerationModel, quality: string): Gen
   const upstreamModel = resolveQualityUpstreamModel(model, quality)
   const qualityProvider = quality === 'low'
     ? model.lowQualityUpstreamProvider
-    : quality === 'high'
-      ? model.highQualityUpstreamProvider
+    : quality === 'xhigh'
+      ? model.xhighQualityUpstreamProvider
+      : quality === 'max'
+        ? model.maxQualityUpstreamProvider
+        : quality === 'high'
+          ? model.highQualityUpstreamProvider
       : null
   const upstreamProvider = qualityProvider?.enabled ? qualityProvider : model.upstreamProvider
   return upstreamProvider?.enabled
@@ -564,7 +573,7 @@ function resolveEffectiveQuality(model: GenerationModel, quality: string, size: 
     }
     return quality
   }
-  for (const fallback of ['low', 'medium', 'high']) {
+  for (const fallback of ['low', 'medium', 'high', 'xhigh', 'max']) {
     if (isQualityTierEnabled(model, fallback, tier)) return fallback
   }
   throw new HttpError(400, 'model_option_disabled', `当前模型未开放${tier}分辨率`)
@@ -1205,6 +1214,8 @@ router.post('/', requireUser, async (req, res, next) => {
         upstreamProvider: true,
         lowQualityUpstreamProvider: true,
         highQualityUpstreamProvider: true,
+        xhighQualityUpstreamProvider: true,
+        maxQualityUpstreamProvider: true,
       },
     })
     if (!model) throw new HttpError(404, 'model_not_found', '模型不可用或不存在')
@@ -1214,6 +1225,24 @@ router.post('/', requireUser, async (req, res, next) => {
     if (!isModelAspectRatioEnabled(model, input.params.size)) {
       const ratio = resolveKnownAspectRatio(input.params.size)
       throw new HttpError(400, 'model_aspect_ratio_disabled', `当前模型未开放 ${ratio} 宽高比`)
+    }
+    const effectiveQuality = resolveEffectiveQuality(model, input.params.quality, input.params.size)
+    const maxInputImages = resolveMaxInputImages(model, effectiveQuality, resolveResolutionTier(input.params.size))
+    if (input.inputImages.length > maxInputImages) {
+      const qualityLabel = effectiveQuality === 'low'
+        ? '低'
+        : effectiveQuality === 'medium'
+          ? '中'
+          : effectiveQuality === 'high'
+            ? '高'
+            : effectiveQuality === 'xhigh'
+              ? '极高'
+              : '最高'
+      throw new HttpError(
+        400,
+        'too_many_input_images',
+        `当前「${qualityLabel} · ${resolveResolutionTier(input.params.size)}」最多支持 ${maxInputImages} 张参考图，本次提交了 ${input.inputImages.length} 张，请移除多余参考图或更换质量/分辨率`,
+      )
     }
     await checkModerationRules(input.prompt)
 
@@ -1226,7 +1255,7 @@ router.post('/', requireUser, async (req, res, next) => {
       ...input,
       params: {
         ...input.params,
-        quality: resolveEffectiveQuality(model, input.params.quality, input.params.size),
+        quality: effectiveQuality,
       },
     })
     const adminTaskMeta = {

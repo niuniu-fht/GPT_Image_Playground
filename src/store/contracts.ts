@@ -39,6 +39,7 @@ export interface AppState {
   authMode: 'login' | 'register'
   models: ModelConfig[]
   announcements: AdminAnnouncement[]
+  announcementsLoaded: boolean
   activeModelId: string | null
   showAdminModels: boolean
   setCurrentUser: (user: CurrentUser | null) => void
@@ -47,6 +48,7 @@ export interface AppState {
   closeAuthModal: () => void
   setModels: (models: ModelConfig[]) => void
   setAnnouncements: (announcements: AdminAnnouncement[]) => void
+  markAnnouncementRead: (announcementId: string) => void
   setActiveModelId: (id: string) => void
   setShowAdminModels: (visible: boolean) => void
 

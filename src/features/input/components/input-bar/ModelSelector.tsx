@@ -27,7 +27,7 @@ export default function ModelSelector({
     ? resolveModelCostForSize(activeModel, params.size, activeQuality) * Math.max(1, Math.floor(params.n))
     : 0
   const activeTier = resolveImageSizeTier(params.size)
-  const activeQualityLabel = activeQuality === 'low' ? '低' : activeQuality === 'high' ? '高' : '中'
+  const activeQualityLabel = activeQuality === 'low' ? '低' : activeQuality === 'medium' ? '中' : activeQuality === 'high' ? '高' : activeQuality === 'xhigh' ? '极高' : '最高'
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {

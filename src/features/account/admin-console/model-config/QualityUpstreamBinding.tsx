@@ -4,8 +4,8 @@ import { useUpstreamModels } from '../upstream-config/useUpstreamModels'
 import { cx, StatusBadge, upstreamHealthLabel, upstreamHealthTone } from '../shared'
 import type { ModelConfigDraftProps } from './modelConfigTypes'
 
-type ProviderField = 'upstreamProviderId' | 'lowQualityUpstreamProviderId' | 'highQualityUpstreamProviderId'
-type ModelField = 'upstreamModel' | 'lowQualityUpstreamModel' | 'highQualityUpstreamModel'
+type ProviderField = 'upstreamProviderId' | 'lowQualityUpstreamProviderId' | 'highQualityUpstreamProviderId' | 'xhighQualityUpstreamProviderId' | 'maxQualityUpstreamProviderId'
+type ModelField = 'upstreamModel' | 'lowQualityUpstreamModel' | 'highQualityUpstreamModel' | 'xhighQualityUpstreamModel' | 'maxQualityUpstreamModel'
 
 interface QualityUpstreamBindingProps extends ModelConfigDraftProps {
   fallback: boolean

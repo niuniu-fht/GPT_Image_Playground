@@ -1,9 +1,10 @@
 import type { RefObject } from 'react'
-import { API_MAX_IMAGES } from './shared'
 import ReferenceImageUrlPopover from './ReferenceImageUrlPopover'
 
 interface ReferenceImagesToolbarProps {
   atImageLimit: boolean
+  currentImageCount: number
+  maxInputImages: number
   showImageUrlInput: boolean
   imageUrlInput: string
   imageUrlInputRef: RefObject<HTMLInputElement | null>
@@ -17,6 +18,8 @@ interface ReferenceImagesToolbarProps {
 
 export default function ReferenceImagesToolbar({
   atImageLimit,
+  currentImageCount,
+  maxInputImages,
   showImageUrlInput,
   imageUrlInput,
   imageUrlInputRef,
@@ -29,7 +32,19 @@ export default function ReferenceImagesToolbar({
 }: ReferenceImagesToolbarProps) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-sm font-medium text-gray-700 dark:text-gray-200">参考图</span>
+      <span className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+        参考图
+        <span
+          className={`rounded-md px-1.5 py-0.5 text-xs font-semibold tabular-nums ${
+            atImageLimit
+              ? 'bg-rose-50 text-rose-500 dark:bg-rose-500/10 dark:text-rose-300'
+              : 'bg-gray-100 text-gray-500 dark:bg-white/[0.06] dark:text-gray-400'
+          }`}
+          title={`当前「质量 × 分辨率」允许上传 ${maxInputImages} 张参考图`}
+        >
+          {currentImageCount}/{maxInputImages}
+        </span>
+      </span>
       <div className="relative flex gap-1">
         <button
           type="button"
@@ -46,7 +61,7 @@ export default function ReferenceImagesToolbar({
           onClick={onOpenFilePicker}
           disabled={atImageLimit}
           className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
-          title={atImageLimit ? `已达上限 ${API_MAX_IMAGES} 张` : '添加本地图片'}
+          title={atImageLimit ? `已达上限 ${maxInputImages} 张` : '添加本地图片'}
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />

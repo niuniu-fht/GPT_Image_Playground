@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ModelConfig } from '../../types'
-import { resolveEffectiveModelQuality, resolveModelCostForSize } from '../modelCost'
+import { DEFAULT_MAX_INPUT_IMAGES, resolveEffectiveModelQuality, resolveMaxInputImages, resolveModelCostForSize } from '../modelCost'
 
 function createModel(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return {
@@ -56,10 +56,57 @@ describe('model quality cost', () => {
     expect(resolveModelCostForSize(model, '1024x1024', 'high')).toBe(10)
   })
 
+  it('treats xhigh and max as independently enabled high-priced tiers', () => {
+    const model = createModel({
+      highQualityEnabled: true,
+      highQuality1KEnabled: true,
+      xhighQualityEnabled: true,
+      xhighQuality1KEnabled: true,
+      maxQualityEnabled: true,
+      maxQuality1KEnabled: true,
+    })
+
+    expect(resolveEffectiveModelQuality(model, 'xhigh')).toBe('xhigh')
+    expect(resolveEffectiveModelQuality(model, 'max')).toBe('max')
+    expect(resolveModelCostForSize(model, '1024x1024', 'xhigh')).toBe(10)
+    expect(resolveModelCostForSize(model, '1024x1024', 'max')).toBe(10)
+  })
+
   it('enables quality and resolution combinations independently', () => {
     const model = createModel({ lowQuality2KEnabled: false })
 
     expect(resolveEffectiveModelQuality(model, 'low', '2048x2048')).toBe('medium')
     expect(resolveEffectiveModelQuality(model, 'low', '1024x1024')).toBe('low')
+  })
+})
+
+describe('max input images per quality and resolution', () => {
+  it('falls back to the global default when nothing is configured', () => {
+    const model = createModel()
+
+    expect(resolveMaxInputImages(model, 'medium', '1K')).toBe(DEFAULT_MAX_INPUT_IMAGES)
+    expect(resolveMaxInputImages(model, 'high', '4K')).toBe(DEFAULT_MAX_INPUT_IMAGES)
+    expect(resolveMaxInputImages(null, 'medium', '1K')).toBe(DEFAULT_MAX_INPUT_IMAGES)
+  })
+
+  it('prefers the tier-specific limit, then the quality base limit', () => {
+    const model = createModel({
+      highQualityMaxInputImages: 6,
+      highQualityMaxInputImages4K: 2,
+    })
+
+    expect(resolveMaxInputImages(model, 'high', '1K')).toBe(6)
+    expect(resolveMaxInputImages(model, 'high', '2K')).toBe(6)
+    expect(resolveMaxInputImages(model, 'high', '4K')).toBe(2)
+  })
+
+  it('clamps configured limits into the allowed range', () => {
+    const model = createModel({
+      lowQualityMaxInputImages: 99,
+      mediumQualityMaxInputImages: 0,
+    })
+
+    expect(resolveMaxInputImages(model, 'low', '1K')).toBe(DEFAULT_MAX_INPUT_IMAGES)
+    expect(resolveMaxInputImages(model, 'medium', '1K')).toBe(0)
   })
 })

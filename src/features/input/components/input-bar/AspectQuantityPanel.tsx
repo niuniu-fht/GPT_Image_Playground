@@ -11,7 +11,9 @@ import {
   isQualityTierEnabled,
   resolveAvailableQualities,
   resolveAvailableTiers,
+  resolveEffectiveModelQuality,
   resolveFirstAvailableCombination,
+  resolveMaxInputImages,
   supportsQualitySelection,
 } from '../../../../lib/modelCost'
 import { isModelAspectRatioEnabled, isModelSizeAspectRatioEnabled, resolveEnabledModelAspectRatios } from '../../../../lib/modelAspectRatio'
@@ -41,6 +43,8 @@ const QUALITY_OPTIONS = [
   { value: 'low', label: '低' },
   { value: 'medium', label: '中' },
   { value: 'high', label: '高' },
+  { value: 'xhigh', label: '极高' },
+  { value: 'max', label: '最高' },
 ] as const
 const DEFAULT_RATIO = '1:1'
 const FLOATING_PANEL_GAP = 8
@@ -156,7 +160,7 @@ export default function AspectQuantityPanel({
   const quantity = Math.min(Math.max(Math.round(params.n || 1), 1), 4)
   const summaryRatio = params.size === 'auto' || !activeRatio ? '自动' : activeRatio
   const qualitySelectionAvailable = supportsQualitySelection(activeModel)
-  const activeQuality = qualitySelectionAvailable && ['low', 'medium', 'high'].includes(params.quality)
+  const activeQuality = qualitySelectionAvailable && ['low', 'medium', 'high', 'xhigh', 'max'].includes(params.quality)
     ? params.quality
     : 'medium'
   const availableQualities = resolveAvailableQualities(activeModel, activeTier)
@@ -168,7 +172,9 @@ export default function AspectQuantityPanel({
     resolveAvailableQualities(activeModel, tier).length > 0
   ))
   const selectableAspectOptions = ASPECT_OPTIONS.filter((option) => isModelAspectRatioEnabled(activeModel, option.ratio))
-  const summaryQualityLabel = activeQuality === 'low' ? '低' : activeQuality === 'high' ? '高' : '中'
+  const summaryQualityLabel = activeQuality === 'low' ? '低' : activeQuality === 'medium' ? '中' : activeQuality === 'high' ? '高' : activeQuality === 'xhigh' ? '极高' : '最高'
+  const effectiveQuality = resolveEffectiveModelQuality(activeModel, params.quality, params.size)
+  const maxInputImages = resolveMaxInputImages(activeModel, effectiveQuality, activeTier)
 
   useLayoutEffect(() => {
     if (!open) return
@@ -272,7 +278,7 @@ export default function AspectQuantityPanel({
     onSetParams({ size, ...(quality ? { quality } : {}) })
   }
 
-  const selectQuality = (quality: 'low' | 'medium' | 'high') => {
+  const selectQuality = (quality: 'low' | 'medium' | 'high' | 'xhigh' | 'max') => {
     if (availableQualities.includes(quality)) {
       onSetParams({ quality })
       return
@@ -364,7 +370,7 @@ export default function AspectQuantityPanel({
                     GPT Image
                   </span>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-5 gap-2">
                   {selectableQualities.map((option) => (
                       <button
                         key={option.value}
@@ -375,6 +381,9 @@ export default function AspectQuantityPanel({
                         {option.label}
                       </button>
                   ))}
+                </div>
+                <div className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">
+                  当前质量下参考图最多 {maxInputImages} 张
                 </div>
               </div>
             )}

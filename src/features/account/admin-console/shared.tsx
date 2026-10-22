@@ -98,12 +98,30 @@ export const emptyModelDraft: ModelDraft = {
   highQualityCostCredits: 2,
   highQualityCostCredits2K: 4,
   highQualityCostCredits4K: 8,
+  xhighQualityEnabled: true,
+  xhighQuality1KEnabled: true,
+  xhighQuality2KEnabled: true,
+  xhighQuality4KEnabled: true,
+  xhighQualityCostCredits: 10,
+  xhighQualityCostCredits2K: 20,
+  xhighQualityCostCredits4K: 40,
+  maxQualityEnabled: true,
+  maxQuality1KEnabled: true,
+  maxQuality2KEnabled: true,
+  maxQuality4KEnabled: true,
+  maxQualityCostCredits: 12,
+  maxQualityCostCredits2K: 24,
+  maxQualityCostCredits4K: 48,
   upstreamModel: 'gpt-image-2',
   lowQualityUpstreamModel: null,
   highQualityUpstreamModel: null,
+  xhighQualityUpstreamModel: null,
+  maxQualityUpstreamModel: null,
   upstreamProviderId: null,
   lowQualityUpstreamProviderId: null,
   highQualityUpstreamProviderId: null,
+  xhighQualityUpstreamProviderId: null,
+  maxQualityUpstreamProviderId: null,
   unsupportedAspectRatios: [],
   apiProtocol: 'images',
   enabled: true,
@@ -226,6 +244,10 @@ export function taskParamsSummary(value: unknown) {
       ? '中'
       : params.quality === 'high'
         ? '高'
+        : params.quality === 'xhigh'
+          ? '极高'
+          : params.quality === 'max'
+            ? '最高'
         : params.quality
   const parts = [
     typeof params.size === 'string' ? params.size : '',

@@ -9,7 +9,8 @@ import {
 } from 'react'
 import { openLightbox, resolveTaskParamSizeOrDefault, useStore, submitTask } from '../../../../store'
 import { resolveModelSwitchParams } from '../../../../store/taskParams'
-import { resolveModelCostForSize } from '../../../../lib/modelCost'
+import { resolveEffectiveModelQuality, resolveMaxInputImages, resolveModelCostForSize } from '../../../../lib/modelCost'
+import { resolveImageSizeTier } from '../../../../lib/size'
 import {
   ALL_CATEGORY_FILTER,
   FAVORITES_CATEGORY_FILTER,
@@ -18,7 +19,6 @@ import {
   type InputImage,
   type TaskParams,
 } from '../../../../types'
-import { API_MAX_IMAGES } from './shared'
 import { useInputImageControls } from './useInputImageControls'
 import { usePromptInputController } from './usePromptInputController'
 import { useIsMobile } from './useIsMobile'
@@ -39,6 +39,8 @@ export interface ReferenceImagesSectionViewModel {
   maskedInputCount: number
   primaryMaskedInput: InputImage | null
   atImageLimit: boolean
+  maxInputImages: number
+  overImageLimit: boolean
   showImageUrlInput: boolean
   imageUrlInput: string
   imageUrlInputRef: RefObject<HTMLInputElement | null>
@@ -63,6 +65,7 @@ export interface ParamsSectionViewModel {
   models: ModelConfig[]
   normalizedSize: string
   params: TaskParams
+  inputImageCount: number
   onActiveModelChange: (modelId: string) => void
   onSetParams: (params: Partial<TaskParams>) => void
 }
@@ -102,6 +105,8 @@ export interface InputBarViewModel {
   promptPreview: string
   isDragging: boolean
   atImageLimit: boolean
+  maxInputImages: number
+  overImageLimit: boolean
   mobileDrawerOpen: boolean
   fileInputRef: RefObject<HTMLInputElement | null>
   inputContent: InputBarContentViewModel
@@ -144,12 +149,17 @@ export function useInputBarState(): InputBarViewModel {
     : '桌面端支持 Ctrl+Enter 直接生成'
   const estimatedCost = resolveModelCostForSize(activeModel, params.size, params.quality) * Math.max(1, Math.floor(params.n))
   const creditBalance = currentUser?.creditBalance ?? 0
+  const effectiveQuality = resolveEffectiveModelQuality(activeModel, params.quality, params.size)
+  const activeTier = resolveImageSizeTier(params.size)
+  const maxInputImages = resolveMaxInputImages(activeModel, effectiveQuality, activeTier)
+  const overImageLimit = inputImages.length > maxInputImages
   const canSubmit =
     Boolean(prompt.trim() || inputImages.length) &&
     Boolean(currentUser) &&
     Boolean(activeModel) &&
+    !overImageLimit &&
     creditBalance >= estimatedCost
-  const atImageLimit = inputImages.length >= API_MAX_IMAGES
+  const atImageLimit = inputImages.length >= maxInputImages
   const maskedInputCount = inputImages.filter((image) => Boolean(image.maskDataUrl)).length
   const primaryMaskedInputIndex = inputImages.findIndex((image) => Boolean(image.maskDataUrl))
   const primaryMaskedInput =
@@ -197,13 +207,15 @@ export function useInputBarState(): InputBarViewModel {
       maskedInputCount,
       primaryMaskedInput,
       primaryMaskedInputIndex,
-    atImageLimit,
-    mobileDrawerOpen,
-    onPreviewImage: (imageId) => openLightbox(imageId, inputImages.map((image) => image.id)),
-    onRemoveInputImage: removeInputImage,
-    onMoveInputImage: moveInputImage,
-    onRequestClearAllImages: requestClearInputImages,
-  })
+      atImageLimit,
+      maxInputImages,
+      overImageLimit,
+      mobileDrawerOpen,
+      onPreviewImage: (imageId) => openLightbox(imageId, inputImages.map((image) => image.id)),
+      onRemoveInputImage: removeInputImage,
+      onMoveInputImage: moveInputImage,
+      onRequestClearAllImages: requestClearInputImages,
+    })
 
   // ===== Sub-ViewModel: ParamsSection =====
   const paramsSectionProps: ParamsSectionViewModel = {
@@ -213,6 +225,7 @@ export function useInputBarState(): InputBarViewModel {
     models,
     normalizedSize,
     params,
+    inputImageCount: inputImages.length,
     onActiveModelChange: handleActiveModelChange,
     onSetParams: setParams,
   }
@@ -237,6 +250,8 @@ export function useInputBarState(): InputBarViewModel {
     promptPreview,
     isDragging,
     atImageLimit,
+    maxInputImages,
+    overImageLimit,
     mobileDrawerOpen,
     fileInputRef,
     inputContent: {

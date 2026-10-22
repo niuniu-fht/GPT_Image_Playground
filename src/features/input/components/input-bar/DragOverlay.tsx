@@ -1,11 +1,10 @@
-import { API_MAX_IMAGES } from './shared'
-
 interface DragOverlayProps {
   visible: boolean
   atImageLimit: boolean
+  maxInputImages: number
 }
 
-export default function DragOverlay({ visible, atImageLimit }: DragOverlayProps) {
+export default function DragOverlay({ visible, atImageLimit, maxInputImages }: DragOverlayProps) {
   if (!visible) return null
 
   return (
@@ -29,7 +28,7 @@ export default function DragOverlay({ visible, atImageLimit }: DragOverlayProps)
         <div className="text-center">
           {atImageLimit ? (
             <>
-              <p className="text-lg font-semibold text-red-500">已达上限 {API_MAX_IMAGES} 张</p>
+              <p className="text-lg font-semibold text-red-500">已达上限 {maxInputImages} 张</p>
               <p className="mt-1 text-sm text-gray-400">请先移除部分参考图后再添加</p>
             </>
           ) : (

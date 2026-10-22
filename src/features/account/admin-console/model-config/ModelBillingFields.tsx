@@ -13,6 +13,8 @@ type CostField = keyof Pick<
   | 'highQualityCostCredits'
   | 'highQualityCostCredits2K'
   | 'highQualityCostCredits4K'
+  | 'xhighQualityCostCredits' | 'xhighQualityCostCredits2K' | 'xhighQualityCostCredits4K'
+  | 'maxQualityCostCredits' | 'maxQualityCostCredits2K' | 'maxQualityCostCredits4K'
 >
 
 type EnabledField = keyof Pick<
@@ -26,6 +28,8 @@ type EnabledField = keyof Pick<
   | 'highQuality1KEnabled'
   | 'highQuality2KEnabled'
   | 'highQuality4KEnabled'
+  | 'xhighQuality1KEnabled' | 'xhighQuality2KEnabled' | 'xhighQuality4KEnabled'
+  | 'maxQuality1KEnabled' | 'maxQuality2KEnabled' | 'maxQuality4KEnabled'
 >
 
 type BillingCell = { field: CostField; enabledField: EnabledField; label: string }
@@ -46,6 +50,18 @@ const HIGH_COST_FIELDS: BillingCell[] = [
   { field: 'highQualityCostCredits', enabledField: 'highQuality1KEnabled', label: '1K' },
   { field: 'highQualityCostCredits2K', enabledField: 'highQuality2KEnabled', label: '2K' },
   { field: 'highQualityCostCredits4K', enabledField: 'highQuality4KEnabled', label: '4K' },
+]
+
+// 极高与最高沿用高质量的计费开关与单价，提交时分别发送 xhigh / max。
+const XHIGH_COST_FIELDS: BillingCell[] = [
+  { field: 'xhighQualityCostCredits', enabledField: 'xhighQuality1KEnabled', label: '1K' },
+  { field: 'xhighQualityCostCredits2K', enabledField: 'xhighQuality2KEnabled', label: '2K' },
+  { field: 'xhighQualityCostCredits4K', enabledField: 'xhighQuality4KEnabled', label: '4K' },
+]
+const MAX_COST_FIELDS: BillingCell[] = [
+  { field: 'maxQualityCostCredits', enabledField: 'maxQuality1KEnabled', label: '1K' },
+  { field: 'maxQualityCostCredits2K', enabledField: 'maxQuality2KEnabled', label: '2K' },
+  { field: 'maxQualityCostCredits4K', enabledField: 'maxQuality4KEnabled', label: '4K' },
 ]
 
 function normalizeCost(value: string): number {
@@ -148,12 +164,24 @@ export function ModelBillingFields({ draft, setDraft }: ModelConfigDraftProps) {
               label="高"
               fields={HIGH_COST_FIELDS}
             />
+            <CostRow
+              draft={draft}
+              setDraft={setDraft}
+              label="极高"
+              fields={XHIGH_COST_FIELDS}
+            />
+            <CostRow
+              draft={draft}
+              setDraft={setDraft}
+              label="最高"
+              fields={MAX_COST_FIELDS}
+            />
           </>
         ) : (
           <>
             <CostRow draft={draft} setDraft={setDraft} label="中" fields={MEDIUM_COST_FIELDS} />
             <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
-              低 / 中 / 高质量选择仅对模型标识或上游模型以 gpt-image 开头的模型开放，其它模型仅按“中”质量计费。
+              低 / 中 / 高 / 极高 / 最高质量选择仅对模型标识或上游模型以 gpt-image 开头的模型开放，其它模型仅按“中”质量计费。
             </div>
           </>
         )}

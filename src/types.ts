@@ -144,10 +144,16 @@ export interface ModelConfig {
   lowQualityCostCredits: number
   lowQualityCostCredits2K: number
   lowQualityCostCredits4K: number
+  lowQualityMaxInputImages?: number | null
+  lowQualityMaxInputImages2K?: number | null
+  lowQualityMaxInputImages4K?: number | null
   mediumQualityEnabled: boolean
   mediumQuality1KEnabled: boolean
   mediumQuality2KEnabled: boolean
   mediumQuality4KEnabled: boolean
+  mediumQualityMaxInputImages?: number | null
+  mediumQualityMaxInputImages2K?: number | null
+  mediumQualityMaxInputImages4K?: number | null
   highQualityEnabled: boolean
   highQuality1KEnabled: boolean
   highQuality2KEnabled: boolean
@@ -155,12 +161,39 @@ export interface ModelConfig {
   highQualityCostCredits: number
   highQualityCostCredits2K: number
   highQualityCostCredits4K: number
+  highQualityMaxInputImages?: number | null
+  highQualityMaxInputImages2K?: number | null
+  highQualityMaxInputImages4K?: number | null
+  xhighQualityEnabled?: boolean
+  xhighQuality1KEnabled?: boolean
+  xhighQuality2KEnabled?: boolean
+  xhighQuality4KEnabled?: boolean
+  xhighQualityCostCredits?: number
+  xhighQualityCostCredits2K?: number
+  xhighQualityCostCredits4K?: number
+  xhighQualityMaxInputImages?: number | null
+  xhighQualityMaxInputImages2K?: number | null
+  xhighQualityMaxInputImages4K?: number | null
+  maxQualityEnabled?: boolean
+  maxQuality1KEnabled?: boolean
+  maxQuality2KEnabled?: boolean
+  maxQuality4KEnabled?: boolean
+  maxQualityCostCredits?: number
+  maxQualityCostCredits2K?: number
+  maxQualityCostCredits4K?: number
+  maxQualityMaxInputImages?: number | null
+  maxQualityMaxInputImages2K?: number | null
+  maxQualityMaxInputImages4K?: number | null
   upstreamModel: string
   lowQualityUpstreamModel?: string | null
   highQualityUpstreamModel?: string | null
+  xhighQualityUpstreamModel?: string | null
+  maxQualityUpstreamModel?: string | null
   upstreamProviderId?: string | null
   lowQualityUpstreamProviderId?: string | null
   highQualityUpstreamProviderId?: string | null
+  xhighQualityUpstreamProviderId?: string | null
+  maxQualityUpstreamProviderId?: string | null
   unsupportedAspectRatios: string[]
   apiProtocol: ApiProtocol
   enabled: boolean
@@ -181,6 +214,8 @@ export interface ModelConfig {
   } | null
   lowQualityUpstreamProvider?: ModelConfig['upstreamProvider']
   highQualityUpstreamProvider?: ModelConfig['upstreamProvider']
+  xhighQualityUpstreamProvider?: ModelConfig['upstreamProvider']
+  maxQualityUpstreamProvider?: ModelConfig['upstreamProvider']
 }
 
 export interface AdminUserSummary {
@@ -447,6 +482,8 @@ export interface AdminAnnouncement {
   endsAt?: string | null
   createdAt: string
   updatedAt: string
+  read?: boolean
+  readAt?: string | null
 }
 
 export interface AdminGenerationTask {
@@ -726,7 +763,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
 export interface TaskParams {
   size: string
-  quality: 'auto' | 'low' | 'medium' | 'high'
+  quality: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   output_format: 'png' | 'jpeg' | 'webp'
   output_compression: number | null
   moderation: 'auto' | 'low'

@@ -3,9 +3,17 @@ import { writeImageEditDraft } from './taskDraft'
 import { getImageView } from './imageAssets'
 import { submitTask } from './runtime'
 import { useStore } from './state'
+import { resolveEffectiveModelQuality, resolveMaxInputImages } from '../lib/modelCost'
+import { resolveImageSizeTier } from '../lib/size'
 
 export async function editOutputs(task: TaskRecord, preferredImageId?: string) {
-  const { inputImages, setInputImages, setAppView, showToast } = useStore.getState()
+  const { inputImages, setInputImages, setAppView, showToast, models, activeModelId, params } = useStore.getState()
+  const activeModel = models.find((model) => model.id === activeModelId) ?? null
+  const maxInputImages = resolveMaxInputImages(
+    activeModel,
+    resolveEffectiveModelQuality(activeModel, params.quality, params.size),
+    resolveImageSizeTier(params.size),
+  )
   const sourceImageId =
     preferredImageId && task.outputImages.includes(preferredImageId)
       ? preferredImageId
@@ -26,8 +34,8 @@ export async function editOutputs(task: TaskRecord, preferredImageId?: string) {
     return
   }
 
-  if (inputImages.length >= 16) {
-    showToast('参考图数量已达上限（16 张），请先移除部分参考图', 'error')
+  if (inputImages.length >= maxInputImages) {
+    showToast(`当前质量与分辨率下参考图上限为 ${maxInputImages} 张，请先移除部分参考图`, 'error')
     return
   }
 

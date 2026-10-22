@@ -201,6 +201,12 @@ export const platformApi = {
     return request<{ items: AdminAnnouncement[] }>(`/api/public/announcements${suffix}`)
   },
 
+  markAnnouncementRead(id: string) {
+    return request<{ read: unknown }>(`/api/public/announcements/${encodeURIComponent(id)}/read`, {
+      method: 'POST',
+    })
+  },
+
   getPublicLanding() {
     return request<{ landingHeroSlidesJson: string }>('/api/public/landing')
   },

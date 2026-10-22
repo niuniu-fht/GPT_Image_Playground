@@ -150,7 +150,7 @@ function normalizeOptionalString(value: unknown): string | null | undefined {
 }
 
 function isTaskQuality(value: unknown): value is TaskParams['quality'] {
-  return value === 'auto' || value === 'low' || value === 'medium' || value === 'high'
+  return value === 'auto' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === 'max'
 }
 
 function isTaskOutputFormat(value: unknown): value is TaskParams['output_format'] {

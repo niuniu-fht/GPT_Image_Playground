@@ -15,7 +15,6 @@ import {
   useStore,
 } from '../../../../store'
 import type { InputImage } from '../../../../types'
-import { API_MAX_IMAGES } from './shared'
 import type { InputPanelBindings, ReferenceImagesSectionViewModel } from './useInputBarState'
 
 interface UseInputImageControlsOptions {
@@ -25,6 +24,8 @@ interface UseInputImageControlsOptions {
   primaryMaskedInput: InputImage | null
   primaryMaskedInputIndex: number
   atImageLimit: boolean
+  maxInputImages: number
+  overImageLimit: boolean
   mobileDrawerOpen: boolean
   onPreviewImage: (imageId: string) => void
   onRemoveInputImage: (index: number) => void
@@ -50,6 +51,8 @@ export function useInputImageControls(
     primaryMaskedInput,
     primaryMaskedInputIndex,
     atImageLimit,
+    maxInputImages,
+    overImageLimit,
     mobileDrawerOpen,
     onPreviewImage,
     onRemoveInputImage,
@@ -68,15 +71,15 @@ export function useInputImageControls(
   const handleFiles = async (files: FileList | File[]) => {
     try {
       const currentCount = useStore.getState().inputImages.length
-      if (currentCount >= API_MAX_IMAGES) {
+      if (currentCount >= maxInputImages) {
         useStore.getState().showToast(
-          `参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加`,
+          `当前质量与分辨率下参考图上限为 ${maxInputImages} 张，无法继续添加`,
           'error',
         )
         return
       }
 
-      const remaining = API_MAX_IMAGES - currentCount
+      const remaining = maxInputImages - currentCount
       const accepted = Array.from(files).filter((file) => file.type.startsWith('image/'))
       const imagesToAdd = accepted.slice(0, remaining)
       const discardedCount = accepted.length - imagesToAdd.length
@@ -88,7 +91,7 @@ export function useInputImageControls(
       if (discardedCount > 0) {
         useStore
           .getState()
-          .showToast(`已达上限 ${API_MAX_IMAGES} 张，${discardedCount} 张图片被丢弃`, 'error')
+          .showToast(`参考图上限 ${maxInputImages} 张，${discardedCount} 张图片被丢弃`, 'error')
       }
     } catch (error) {
       useStore
@@ -108,9 +111,9 @@ export function useInputImageControls(
   const handleAddImageUrl = async () => {
     try {
       const currentCount = useStore.getState().inputImages.length
-      if (currentCount >= API_MAX_IMAGES) {
+      if (currentCount >= maxInputImages) {
         useStore.getState().showToast(
-          `参考图数量已达上限（${API_MAX_IMAGES} 张），无法继续添加`,
+          `当前质量与分辨率下参考图上限为 ${maxInputImages} 张，无法继续添加`,
           'error',
         )
         return
@@ -232,6 +235,8 @@ export function useInputImageControls(
       maskedInputCount,
       primaryMaskedInput,
       atImageLimit,
+      maxInputImages,
+      overImageLimit,
       showImageUrlInput,
       imageUrlInput,
       imageUrlInputRef,

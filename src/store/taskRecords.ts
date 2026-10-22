@@ -191,6 +191,8 @@ export function resolveTaskDisplayImageParam(
   if (value === 'low') return '低'
   if (value === 'medium') return '中'
   if (value === 'high') return '高'
+  if (value === 'xhigh') return '极高'
+  if (value === 'max') return '最高'
   return value
 }
 

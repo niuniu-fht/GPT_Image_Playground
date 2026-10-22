@@ -8,7 +8,7 @@ export function ModelUpstreamFields({ draft, setDraft, upstreams }: ModelConfigS
       <div>
         <div className="text-sm font-semibold text-gray-950 dark:text-gray-50">质量渠道绑定</div>
         <div className="mt-1 text-xs leading-5 text-gray-500">
-          每档质量可独立选择请求渠道与上游模型。低、高未设置时沿用中质量配置。
+          每档质量可独立选择请求渠道与上游模型。低、高、极高、最高未设置时沿用中质量配置。
         </div>
       </div>
 
@@ -47,6 +47,8 @@ export function ModelUpstreamFields({ draft, setDraft, upstreams }: ModelConfigS
           modelField="lowQualityUpstreamModel"
           fallback
         />
+        <QualityUpstreamBinding draft={draft} setDraft={setDraft} upstreams={upstreams} label="极高质量" providerField="xhighQualityUpstreamProviderId" modelField="xhighQualityUpstreamModel" fallback />
+        <QualityUpstreamBinding draft={draft} setDraft={setDraft} upstreams={upstreams} label="最高质量" providerField="maxQualityUpstreamProviderId" modelField="maxQualityUpstreamModel" fallback />
         <QualityUpstreamBinding
           draft={draft}
           setDraft={setDraft}

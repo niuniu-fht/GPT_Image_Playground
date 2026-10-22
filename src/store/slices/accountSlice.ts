@@ -15,6 +15,7 @@ export function createAccountSlice(set: StoreSet) {
     authMode: 'login' as 'login' | 'register',
     models: [] as ModelConfig[],
     announcements: [] as AdminAnnouncement[],
+    announcementsLoaded: false,
     activeModelId: null as string | null,
     showAdminModels: false,
 
@@ -45,7 +46,15 @@ export function createAccountSlice(set: StoreSet) {
     },
 
     setAnnouncements(announcements: AdminAnnouncement[]) {
-      set({ announcements })
+      set({ announcements, announcementsLoaded: true })
+    },
+
+    markAnnouncementRead(announcementId: string) {
+      set((state) => ({
+        announcements: state.announcements.map((item) => (
+          item.id === announcementId ? { ...item, read: true } : item
+        )),
+      }))
     },
 
     setActiveModelId(activeModelId: string) {
