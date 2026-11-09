@@ -100,26 +100,39 @@ export function normalizeGenerationTimeoutSeconds(value: number): number {
 }
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
+const BEIJING_UTC_OFFSET_MS = 8 * 60 * 60 * 1000
 
 export function normalizeTimeString(value: string, fallback: string): string {
   const trimmed = value.trim()
   return TIME_PATTERN.test(trimmed) ? trimmed : fallback
 }
 
-/** 判断当前时间是否在 [start, end) 窗口内；start === end 视为全天开放；支持跨天窗口。 */
-export function isWithinTimeWindow(now: Date, start: string, end: string): boolean {
-  const startMinutes = normalizeTimeString(start, '00:00')
+/** 服务器容器多为 UTC，上传窗口统一按北京时间（UTC+8）折算。 */
+export function beijingMinutesOfDay(now: Date): number {
+  const shifted = (now.getTime() + BEIJING_UTC_OFFSET_MS) % 86_400_000
+  return Math.floor(shifted / 60_000)
+}
+
+function windowRangeMinutes(start: string, end: string): { startMinutes: number; endMinutes: number } {
+  const toMinutes = (value: string) => normalizeTimeString(value, '00:00')
     .split(':')
     .reduce((sum, part) => sum * 60 + Number(part), 0)
-  const endMinutes = normalizeTimeString(end, '00:00')
-    .split(':')
-    .reduce((sum, part) => sum * 60 + Number(part), 0)
+  return { startMinutes: toMinutes(start), endMinutes: toMinutes(end) }
+}
+
+/** 判断北京时间分钟数是否在 [start, end) 窗口内；start === end 视为全天开放；支持跨天窗口。 */
+export function isWithinWindowMinutes(minutesOfDay: number, start: string, end: string): boolean {
+  const { startMinutes, endMinutes } = windowRangeMinutes(start, end)
   if (startMinutes === endMinutes) return true
-  const nowMinutes = now.getHours() * 60 + now.getMinutes()
   if (startMinutes < endMinutes) {
-    return nowMinutes >= startMinutes && nowMinutes < endMinutes
+    return minutesOfDay >= startMinutes && minutesOfDay < endMinutes
   }
-  return nowMinutes >= startMinutes || nowMinutes < endMinutes
+  return minutesOfDay >= startMinutes || minutesOfDay < endMinutes
+}
+
+/** 判断当前时间是否在上传窗口内（窗口按北京时间解释，支持跨天）。 */
+export function isWithinTimeWindow(now: Date, start: string, end: string): boolean {
+  return isWithinWindowMinutes(beijingMinutesOfDay(now), start, end)
 }
 
 export async function getPlatformSettings(): Promise<PlatformSettings> {

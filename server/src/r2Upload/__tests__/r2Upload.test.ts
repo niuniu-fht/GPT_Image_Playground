@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { isAlreadyOnR2, needsR2Upload } from '../config.js'
 import { isWithinTimeWindow } from '../../settings.js'
 
+/** 构造一个「北京时间 hour:minute」对应的时刻：窗口判断内部按 UTC+8 折算 */
 function bjDate(hour: number, minute = 0): Date {
-  // 用固定日期构造本地时间，测试只关心时分
-  return new Date(2026, 0, 1, hour, minute)
+  return new Date(Date.UTC(2026, 0, 1, ((hour - 8) + 24) % 24, minute))
 }
 
 describe('isAlreadyOnR2', () => {
@@ -27,7 +27,7 @@ describe('needsR2Upload', () => {
   })
 })
 
-describe('isWithinTimeWindow', () => {
+describe('isWithinTimeWindow（按北京时间解释窗口）', () => {
   it('treats equal start/end as always open', () => {
     expect(isWithinTimeWindow(bjDate(23), '02:00', '02:00')).toBe(true)
   })
@@ -38,5 +38,13 @@ describe('isWithinTimeWindow', () => {
     expect(isWithinTimeWindow(bjDate(23, 30), '22:00', '06:00')).toBe(true)
     expect(isWithinTimeWindow(bjDate(5), '22:00', '06:00')).toBe(true)
     expect(isWithinTimeWindow(bjDate(12), '22:00', '06:00')).toBe(false)
+  })
+
+  it('default prod window 19:00-07:00 covers late night and early morning', () => {
+    expect(isWithinTimeWindow(bjDate(20), '19:00', '07:00')).toBe(true)
+    expect(isWithinTimeWindow(bjDate(0, 30), '19:00', '07:00')).toBe(true)
+    expect(isWithinTimeWindow(bjDate(6, 59), '19:00', '07:00')).toBe(true)
+    expect(isWithinTimeWindow(bjDate(7), '19:00', '07:00')).toBe(false)
+    expect(isWithinTimeWindow(bjDate(12), '19:00', '07:00')).toBe(false)
   })
 })
