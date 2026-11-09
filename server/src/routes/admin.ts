@@ -13,6 +13,9 @@ import { cleanupGeneratedAssetsForTasks } from '../generatedAssetCleanup.js'
 import { buildGeminiModelsEndpoint } from '../geminiApi.js'
 import { HttpError, sendOk } from '../http.js'
 import { prisma } from '../prisma.js'
+import { getR2UploadRuntimeConfig } from '../r2Upload/config.js'
+import { uploadToR2Hub } from '../r2Upload/hub.js'
+import { enqueueR2UploadForImages, getR2UploadQueueStats } from '../r2Upload/queue.js'
 import { getPlatformSettings, toAdminPlatformSettingsView, upsertPlatformSettings } from '../settings.js'
 import { consumeSub2ApiRedeemCode } from '../sub2apiRedeem.js'
 
@@ -1758,6 +1761,12 @@ const settingsSchema = z.object({
   sub2apiRedeemEnabled: z.boolean().optional(),
   sub2apiRedeemBaseUrl: z.string().url().optional().or(z.literal('')),
   sub2apiRedeemToken: z.string().max(4000).optional(),
+  r2UploadEnabled: z.boolean().optional(),
+  r2UploadWindowEnabled: z.boolean().optional(),
+  r2UploadWindowStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, '时间段格式应为 HH:MM').optional(),
+  r2UploadWindowEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, '时间段格式应为 HH:MM').optional(),
+  r2HubUrl: z.string().url().optional().or(z.literal('')),
+  r2HubApiKey: z.string().max(4000).optional(),
 })
 
 const sub2apiRedeemTestSchema = z.object({
@@ -1767,11 +1776,14 @@ const sub2apiRedeemTestSchema = z.object({
 router.patch('/settings', async (req, res, next) => {
   try {
     const parsed = settingsSchema.parse(req.body)
-    const { sub2apiRedeemToken, ...input } = parsed
+    const { sub2apiRedeemToken, r2HubApiKey, ...input } = parsed
     const updateInput = {
       ...input,
       ...(typeof sub2apiRedeemToken === 'string' && sub2apiRedeemToken.trim()
         ? { sub2apiRedeemToken: sub2apiRedeemToken.trim() }
+        : {}),
+      ...(typeof r2HubApiKey === 'string' && r2HubApiKey.trim()
+        ? { r2HubApiKey: r2HubApiKey.trim() }
         : {}),
     }
     const settings = await upsertPlatformSettings(updateInput)
@@ -1779,6 +1791,9 @@ router.patch('/settings', async (req, res, next) => {
       ...input,
       ...(typeof sub2apiRedeemToken === 'string' && sub2apiRedeemToken.trim()
         ? { sub2apiRedeemToken: '***configured***' }
+        : {}),
+      ...(typeof r2HubApiKey === 'string' && r2HubApiKey.trim()
+        ? { r2HubApiKey: '***configured***' }
         : {}),
     })
     sendOk(res, { settings: toAdminPlatformSettingsView(settings) })
@@ -1811,6 +1826,89 @@ router.post('/settings/sub2api-redeem/test', async (req, res, next) => {
       result,
       message: 'sub2api 兑换码校验成功，已标记为已使用',
     })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/r2-upload/status', async (_req, res, next) => {
+  try {
+    const config = await getR2UploadRuntimeConfig()
+    sendOk(res, {
+      config,
+      queue: getR2UploadQueueStats(),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+const R2_TEST_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+)
+
+router.post('/r2-upload/test', async (req, res, next) => {
+  try {
+    const settings = await getPlatformSettings()
+    if (!settings.r2HubUrl.trim()) {
+      throw new HttpError(400, 'r2_hub_not_configured', '请先配置 r2hub 服务地址')
+    }
+    if (!settings.r2HubApiKey) {
+      throw new HttpError(400, 'r2_hub_key_not_configured', '请先配置 r2hub API Key')
+    }
+    const uploaded = await uploadToR2Hub({
+      data: R2_TEST_PNG,
+      filename: `gip-r2-test-${Date.now()}.png`,
+      contentType: 'image/png',
+      hubUrl: settings.r2HubUrl.trim(),
+      hubApiKey: settings.r2HubApiKey,
+    })
+    await writeAudit(req, 'platform.r2-upload.test', 'platform', { url: uploaded.url, bucket: uploaded.bucket })
+    sendOk(res, { ok: true, url: uploaded.url, bucket: uploaded.bucket, key: uploaded.key })
+  } catch (error) {
+    next(error)
+  }
+})
+
+const r2BackfillSchema = z.object({
+  hours: z.number().int().min(1).max(168).default(24),
+  limit: z.number().int().min(1).max(2000).default(500),
+})
+
+router.post('/r2-upload/backfill', async (req, res, next) => {
+  try {
+    const input = r2BackfillSchema.parse(req.body ?? {})
+    const config = await getR2UploadRuntimeConfig()
+    if (!config.enabled) {
+      throw new HttpError(400, 'r2_upload_disabled', '请先开启 R2 上传总开关')
+    }
+    const tasks = await prisma.generationTask.findMany({
+      where: {
+        status: 'done',
+        createdAt: { gte: new Date(Date.now() - input.hours * 60 * 60 * 1000) },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: input.limit,
+      select: { id: true, outputImages: true },
+    })
+    let enqueued = 0
+    let scanned = 0
+    for (const task of tasks) {
+      const images = Array.isArray(task.outputImages) ? task.outputImages : []
+      const doneImages = images
+        .filter((item): item is { dataUrl: string; index: number; mimeType: string; status: string } => (
+          Boolean(item) && typeof item === 'object'
+          && (item as Record<string, unknown>).status === 'done'
+          && typeof (item as Record<string, unknown>).dataUrl === 'string'
+        ))
+        .map((item) => ({ dataUrl: item.dataUrl, index: item.index, mimeType: item.mimeType }))
+      if (!doneImages.length) continue
+      scanned += 1
+      enqueued += await enqueueR2UploadForImages({ taskId: task.id, images: doneImages })
+    }
+    await writeAudit(req, 'platform.r2-upload.backfill', 'platform', { hours: input.hours, limit: input.limit, scanned, enqueued })
+    sendOk(res, { ok: true, scannedTasks: tasks.length, tasksWithImages: scanned, enqueued })
   } catch (error) {
     next(error)
   }

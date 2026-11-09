@@ -244,6 +244,9 @@ export default function AdminConsole() {
   const [settingsDraft, setSettingsDraft] = useState<AdminPlatformSettings>(defaultSettingsDraft)
   const [sub2apiRedeemTestCode, setSub2apiRedeemTestCode] = useState('')
   const [sub2apiRedeemTesting, setSub2apiRedeemTesting] = useState(false)
+  const [r2Testing, setR2Testing] = useState(false)
+  const [r2TestResult, setR2TestResult] = useState('')
+  const [r2Backfilling, setR2Backfilling] = useState(false)
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([])
   const [auditPage, setAuditPage] = useState(1)
   const [auditTotal, setAuditTotal] = useState(0)
@@ -1838,6 +1841,7 @@ export default function AdminConsole() {
           const settingsPayload: Partial<AdminPlatformSettings> = {
             ...settingsDraft,
             sub2apiRedeemToken: settingsDraft.sub2apiRedeemToken?.trim() || undefined,
+            r2HubApiKey: settingsDraft.r2HubApiKey?.trim() || undefined,
           }
           const result = await platformApi.updateAdminSettings(settingsPayload)
           setSettingsDraft({ ...result.settings, sub2apiRedeemToken: '' })
@@ -1863,6 +1867,36 @@ export default function AdminConsole() {
       showToast(error instanceof Error ? error.message : 'sub2api 兑换码测试失败', 'error')
     } finally {
       setSub2apiRedeemTesting(false)
+    }
+  }
+
+  async function testR2UploadConnection() {
+    if (!settingsDraft.r2HubUrl.trim()) {
+      showToast('请先填写 r2hub 服务地址并保存', 'error')
+      return
+    }
+    setR2Testing(true)
+    try {
+      const result = await platformApi.testAdminR2Upload()
+      setR2TestResult(result.url)
+      showToast(`R2 上传连通成功：${result.bucket}`, 'success')
+    } catch (error) {
+      setR2TestResult('')
+      showToast(error instanceof Error ? error.message : 'R2 上传测试失败', 'error')
+    } finally {
+      setR2Testing(false)
+    }
+  }
+
+  async function runR2Backfill() {
+    setR2Backfilling(true)
+    try {
+      const result = await platformApi.backfillAdminR2Upload({ hours: 24, limit: 500 })
+      showToast(`回填完成：扫描 ${result.scannedTasks} 个任务，新入队 ${result.enqueued} 张图片`, 'success')
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'R2 回填失败', 'error')
+    } finally {
+      setR2Backfilling(false)
     }
   }
 
@@ -3009,6 +3043,94 @@ export default function AdminConsole() {
 
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
               <div className="mb-4">
+                <div className="text-base font-semibold text-gray-950 dark:text-gray-50">R2 加速存储</div>
+                <div className="mt-1 text-sm text-gray-500">生成图自动上传 R2（经 r2hub 服务），前端按 R2 地址展示与下载；URL 已是 https://pre / https://pub 开头的图片会跳过不再重复上传。</div>
+              </div>
+              <label className="flex items-center justify-between rounded-2xl border border-gray-200 px-4 py-3 dark:border-white/[0.08]">
+                <span>
+                  <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">启用 R2 上传</span>
+                  <span className="mt-0.5 block text-xs text-gray-400">总开关：开启后新完成的生成图进入上传队列</span>
+                </span>
+                <input type="checkbox" checked={settingsDraft.r2UploadEnabled} onChange={(event) => setSettingsDraft((prev) => ({ ...prev, r2UploadEnabled: event.target.checked }))} />
+              </label>
+              <label className="mt-3 flex items-center justify-between rounded-2xl border border-gray-200 px-4 py-3 dark:border-white/[0.08]">
+                <span>
+                  <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">仅在上传时间段内执行</span>
+                  <span className="mt-0.5 block text-xs text-gray-400">关闭 = 图片生成后立即上传；开启 = 队列只在时间段内消费。注意：等待期间本地文件（6 小时保留）或上游图（约 17 小时）可能过期导致上传失败</span>
+                </span>
+                <input type="checkbox" checked={settingsDraft.r2UploadWindowEnabled} onChange={(event) => setSettingsDraft((prev) => ({ ...prev, r2UploadWindowEnabled: event.target.checked }))} />
+              </label>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="block text-xs font-semibold text-gray-500">
+                  上传开始时间
+                  <input
+                    type="time"
+                    value={settingsDraft.r2UploadWindowStart}
+                    onChange={(event) => setSettingsDraft((prev) => ({ ...prev, r2UploadWindowStart: event.target.value }))}
+                    className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+                  />
+                </label>
+                <label className="block text-xs font-semibold text-gray-500">
+                  上传结束时间
+                  <input
+                    type="time"
+                    value={settingsDraft.r2UploadWindowEnd}
+                    onChange={(event) => setSettingsDraft((prev) => ({ ...prev, r2UploadWindowEnd: event.target.value }))}
+                    className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+                  />
+                </label>
+              </div>
+              <label className="mt-4 block text-xs font-semibold text-gray-500">
+                r2hub 服务地址
+                <input
+                  value={settingsDraft.r2HubUrl}
+                  onChange={(event) => setSettingsDraft((prev) => ({ ...prev, r2HubUrl: event.target.value }))}
+                  placeholder="http://127.0.0.1:8100"
+                  className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+                />
+              </label>
+              <label className="mt-4 block text-xs font-semibold text-gray-500">
+                r2hub API Key
+                <input
+                  type="password"
+                  value={settingsDraft.r2HubApiKey ?? ''}
+                  onChange={(event) => setSettingsDraft((prev) => ({ ...prev, r2HubApiKey: event.target.value }))}
+                  placeholder={settingsDraft.r2HubApiKeyConfigured ? '已配置，留空则保持不变' : 'r2hub 后台创建的上传 Key'}
+                  className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+                />
+                <span className="mt-1.5 block text-[11px] font-normal text-gray-400">
+                  {settingsDraft.r2HubApiKeyConfigured ? 'API Key 已配置；输入新值后保存会覆盖旧值。' : '当前未配置 API Key，上传会失败。'}
+                </span>
+              </label>
+              <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3 dark:border-emerald-400/20 dark:bg-emerald-400/10">
+                <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-200">连通测试与历史回填</div>
+                <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    disabled={r2Testing}
+                    onClick={() => void testR2UploadConnection()}
+                    className="h-10 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {r2Testing ? '测试中...' : '测试 R2 上传'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={r2Backfilling || !settingsDraft.r2UploadEnabled}
+                    onClick={() => void runR2Backfill()}
+                    className="h-10 rounded-xl border border-emerald-300 px-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-400/30 dark:text-emerald-200 dark:hover:bg-emerald-400/10"
+                    title="扫描最近 24 小时已完成任务，把未在 R2 的图片加入上传队列（需先开启总开关并保存）"
+                  >
+                    {r2Backfilling ? '回填中...' : '回填近 24 小时图片'}
+                  </button>
+                </div>
+                {r2TestResult && (
+                  <div className="mt-2 truncate text-[11px] text-emerald-600 dark:text-emerald-300" title={r2TestResult}>最近测试上传：{r2TestResult}</div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
+              <div className="mb-4">
                 <div className="text-base font-semibold text-gray-950 dark:text-gray-50">维护提示</div>
                 <div className="mt-1 text-sm text-gray-500">关闭生成时，用户会看到这段中文提示。</div>
               </div>
@@ -3047,6 +3169,9 @@ export default function AdminConsole() {
               <div className="flex items-center justify-between"><span className="text-gray-500">兑换说明</span><StatusBadge tone={settingsDraft.redeemDescription.trim() ? 'green' : 'gray'}>{settingsDraft.redeemDescription.trim() ? '已配置' : '不显示'}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">sub2api 校验</span><StatusBadge tone={settingsDraft.sub2apiRedeemEnabled ? 'blue' : 'gray'}>{settingsDraft.sub2apiRedeemEnabled ? '启用' : '关闭'}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">sub2api Admin Key</span><StatusBadge tone={settingsDraft.sub2apiRedeemTokenConfigured ? 'green' : 'gray'}>{settingsDraft.sub2apiRedeemTokenConfigured ? '已配置' : '未配置'}</StatusBadge></div>
+              <div className="flex items-center justify-between"><span className="text-gray-500">R2 加速存储</span><StatusBadge tone={settingsDraft.r2UploadEnabled ? 'blue' : 'gray'}>{settingsDraft.r2UploadEnabled ? '启用' : '关闭'}</StatusBadge></div>
+              <div className="flex items-center justify-between"><span className="text-gray-500">R2 上传窗口</span><span className="font-semibold text-gray-900 dark:text-gray-100">{settingsDraft.r2UploadWindowEnabled ? `${settingsDraft.r2UploadWindowStart}~${settingsDraft.r2UploadWindowEnd}` : '不限'}</span></div>
+              <div className="flex items-center justify-between"><span className="text-gray-500">r2hub Key</span><StatusBadge tone={settingsDraft.r2HubApiKeyConfigured ? 'green' : 'gray'}>{settingsDraft.r2HubApiKeyConfigured ? '已配置' : '未配置'}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">首页轮播</span><StatusBadge tone={settingsDraft.landingHeroSlidesJson.trim() ? 'blue' : 'amber'}>{settingsDraft.landingHeroSlidesJson.trim() ? '已配置' : '待配置'}</StatusBadge></div>
             </div>
             <button className="mt-5 h-10 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-gray-950">保存设置</button>

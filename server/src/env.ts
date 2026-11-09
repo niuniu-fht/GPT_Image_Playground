@@ -28,6 +28,8 @@ export const env = {
   r2SecretKey: process.env.R2_SECRET_ACCESS_KEY || '',
   r2Bucket: process.env.R2_BUCKET || '',
   r2PublicBaseUrl: (process.env.R2_PUBLIC_BASE_URL || process.env.PUBLIC_ASSET_BASE_URL || '').replace(/\/+$/, ''),
+  r2HubUrl: (process.env.R2HUB_URL || 'http://127.0.0.1:8100').replace(/\/+$/, ''),
+  r2HubApiKey: process.env.R2HUB_API_KEY || '',
   frontendOrigins: (process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:5173,http://localhost:5174')
     .split(',')
     .map((item) => item.trim())

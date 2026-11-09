@@ -188,6 +188,13 @@ export const defaultSettingsDraft: AdminPlatformSettings = {
   sub2apiRedeemBaseUrl: '',
   sub2apiRedeemTokenConfigured: false,
   sub2apiRedeemToken: '',
+  r2UploadEnabled: false,
+  r2UploadWindowEnabled: false,
+  r2UploadWindowStart: '19:00',
+  r2UploadWindowEnd: '07:00',
+  r2HubUrl: 'http://127.0.0.1:8100',
+  r2HubApiKeyConfigured: false,
+  r2HubApiKey: '',
 }
 
 export const adminPageSize = 20

@@ -644,6 +644,44 @@ export const platformApi = {
     })
   },
 
+  testAdminR2Upload() {
+    return request<{ ok: boolean; url: string; bucket: string; key: string }>('/api/admin/r2-upload/test', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+  },
+
+  getAdminR2UploadStatus() {
+    return request<{
+      config: {
+        enabled: boolean
+        windowEnabled: boolean
+        inWindow: boolean
+        windowStart: string
+        windowEnd: string
+        hubUrl: string
+        hubApiKeyConfigured: boolean
+      }
+      queue: {
+        queueLength: number
+        retrying: number
+        processing: boolean
+        uploadedCount: number
+        droppedCount: number
+        oldestQueuedAt: number | null
+        lastError: string | null
+        uptimeSeconds: number
+      }
+    }>('/api/admin/r2-upload/status')
+  },
+
+  backfillAdminR2Upload(input: { hours?: number; limit?: number } = {}) {
+    return request<{ ok: boolean; scannedTasks: number; tasksWithImages: number; enqueued: number }>('/api/admin/r2-upload/backfill', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
   listAdminUpstreams(params: { q?: string; status?: string; health?: string; page?: number; pageSize?: number } = {}) {
     const query = new URLSearchParams()
     if (params.q) query.set('q', params.q)

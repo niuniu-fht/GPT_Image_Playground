@@ -20,6 +20,7 @@ import {
   resolveResolutionTier,
 } from '../modelCost.js'
 import { prisma } from '../prisma.js'
+import { enqueueR2UploadForImages, resolveR2UploadPlan } from '../r2Upload/queue.js'
 import { getPlatformSettings } from '../settings.js'
 import {
   reserveGenerationTaskSlot,
@@ -1020,7 +1021,24 @@ async function runGenerationTask(input: {
         status: 'error',
         error: item.error,
       }))
-    const outputImages = [...images, ...failedImages].sort((left, right) => left.index - right.index)
+
+    // R2 上传决策：立即模式同步上传并把地址替换为 R2 链接；窗口模式在提交后入队
+    const r2Images = images.map((image) => ({
+      dataUrl: image.dataUrl,
+      index: image.index,
+      mimeType: image.mimeType,
+    }))
+    let r2Plan: Awaited<ReturnType<typeof resolveR2UploadPlan>> | null = null
+    if (!controller.signal.aborted && r2Images.length) {
+      r2Plan = await resolveR2UploadPlan({ taskId: input.taskId, images: r2Images })
+    }
+    const finalImages = r2Plan
+      ? images.map((image) => {
+          const r2Url = r2Plan.urls.get(image.index)
+          return r2Url ? { ...image, dataUrl: r2Url } : image
+        })
+      : images
+    const outputImages = [...finalImages, ...failedImages].sort((left, right) => left.index - right.index)
     const outputPreviews = [
       ...images.map((image) => ({
         index: image.index,
@@ -1091,6 +1109,16 @@ async function runGenerationTask(input: {
     })
     if (!completedTask) {
       await deleteGeneratedImageFilesForTasks([input.taskId])
+    } else if (r2Plan && r2Plan.fallbackImages.length) {
+      void enqueueR2UploadForImages({
+        taskId: input.taskId,
+        images: r2Plan.fallbackImages,
+      }).catch((error: unknown) => {
+        console.warn('[r2-upload] failed to enqueue fallback images', {
+          taskId: input.taskId,
+          error,
+        })
+      })
     }
   } catch (error) {
     const taskError = controller.signal.aborted

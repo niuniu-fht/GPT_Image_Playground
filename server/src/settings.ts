@@ -12,10 +12,17 @@ export interface PlatformSettings {
   sub2apiRedeemEnabled: boolean
   sub2apiRedeemBaseUrl: string
   sub2apiRedeemToken: string
+  r2UploadEnabled: boolean
+  r2UploadWindowEnabled: boolean
+  r2UploadWindowStart: string
+  r2UploadWindowEnd: string
+  r2HubUrl: string
+  r2HubApiKey: string
 }
 
-export interface AdminPlatformSettingsView extends Omit<PlatformSettings, 'sub2apiRedeemToken'> {
+export interface AdminPlatformSettingsView extends Omit<PlatformSettings, 'sub2apiRedeemToken' | 'r2HubApiKey'> {
   sub2apiRedeemTokenConfigured: boolean
+  r2HubApiKeyConfigured: boolean
 }
 
 export const defaultLandingHeroSlides = [
@@ -67,6 +74,12 @@ export const defaultPlatformSettings: PlatformSettings = {
   sub2apiRedeemEnabled: false,
   sub2apiRedeemBaseUrl: '',
   sub2apiRedeemToken: '',
+  r2UploadEnabled: false,
+  r2UploadWindowEnabled: false,
+  r2UploadWindowStart: '19:00',
+  r2UploadWindowEnd: '07:00',
+  r2HubUrl: env.r2HubUrl,
+  r2HubApiKey: env.r2HubApiKey,
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean) {
@@ -84,6 +97,29 @@ export function normalizeGenerationTimeoutSeconds(value: number): number {
     return defaultPlatformSettings.generationTimeoutSeconds
   }
   return Math.min(1800, Math.max(30, Math.floor(value)))
+}
+
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
+
+export function normalizeTimeString(value: string, fallback: string): string {
+  const trimmed = value.trim()
+  return TIME_PATTERN.test(trimmed) ? trimmed : fallback
+}
+
+/** 判断当前时间是否在 [start, end) 窗口内；start === end 视为全天开放；支持跨天窗口。 */
+export function isWithinTimeWindow(now: Date, start: string, end: string): boolean {
+  const startMinutes = normalizeTimeString(start, '00:00')
+    .split(':')
+    .reduce((sum, part) => sum * 60 + Number(part), 0)
+  const endMinutes = normalizeTimeString(end, '00:00')
+    .split(':')
+    .reduce((sum, part) => sum * 60 + Number(part), 0)
+  if (startMinutes === endMinutes) return true
+  const nowMinutes = now.getHours() * 60 + now.getMinutes()
+  if (startMinutes < endMinutes) {
+    return nowMinutes >= startMinutes && nowMinutes < endMinutes
+  }
+  return nowMinutes >= startMinutes || nowMinutes < endMinutes
 }
 
 export async function getPlatformSettings(): Promise<PlatformSettings> {
@@ -104,14 +140,21 @@ export async function getPlatformSettings(): Promise<PlatformSettings> {
       ?? map.get('sub2apiRedeemConsumeUrl')
       ?? defaultPlatformSettings.sub2apiRedeemBaseUrl,
     sub2apiRedeemToken: map.get('sub2apiRedeemToken') ?? defaultPlatformSettings.sub2apiRedeemToken,
+    r2UploadEnabled: parseBoolean(map.get('r2UploadEnabled'), defaultPlatformSettings.r2UploadEnabled),
+    r2UploadWindowEnabled: parseBoolean(map.get('r2UploadWindowEnabled'), defaultPlatformSettings.r2UploadWindowEnabled),
+    r2UploadWindowStart: normalizeTimeString(map.get('r2UploadWindowStart') ?? '', defaultPlatformSettings.r2UploadWindowStart),
+    r2UploadWindowEnd: normalizeTimeString(map.get('r2UploadWindowEnd') ?? '', defaultPlatformSettings.r2UploadWindowEnd),
+    r2HubUrl: map.get('r2HubUrl') ?? defaultPlatformSettings.r2HubUrl,
+    r2HubApiKey: map.get('r2HubApiKey') ?? defaultPlatformSettings.r2HubApiKey,
   }
 }
 
 export function toAdminPlatformSettingsView(settings: PlatformSettings): AdminPlatformSettingsView {
-  const { sub2apiRedeemToken, ...view } = settings
+  const { sub2apiRedeemToken, r2HubApiKey, ...view } = settings
   return {
     ...view,
     sub2apiRedeemTokenConfigured: Boolean(sub2apiRedeemToken),
+    r2HubApiKeyConfigured: Boolean(r2HubApiKey),
   }
 }
 
@@ -127,6 +170,12 @@ export async function upsertPlatformSettings(input: Partial<PlatformSettings>) {
   if (typeof input.sub2apiRedeemEnabled === 'boolean') entries.push(['sub2apiRedeemEnabled', String(input.sub2apiRedeemEnabled)])
   if (typeof input.sub2apiRedeemBaseUrl === 'string') entries.push(['sub2apiRedeemBaseUrl', input.sub2apiRedeemBaseUrl])
   if (typeof input.sub2apiRedeemToken === 'string') entries.push(['sub2apiRedeemToken', input.sub2apiRedeemToken])
+  if (typeof input.r2UploadEnabled === 'boolean') entries.push(['r2UploadEnabled', String(input.r2UploadEnabled)])
+  if (typeof input.r2UploadWindowEnabled === 'boolean') entries.push(['r2UploadWindowEnabled', String(input.r2UploadWindowEnabled)])
+  if (typeof input.r2UploadWindowStart === 'string') entries.push(['r2UploadWindowStart', normalizeTimeString(input.r2UploadWindowStart, defaultPlatformSettings.r2UploadWindowStart)])
+  if (typeof input.r2UploadWindowEnd === 'string') entries.push(['r2UploadWindowEnd', normalizeTimeString(input.r2UploadWindowEnd, defaultPlatformSettings.r2UploadWindowEnd)])
+  if (typeof input.r2HubUrl === 'string') entries.push(['r2HubUrl', input.r2HubUrl.trim()])
+  if (typeof input.r2HubApiKey === 'string') entries.push(['r2HubApiKey', input.r2HubApiKey])
 
   await prisma.$transaction(
     entries.map(([key, value]) =>
@@ -152,6 +201,12 @@ export async function seedMissingPlatformSettings(input: PlatformSettings) {
     ['sub2apiRedeemEnabled', String(input.sub2apiRedeemEnabled)],
     ['sub2apiRedeemBaseUrl', input.sub2apiRedeemBaseUrl],
     ['sub2apiRedeemToken', input.sub2apiRedeemToken],
+    ['r2UploadEnabled', String(input.r2UploadEnabled)],
+    ['r2UploadWindowEnabled', String(input.r2UploadWindowEnabled)],
+    ['r2UploadWindowStart', normalizeTimeString(input.r2UploadWindowStart, defaultPlatformSettings.r2UploadWindowStart)],
+    ['r2UploadWindowEnd', normalizeTimeString(input.r2UploadWindowEnd, defaultPlatformSettings.r2UploadWindowEnd)],
+    ['r2HubUrl', input.r2HubUrl],
+    ['r2HubApiKey', input.r2HubApiKey],
   ]
   const existingRows = await prisma.platformSetting.findMany({
     where: { key: { in: entries.map(([key]) => key) } },

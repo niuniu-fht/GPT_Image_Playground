@@ -722,6 +722,13 @@ export interface AdminPlatformSettings {
   sub2apiRedeemBaseUrl: string
   sub2apiRedeemTokenConfigured: boolean
   sub2apiRedeemToken?: string
+  r2UploadEnabled: boolean
+  r2UploadWindowEnabled: boolean
+  r2UploadWindowStart: string
+  r2UploadWindowEnd: string
+  r2HubUrl: string
+  r2HubApiKeyConfigured: boolean
+  r2HubApiKey?: string
 }
 
 export interface CategoryConfig {
