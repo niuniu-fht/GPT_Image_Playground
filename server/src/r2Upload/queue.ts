@@ -214,7 +214,8 @@ export async function resolveR2UploadPlan(input: {
   if (!settings.r2UploadEnabled || !settings.r2HubUrl || !settings.r2HubApiKey) {
     return { mode: 'queue', urls: new Map(), fallbackImages: [], uploaded: 0 }
   }
-  if (settings.r2UploadWindowEnabled) {
+  // 窗口模式且当前不在窗口内：排队等待窗口消费；在窗口内则与立即模式一致，同步上传
+  if (settings.r2UploadWindowEnabled && !isWithinTimeWindow(new Date(), settings.r2UploadWindowStart, settings.r2UploadWindowEnd)) {
     return { mode: 'queue', urls: new Map(), fallbackImages: candidates, uploaded: 0 }
   }
 
