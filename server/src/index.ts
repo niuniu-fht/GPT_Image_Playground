@@ -9,7 +9,7 @@ import { env } from './env.js'
 import { startGenerationTimeoutSweep } from './generationTimeout.js'
 import { getGenerationConcurrencySnapshot } from './generationConcurrency.js'
 import { startGeneratedImageFileSweep } from './generatedImageFiles.js'
-import { startR2UploadWorker } from './r2Upload/queue.js'
+import { restoreUnuploadedFromDatabase, startR2UploadWorker } from './r2Upload/queue.js'
 import { HttpError, sendError } from './http.js'
 import authRouter from './routes/auth.js'
 import adminRouter from './routes/admin.js'
@@ -93,5 +93,8 @@ app.listen(env.port, () => {
   startGenerationTimeoutSweep()
   startGeneratedImageFileSweep()
   startR2UploadWorker()
+  void restoreUnuploadedFromDatabase().catch((error: unknown) => {
+    console.error('[r2-upload] restore scan failed', error)
+  })
   console.log(`GPT Image Playground server listening on http://127.0.0.1:${env.port}`)
 })

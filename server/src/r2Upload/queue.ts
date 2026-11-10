@@ -6,7 +6,7 @@ import { readImageSource, uploadToR2Hub } from './hub.js'
 
 const TICK_INTERVAL_MS = 15_000
 const MAX_ATTEMPTS = 8
-const BATCH_PER_TICK = 3
+const BATCH_PER_TICK = 10
 const BACKOFF_BASE_MS = 30_000
 
 interface R2UploadJob {
@@ -112,14 +112,13 @@ async function updateTaskWithR2Url(
   })
 }
 
-async function processJob(
+/** 只负责读取源图并上传到 r2hub，不触碰任务记录（事务提交前后都可安全调用）。 */
+async function uploadImageToHub(
   job: { taskId: string; index: number; dataUrl: string; mimeType: string },
   config: { hubUrl: string; hubApiKey: string },
 ): Promise<string> {
   const source = await readImageSource(job.dataUrl, job.mimeType, job.taskId, job.index)
   const uploaded = await uploadToR2Hub({ ...source, hubUrl: config.hubUrl, hubApiKey: config.hubApiKey })
-  await updateTaskWithR2Url(job, uploaded.url)
-  state.uploadedCount += 1
   console.info('[r2-upload] uploaded image', {
     taskId: job.taskId,
     index: job.index,
@@ -151,7 +150,9 @@ async function tick(): Promise<void> {
   try {
     for (const job of due) {
       try {
-        await processJob(job, hubConfig)
+        const r2Url = await uploadImageToHub(job, hubConfig)
+        await updateTaskWithR2Url(job, r2Url)
+        state.uploadedCount += 1
         state.jobs.delete(jobKey(job.taskId, job.index))
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -224,7 +225,8 @@ export async function resolveR2UploadPlan(input: {
   const fallbackImages: R2UploadImageInput[] = []
   for (const image of candidates) {
     try {
-      const r2Url = await processJob(
+      // inline 路径不回写任务记录：R2 地址随后随完成事务一起落库
+      const r2Url = await uploadImageToHub(
         { taskId: input.taskId, index: image.index, dataUrl: image.dataUrl, mimeType: image.mimeType },
         hubConfig,
       )
@@ -255,6 +257,41 @@ export function startR2UploadWorker(): () => void {
       tickTimer = null
     }
   }
+}
+
+/**
+ * 容器重启会丢失内存队列。启动时回扫最近 hours 小时的已完成任务，
+ * 把 outputImages 里还不是 R2 地址的图片重新入队（needsR2Upload 幂等过滤已上传的）。
+ */
+export async function restoreUnuploadedFromDatabase(hours = 6, limit = 1000): Promise<number> {
+  const config = await getR2UploadRuntimeConfig()
+  if (!config.enabled) return 0
+  const tasks = await prisma.generationTask.findMany({
+    where: {
+      status: 'done',
+      createdAt: { gte: new Date(Date.now() - hours * 60 * 60 * 1000) },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    select: { id: true, outputImages: true },
+  })
+  let added = 0
+  for (const task of tasks) {
+    const images = Array.isArray(task.outputImages) ? task.outputImages : []
+    const doneImages = images
+      .filter((item): item is { dataUrl: string; index: number; mimeType: string; status: string } => (
+        Boolean(item) && typeof item === 'object'
+        && (item as Record<string, unknown>).status === 'done'
+        && typeof (item as Record<string, unknown>).dataUrl === 'string'
+      ))
+      .map((item) => ({ dataUrl: item.dataUrl, index: item.index, mimeType: item.mimeType }))
+    if (!doneImages.length) continue
+    added += await enqueueR2UploadForImages({ taskId: task.id, images: doneImages })
+  }
+  if (added > 0) {
+    console.info('[r2-upload] restored images into queue after restart', { added, scanned: tasks.length })
+  }
+  return added
 }
 
 export function getR2UploadQueueStats() {
