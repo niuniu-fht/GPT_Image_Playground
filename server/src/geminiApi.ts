@@ -102,8 +102,24 @@ function normalizeCandidate(width: number, height: number): { width: number; hei
 
 function playgroundTierSize(tier: ResolutionTier, ratio: string): { width: number; height: number } {
   const [ratioWidth, ratioHeight] = ratio.split(':').map(Number)
+  // 与前端 src/lib/size.ts 的 2K 定义保持一致：统一长边 2048，
+  // 面积低于 300w 下限的比例（16:9、9:16、3:2、2:3、21:9）按目标面积 310w 缩放
+  if (tier === '2K') {
+    const longSide = 2048
+    const width = ratioWidth > ratioHeight
+      ? longSide
+      : roundToMultiple(longSide * ratioWidth / ratioHeight)
+    const height = ratioWidth > ratioHeight
+      ? roundToMultiple(longSide * ratioHeight / ratioWidth)
+      : longSide
+    if (width * height >= 3_000_000) {
+      return { width, height }
+    }
+    const scale = Math.sqrt((3_100_000 * ratioWidth) / ratioHeight)
+    return normalizeCandidate(roundToMultiple(scale), roundToMultiple(3_100_000 / scale))
+  }
   if (ratioWidth === ratioHeight) {
-    const side = tier === '1K' ? 1024 : tier === '2K' ? 2048 : 3840
+    const side = tier === '1K' ? 1024 : 3840
     return { width: side, height: side }
   }
   if (tier === '1K') {
@@ -112,7 +128,7 @@ function playgroundTierSize(tier: ResolutionTier, ratio: string): { width: numbe
       ? { width: roundToMultiple(shortSide * ratioWidth / ratioHeight), height: shortSide }
       : { width: shortSide, height: roundToMultiple(shortSide * ratioHeight / ratioWidth) }
   }
-  const longSide = tier === '2K' ? 2048 : 3840
+  const longSide = 3840
   return normalizeCandidate(
     ratioWidth > ratioHeight ? longSide : longSide * ratioWidth / ratioHeight,
     ratioWidth > ratioHeight ? longSide * ratioHeight / ratioWidth : longSide,

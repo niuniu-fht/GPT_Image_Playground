@@ -67,8 +67,9 @@ export function resolveResolutionTier(size: string): ResolutionTier {
   const height = Number(match[2])
   const pixels = width * height
   if (!Number.isFinite(pixels) || pixels <= 0) return '1K'
+  // 档位区间：1K < 300w；2K ∈ [300w, 600w)；4K ≥ 600w
   if (pixels >= 6_000_000) return '4K'
-  if (pixels >= 2_600_000) return '2K'
+  if (pixels >= 3_000_000) return '2K'
   return '1K'
 }
 

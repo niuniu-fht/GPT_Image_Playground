@@ -20,9 +20,14 @@ describe('Gemini native image adapter', () => {
   })
 
   it('maps playground sizes to Gemini aspect ratio and image size', () => {
-    expect(resolveGeminiImageConfig('2048x1152')).toEqual({
+    expect(resolveGeminiImageConfig('2832x1584')).toEqual({
       aspectRatio: '16:9',
       imageSize: '2K',
+    })
+    // 旧版 2048x1152 的 2K 尺寸低于 300w 下限，按新档位定义归入 1K
+    expect(resolveGeminiImageConfig('2048x1152')).toEqual({
+      aspectRatio: '16:9',
+      imageSize: '1K',
     })
     expect(resolveGeminiImageConfig('3840x3840')).toEqual({
       aspectRatio: '1:1',
@@ -62,7 +67,7 @@ describe('Gemini native image adapter', () => {
       model: 'gemini-3-pro-image-preview',
       prompt: 'edit this image',
       signal: new AbortController().signal,
-      size: '2048x1152',
+      size: '2832x1584',
     })
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]

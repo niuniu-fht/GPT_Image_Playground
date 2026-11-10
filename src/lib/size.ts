@@ -8,6 +8,13 @@ const MAX_PIXELS = 8_294_400
 
 export type SizeTier = '1K' | '2K' | '4K'
 
+/**
+ * 档位像素区间定义：1K < 300w；2K ∈ [300w, 600w)；4K ≥ 600w。
+ * 2K 档统一长边 2048 在 16:9、9:16、3:2、2:3、21:9 下只有 180w~279w，跌破 300w 下限；
+ * 这些比例改按目标像素面积 310w（刚好超过 300w 下限）随比例缩放，其余保持原尺寸。
+ */
+const TIER_2K_TARGET_PIXELS = 3_100_000
+
 export const KNOWN_ASPECT_RATIOS = [
   '1:1',
   '16:9',
@@ -167,8 +174,29 @@ export function calculateImageSize(tier: SizeTier, ratio: string) {
   if (!parsed) return null
 
   const { width: ratioWidth, height: ratioHeight } = parsed
+
+  if (tier === '2K') {
+    // 2K 档先按统一长边 2048 计算；面积低于 300w 下限的比例
+    // （16:9、9:16、3:2、2:3、21:9）改按目标面积 450w 缩放，保证落在 2K 区间 [300w, 600w)。
+    // 已达标的比例（1:1、4:3、3:4、5:4、4:5）保持原尺寸不变。
+    const longSide = 2048
+    const width = ratioWidth > ratioHeight
+      ? longSide
+      : roundToMultiple(longSide * ratioWidth / ratioHeight, SIZE_MULTIPLE)
+    const height = ratioWidth > ratioHeight
+      ? roundToMultiple(longSide * ratioHeight / ratioWidth, SIZE_MULTIPLE)
+      : longSide
+    if (width * height >= 3_000_000) {
+      return normalizeImageSize(`${width}x${height}`)
+    }
+    const scale = Math.sqrt((TIER_2K_TARGET_PIXELS * ratioWidth) / ratioHeight)
+    const fixedWidth = roundToMultiple(scale, SIZE_MULTIPLE)
+    const fixedHeight = roundToMultiple(TIER_2K_TARGET_PIXELS / scale, SIZE_MULTIPLE)
+    return normalizeImageSize(`${fixedWidth}x${fixedHeight}`)
+  }
+
   if (ratioWidth === ratioHeight) {
-    const side = tier === '1K' ? 1024 : tier === '2K' ? 2048 : 3840
+    const side = tier === '1K' ? 1024 : 3840
     return normalizeImageSize(`${side}x${side}`)
   }
 
@@ -183,7 +211,7 @@ export function calculateImageSize(tier: SizeTier, ratio: string) {
     return `${width}x${height}`
   }
 
-  const longSide = tier === '2K' ? 2048 : 3840
+  const longSide = 3840
   const width = ratioWidth > ratioHeight
     ? longSide
     : roundToMultiple(longSide * ratioWidth / ratioHeight, SIZE_MULTIPLE)
@@ -212,7 +240,7 @@ export function resolveImageSizeTier(size: string): SizeTier {
   const pixels = width * height
   if (!Number.isFinite(pixels) || pixels <= 0) return '1K'
   if (pixels >= 6_000_000) return '4K'
-  if (pixels >= 2_600_000) return '2K'
+  if (pixels >= 3_000_000) return '2K'
   return '1K'
 }
 
