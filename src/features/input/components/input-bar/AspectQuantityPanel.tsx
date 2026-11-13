@@ -18,6 +18,7 @@ import {
 } from '../../../../lib/modelCost'
 import { isModelAspectRatioEnabled, isModelSizeAspectRatioEnabled, resolveEnabledModelAspectRatios } from '../../../../lib/modelAspectRatio'
 import type { ModelConfig, TaskParams } from '../../../../types'
+import { getCssZoom, getViewportSize } from '../../../../lib/viewport'
 
 type AspectOption = {
   label: string
@@ -49,7 +50,7 @@ const QUALITY_OPTIONS = [
 const DEFAULT_RATIO = '1:1'
 const FLOATING_PANEL_GAP = 8
 const FLOATING_PANEL_WIDTH = 322
-const FLOATING_PANEL_ESTIMATED_HEIGHT = 396
+const FLOATING_PANEL_ESTIMATED_HEIGHT = 460
 const FLOATING_PANEL_SCREEN_PADDING = 12
 const FLOATING_PANEL_BOUNDARY_PADDING = 12
 const FLOATING_PANEL_MIN_WIDTH = 268
@@ -179,18 +180,27 @@ export default function AspectQuantityPanel({
   useLayoutEffect(() => {
     if (!open) return
 
-    const rect = summaryRef.current?.getBoundingClientRect()
-    if (!rect) return
+    const visualRect = summaryRef.current?.getBoundingClientRect()
+    if (!visualRect) return
+
+    // 85% 缩放：rect 是视觉像素，弹层样式是缩放空间像素，统一 ÷ zoom
+    const zoom = getCssZoom()
+    const rect = {
+      left: visualRect.left / zoom,
+      top: visualRect.top / zoom,
+      right: visualRect.right / zoom,
+      width: visualRect.width / zoom,
+    }
 
     const boundaryRect = summaryRef.current
       ?.closest('[data-input-panel]')
       ?.getBoundingClientRect()
     const boundaryLeft = boundaryRect
-      ? boundaryRect.left + FLOATING_PANEL_BOUNDARY_PADDING
+      ? boundaryRect.left / zoom + FLOATING_PANEL_BOUNDARY_PADDING
       : FLOATING_PANEL_SCREEN_PADDING
     const boundaryRight = boundaryRect
-      ? boundaryRect.right - FLOATING_PANEL_BOUNDARY_PADDING
-      : window.innerWidth - FLOATING_PANEL_SCREEN_PADDING
+      ? boundaryRect.right / zoom - FLOATING_PANEL_BOUNDARY_PADDING
+      : getViewportSize().width - FLOATING_PANEL_SCREEN_PADDING
     const availableWidth = Math.max(0, boundaryRight - boundaryLeft)
     const width = Math.min(
       availableWidth,

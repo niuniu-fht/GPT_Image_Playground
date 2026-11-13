@@ -38,10 +38,10 @@ export default function LandingPage() {
     <main
       ref={mainRef}
       onPointerMove={handlePointerMove}
-      className="relative min-h-screen overflow-hidden bg-[#f7f9fc] text-slate-950 [--mouse-x:50vw] [--mouse-y:42vh] dark:bg-slate-950 dark:text-white"
+      className="relative min-h-full overflow-hidden bg-[#f7f9fc] text-slate-950 [--mouse-x:50vw] [--mouse-y:42vh] dark:bg-slate-950 dark:text-white"
     >
-      <div className="relative z-10 flex min-h-screen flex-col">
-        <section className="relative min-h-screen overflow-hidden">
+      <div className="relative z-10 flex min-h-full flex-col">
+        <section className="relative min-h-full overflow-hidden">
           <LandingHeroBackdrop />
           <ExperienceTopNav
             appView="home"

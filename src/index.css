@@ -14,6 +14,20 @@ html {
   scrollbar-gutter: stable;
 }
 
+/* 桌面端默认 85% 整体比例：等同浏览器缩小 85%，一屏容纳更多内容 */
+@media (min-width: 768px) {
+  html {
+    zoom: 0.85;
+  }
+
+  /* zoom 空间里 vh 只有 85% 视觉高度：改用百分比高度链，保证撑满整个视口 */
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: #cbd5e1 transparent;

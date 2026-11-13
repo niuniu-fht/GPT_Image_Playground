@@ -107,7 +107,7 @@ export default function SquarePage() {
   }
 
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[#f4f7fb] text-slate-950 dark:bg-[#090909] dark:text-white">
+    <main className="relative min-h-full overflow-x-hidden bg-[#f4f7fb] text-slate-950 dark:bg-[#090909] dark:text-white">
       <SquareAtmosphere />
       <div className="pointer-events-none fixed inset-0 z-0 bg-[linear-gradient(135deg,rgba(14,165,233,0.12),transparent_28%,rgba(15,23,42,0.08)_54%,transparent_78%),linear-gradient(180deg,rgba(248,250,252,0.86),rgba(226,232,240,0.58)_55%,rgba(248,250,252,0.95)_100%)] dark:bg-[linear-gradient(180deg,rgba(9,9,9,0.12),rgba(9,9,9,0.56)_58%,rgba(9,9,9,0.9)_100%)]" />
       <div className="pointer-events-none fixed inset-0 z-0 opacity-[0.28] [background-image:linear-gradient(rgba(15,23,42,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.10)_1px,transparent_1px)] [background-size:44px_44px] dark:opacity-100 dark:bg-[linear-gradient(90deg,rgba(0,0,0,0.34),transparent_24%,transparent_76%,rgba(0,0,0,0.34))] dark:[background-image:none]" />

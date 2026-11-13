@@ -14,7 +14,7 @@ function getErrorSummary(error: Error): string {
 
 export default function AppErrorFallback({ error, onReload, onReset }: AppErrorFallbackProps) {
   return (
-    <main className="grid min-h-screen place-items-center bg-slate-50 px-5 text-slate-950 dark:bg-slate-950 dark:text-white">
+    <main className="grid min-h-full place-items-center bg-slate-50 px-5 text-slate-950 dark:bg-slate-950 dark:text-white">
       <section className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-950/8 dark:border-white/[0.10] dark:bg-slate-900">
         <div className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-rose-50 text-lg font-black text-rose-600 dark:bg-rose-400/10 dark:text-rose-200">
           !

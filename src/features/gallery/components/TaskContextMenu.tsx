@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import type { TaskRecord } from '../../../types'
 import { canEditTaskOutputs, canRetryTask } from '../../../store'
+import { getViewportSize } from '../../../lib/viewport'
 
 interface Props {
   task: TaskRecord | null
@@ -107,11 +108,12 @@ export default function TaskContextMenu({
     let left = x
     let top = y
 
-    if (left + menuWidth > window.innerWidth - 8) {
-      left = Math.max(8, window.innerWidth - menuWidth - 8)
+    const viewport = getViewportSize()
+    if (left + menuWidth > viewport.width - 8) {
+      left = Math.max(8, viewport.width - menuWidth - 8)
     }
-    if (top + menuHeight > window.innerHeight - 8) {
-      top = Math.max(8, window.innerHeight - menuHeight - 8)
+    if (top + menuHeight > viewport.height - 8) {
+      top = Math.max(8, viewport.height - menuHeight - 8)
     }
 
     return { left, top }

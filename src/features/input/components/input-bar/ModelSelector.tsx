@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { resolveEffectiveModelQuality, resolveFirstAvailableCombination, resolveModelCostForSize } from '../../../../lib/modelCost'
 import { resolveImageSizeTier } from '../../../../lib/size'
 import { renderModelIcon, SeedreamBrandIcon, BrandGptIcon, BrandGeminiIcon } from '../../../../lib/modelIcon'
+import { getCssZoom, getViewportSize } from '../../../../lib/viewport'
 import type { ModelConfig, TaskParams } from '../../../../types'
 
 interface ModelSelectorProps {
@@ -21,7 +22,7 @@ interface MenuPosition {
   maxHeight: number
 }
 
-const MENU_MAX_HEIGHT = 440
+const MENU_MAX_HEIGHT = 500
 const MENU_GAP = 8
 const MIN_USABLE_SPACE = 160
 
@@ -34,17 +35,17 @@ interface GroupMeta {
 }
 
 const GROUP_META: Record<string, GroupMeta> = {
-  gpt: { logo: <BrandGptIcon className="h-5 w-5" /> },
-  gemini: { logo: <BrandGeminiIcon className="h-5 w-5" /> },
+  gpt: { logo: <BrandGptIcon className="h-4 w-4" /> },
+  gemini: { logo: <BrandGeminiIcon className="h-4 w-4" /> },
   grok: { logo: '𝕏', bg: 'bg-slate-900 dark:bg-slate-700' },
-  seedream: { logo: <SeedreamBrandIcon className="h-5 w-5" /> },
+  seedream: { logo: <SeedreamBrandIcon className="h-4 w-4" /> },
 }
 
 function groupLogo(name: string) {
   const meta = GROUP_META[name.toLowerCase()]
   if (meta?.bg) {
     return (
-      <span className={`grid h-5 w-5 shrink-0 place-items-center rounded-md text-[10px] font-bold text-white ${meta.bg}`}>
+      <span className={`grid h-4 w-4 shrink-0 place-items-center rounded text-[9px] font-bold text-white ${meta.bg}`}>
         {meta.logo}
       </span>
     )
@@ -53,7 +54,7 @@ function groupLogo(name: string) {
     return <span className="shrink-0">{meta.logo}</span>
   }
   return (
-    <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-gray-200 text-[10px] font-bold text-gray-500 dark:bg-white/[0.1] dark:text-gray-300">
+    <span className="grid h-4 w-4 shrink-0 place-items-center rounded bg-gray-200 text-[9px] font-bold text-gray-500 dark:bg-white/[0.1] dark:text-gray-300">
       {name.charAt(0) || '•'}
     </span>
   )
@@ -102,14 +103,23 @@ export default function ModelSelector({
   }, [groups, groupFilter])
 
   const updatePosition = useCallback(() => {
-    const rect = rootRef.current?.getBoundingClientRect()
-    if (!rect) return
-    const spaceBelow = window.innerHeight - rect.bottom - MENU_GAP * 2
+    const visualRect = rootRef.current?.getBoundingClientRect()
+    if (!visualRect) return
+    // 85% 缩放：rect 是视觉像素，fixed 弹层样式是缩放空间像素，统一 ÷ zoom
+    const zoom = getCssZoom()
+    const rect = {
+      left: visualRect.left / zoom,
+      top: visualRect.top / zoom,
+      bottom: visualRect.bottom / zoom,
+      width: visualRect.width / zoom,
+    }
+    const viewport = getViewportSize()
+    const spaceBelow = viewport.height - rect.bottom - MENU_GAP * 2
     const spaceAbove = rect.top - MENU_GAP * 2
     const openUpward = spaceBelow < MIN_USABLE_SPACE && spaceAbove > spaceBelow
     const maxHeight = Math.min(MENU_MAX_HEIGHT, Math.max(MIN_USABLE_SPACE, openUpward ? spaceAbove : spaceBelow))
     setPosition(openUpward
-      ? { left: rect.left, bottom: window.innerHeight - rect.top + MENU_GAP, width: rect.width, maxHeight }
+      ? { left: rect.left, bottom: viewport.height - rect.top + MENU_GAP, width: rect.width, maxHeight }
       : { left: rect.left, top: rect.bottom + MENU_GAP, width: rect.width, maxHeight })
   }, [])
 
@@ -196,7 +206,7 @@ export default function ModelSelector({
           }}
           className="fixed z-[120] overflow-y-auto overscroll-contain rounded-2xl border border-gray-200/90 bg-white p-1.5 shadow-2xl shadow-gray-900/15 ring-1 ring-black/[0.02] dark:border-white/[0.08] dark:bg-gray-900 dark:shadow-black/40 dark:ring-white/[0.04] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-white/[0.14]"
         >
-          <div className="sticky top-0 z-20 flex flex-wrap items-center gap-1.5 border-b border-gray-100 bg-white/95 px-1.5 pb-2 pt-1 backdrop-blur dark:border-white/[0.06] dark:bg-gray-900/95">
+          <div className="sticky top-0 z-20 flex flex-wrap items-center gap-1 border-b border-gray-100 bg-white/95 px-1.5 pb-1.5 pt-1 backdrop-blur dark:border-white/[0.06] dark:bg-gray-900/95">
             {[{ name: null, label: '全部', count: models.length }, ...groups.map((group) => ({ name: group.name, label: group.name, count: group.models.length }))].map((chip) => {
               const active = (chip.name ?? null) === groupFilter
               return (
@@ -204,7 +214,7 @@ export default function ModelSelector({
                   key={chip.label}
                   type="button"
                   onClick={() => setGroupFilter(chip.name ?? null)}
-                  className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition ${
                     active
                       ? 'bg-slate-900 text-white dark:bg-white dark:text-gray-950'
                       : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-white/[0.06] dark:text-gray-400 dark:hover:bg-white/[0.1]'
@@ -217,11 +227,11 @@ export default function ModelSelector({
             })}
           </div>
           {visibleGroups.map((group) => (
-            <div key={group.name} className="mb-2.5 last:mb-1">
+            <div key={group.name} className="mb-2 last:mb-1">
               {groupFilter ? null : (
-                <div className="sticky top-[38px] z-10 flex items-center gap-2 bg-white/95 px-2.5 py-2 backdrop-blur dark:bg-gray-900/95">
+                <div className="sticky top-[30px] z-10 flex items-center gap-1.5 bg-white/95 px-2.5 py-1.5 backdrop-blur dark:bg-gray-900/95">
                   {groupLogo(group.name)}
-                  <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400 dark:text-gray-500">
                     {group.name}
                   </span>
                   <span className="text-[11px] tabular-nums text-gray-300 dark:text-gray-600">{group.models.length}</span>
@@ -242,34 +252,34 @@ export default function ModelSelector({
                       onChange(model.id)
                       setOpen(false)
                     }}
-                    className={`flex w-full items-center gap-3 rounded-xl px-2.5 py-3 pl-3 text-left transition ${
+                    className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2 pl-2.5 text-left transition ${
                       selected
                         ? 'bg-slate-100/90 ring-1 ring-slate-200 dark:bg-white/[0.08] dark:ring-white/[0.08]'
                         : 'hover:bg-gray-50 dark:hover:bg-white/[0.05]'
                     }`}
                   >
-                    <span className="shrink-0">{renderModelIcon(model.icon)}</span>
+                    <span className="shrink-0">{renderModelIcon(model.icon, 'h-7 w-7')}</span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-1.5">
-                        <span className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">
+                        <span className="truncate text-[13px] font-semibold leading-5 text-gray-800 dark:text-gray-100">
                           {model.displayName}
                         </span>
                         {model.isNew && (
-                          <span className="shrink-0 rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                          <span className="shrink-0 rounded-full bg-rose-500 px-1 py-0.5 text-[9px] font-semibold leading-none text-white">
                             新
                           </span>
                         )}
                       </span>
-                      <span className="mt-1 block truncate text-xs text-gray-400 dark:text-gray-500">
+                      <span className="block truncate text-[11px] leading-4 text-gray-400 dark:text-gray-500">
                         {model.description}
                       </span>
                     </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-gray-500 dark:bg-white/[0.06] dark:text-gray-400">
                         {modelCost} 积分起
                       </span>
                       <svg
-                        className={`h-4 w-4 text-slate-700 dark:text-gray-100 ${selected ? '' : 'invisible'}`}
+                        className={`h-3.5 w-3.5 text-slate-700 dark:text-gray-100 ${selected ? '' : 'invisible'}`}
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"

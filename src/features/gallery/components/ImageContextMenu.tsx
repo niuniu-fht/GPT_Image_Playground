@@ -3,6 +3,7 @@ import { useStore } from '../../../store'
 import { copyImageToClipboard } from '../../../lib/clipboardImage'
 import { downloadImageFromSrc } from '../../../lib/downloadImage'
 import { resolveRemoteImageAccessMessage } from '../../../lib/remoteImageAccess'
+import { getViewportSize } from '../../../lib/viewport'
 
 export default function ImageContextMenu() {
   const [menuInfo, setMenuInfo] = useState<{ src: string; x: number; y: number } | null>(null)
@@ -93,10 +94,10 @@ export default function ImageContextMenu() {
   const MENU_WIDTH = 120
   const MENU_HEIGHT = 88 // 两个按钮高度加 padding
 
-  if (left + MENU_WIDTH > window.innerWidth) {
+  if (left + MENU_WIDTH > getViewportSize().width) {
     left -= MENU_WIDTH
   }
-  if (top + MENU_HEIGHT > window.innerHeight) {
+  if (top + MENU_HEIGHT > getViewportSize().height) {
     top -= MENU_HEIGHT
   }
 
