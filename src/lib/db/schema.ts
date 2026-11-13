@@ -1,5 +1,7 @@
 export const DB_NAME = 'gpt-image-playground'
-export const DB_VERSION = 4
+// v5：曾引入 chatConversations 存储，后保留版本号避免已升级浏览器无法降级打开
+export const DB_VERSION = 5
+export const STORE_CHAT_CONVERSATIONS = 'chatConversations'
 export const STORE_TASKS = 'tasks'
 export const STORE_IMAGES = 'images'
 export const IMAGE_INDEX_KIND = 'kind'
@@ -26,6 +28,7 @@ export function openDB(): Promise<IDBDatabase> {
 
       ensureImageIndexes(imageStore)
       backfillLegacyImageKinds(imageStore)
+
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error ?? new Error('打开 IndexedDB 失败'))

@@ -51,6 +51,7 @@ export default function GalleryExportButton() {
   const setConfirmDialog = useStore((state) => state.setConfirmDialog)
   const showToast = useStore((state) => state.showToast)
   const [exporting, setExporting] = useState(false)
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
 
   const targetTasks = useMemo(() => {
     if (taskView !== 'gallery') return []
@@ -84,7 +85,9 @@ export default function GalleryExportButton() {
   const imageCount = countTaskOutputImages(targetTasks)
   const hasSelection = selectedTaskIds.length > 0
   const label = exporting
-    ? '打包中…'
+    ? progress
+      ? `打包中 ${progress.done}/${progress.total}`
+      : '打包中…'
     : hasSelection
       ? '导出所选图片'
       : '导出全部图片'
@@ -92,7 +95,9 @@ export default function GalleryExportButton() {
   const runExport = async () => {
     setExporting(true)
     try {
-      const result = await exportGalleryImagesZip(targetTasks)
+      const result = await exportGalleryImagesZip(targetTasks, (done, total) => {
+        setProgress({ done, total })
+      })
       if (!result.exportedImageCount && !result.failedImageCount) {
         showToast('当前范围没有可导出的图片', 'info')
         return
@@ -112,6 +117,7 @@ export default function GalleryExportButton() {
     } catch (error) {
       showToast(`导出失败：${error instanceof Error ? error.message : String(error)}`, 'error')
     } finally {
+      setProgress(null)
       setExporting(false)
     }
   }
@@ -127,7 +133,10 @@ export default function GalleryExportButton() {
       title: hasSelection ? '导出所选图片' : '导出全部图片',
       message: `将导出 ${targetTasks.length} 个任务中的 ${imageCount} 张图片。`,
       confirmText: '开始导出',
-      action: runExport,
+      action: async () => {
+        // 不等待打包完成：确认后立即关闭弹窗，进度在导出按钮上展示（打包中 x/y）
+        void runExport()
+      },
     })
   }
 

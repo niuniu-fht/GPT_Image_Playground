@@ -11,6 +11,10 @@ interface ReferenceImageThumbGridProps {
   onRemoveInputImage: (index: number) => void
   onMoveInputImage: (fromIndex: number, toIndex: number) => void
   onRequestClearAllImages: () => void
+  aiReverse?: {
+    enabled: boolean
+    onReverse: (image: InputImage, index: number) => void
+  }
 }
 
 export default function ReferenceImageThumbGrid({
@@ -19,6 +23,7 @@ export default function ReferenceImageThumbGrid({
   onRemoveInputImage,
   onMoveInputImage,
   onRequestClearAllImages,
+  aiReverse,
 }: ReferenceImageThumbGridProps) {
   const {
     announcement,
@@ -83,6 +88,30 @@ export default function ReferenceImageThumbGrid({
             >
               {isRemotePreviewUrl(image.dataUrl) ? 'URL' : '本地'}
             </span>
+            {aiReverse && (
+              <button
+                type="button"
+                draggable={false}
+                disabled={!aiReverse.enabled}
+                aria-label={`AI 反推图 ${index + 1} 的提示词`}
+                title={aiReverse.enabled ? 'AI 反推这张图的提示词' : 'AI 功能未开启或正在生成'}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  aiReverse.onReverse(image, index)
+                }}
+                className="absolute right-1 top-1 flex h-[22px] w-[22px] items-center justify-center rounded-full bg-indigo-500 text-white opacity-100 shadow-md transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:bg-gray-400 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+              >
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"
+                  />
+                </svg>
+              </button>
+            )}
             {image.maskDataUrl && (
               <span className="absolute bottom-1 right-1 rounded bg-emerald-500/90 px-1 py-0.5 text-[9px] leading-none text-white shadow-sm">
                 蒙版

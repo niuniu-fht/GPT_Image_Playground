@@ -111,4 +111,87 @@ describe('Gemini native image adapter', () => {
     })
     expect(result.images[0]?.mimeType).toBe('image/jpeg')
   })
+
+  it('remembers the legacy format preference and uses it first on the next request', async () => {
+    const fetchMock = vi.fn()
+      // 第一次请求：imageConfig 被 400 拒绝
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'unknown imageConfig' } }), { status: 400 }))
+      // 重试：旧格式成功
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ inline_data: { mime_type: 'image/png', data: 'AQID' } }] } }],
+      }), { status: 200 }))
+      // 第二次请求：应直接使用旧格式，一次成功
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ inline_data: { mime_type: 'image/png', data: 'AQID' } }] } }],
+      }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const request = {
+      apiKey: 'relay-key',
+      baseUrl: 'https://relay.example.com',
+      inputImages: [],
+      prompt: 'generate image',
+      signal: new AbortController().signal,
+      size: '1024x1024',
+    }
+    await callGeminiGenerateContent({ ...request, model: 'gemini-legacy-model' })
+    await callGeminiGenerateContent({ ...request, model: 'gemini-legacy-model' })
+
+    // 第 1 次请求：imageConfig 被拒 → 旧格式重试成功（共 2 次调用）
+    // 第 2 次请求：记住偏好后直接用旧格式，一次成功（第 3 次调用）
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const firstBody = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))
+    const retriedBody = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))
+    const secondRequestBody = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body))
+    expect(firstBody.generationConfig.imageConfig).toBeDefined()
+    expect(retriedBody.generationConfig.responseFormat).toEqual({
+      image: { aspectRatio: '1:1', imageSize: '1K' },
+    })
+    expect(secondRequestBody.generationConfig.responseFormat).toEqual({
+      image: { aspectRatio: '1:1', imageSize: '1K' },
+    })
+    expect(secondRequestBody.generationConfig.imageConfig).toBeUndefined()
+  })
+
+  it('does not retry the alternate shape when the upstream blocks the content', async () => {
+    // 内容审核 400：备用格式过不了审，且会把 imageConfig 挪出 generationConfig，
+    // 导致网关按 1K 档调度、上游按默认 1:1 1K 出图 —— 必须直接报错。
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { code: 400, message: '内容审核未通过，请修改提示词后重试', status: 'INVALID_ARGUMENT' },
+      }), { status: 400 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(callGeminiGenerateContent({
+      apiKey: 'relay-key',
+      baseUrl: 'https://relay.example.com',
+      inputImages: [],
+      model: 'gemini-image',
+      prompt: 'nsfw prompt',
+      signal: new AbortController().signal,
+      size: '3840x2160',
+    })).rejects.toMatchObject({ status: 400, code: 'gemini_upstream_error' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not retry the alternate shape when the upstream blocks with safety keywords', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { code: 400, message: 'Image generation blocked due to PROHIBITED_CONTENT', status: 'INVALID_ARGUMENT' },
+      }), { status: 400 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(callGeminiGenerateContent({
+      apiKey: 'relay-key',
+      baseUrl: 'https://relay.example.com',
+      inputImages: [],
+      model: 'gemini-image',
+      prompt: 'nsfw prompt',
+      signal: new AbortController().signal,
+      size: '3840x2160',
+    })).rejects.toMatchObject({ status: 400, code: 'gemini_upstream_error' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })

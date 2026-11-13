@@ -123,6 +123,7 @@ export const emptyModelDraft: ModelDraft = {
   xhighQualityUpstreamProviderId: null,
   maxQualityUpstreamProviderId: null,
   unsupportedAspectRatios: [],
+  group: '',
   apiProtocol: 'images',
   enabled: true,
   isNew: false,
@@ -195,6 +196,13 @@ export const defaultSettingsDraft: AdminPlatformSettings = {
   r2HubUrl: 'http://127.0.0.1:8100',
   r2HubApiKeyConfigured: false,
   r2HubApiKey: '',
+  chatEnabled: false,
+  chatProviderId: '',
+  chatModel: '',
+  chatSystemPrompt: '',
+  chatMaxRequestsPerMinute: 20,
+  chatCostCredits: 1,
+  chatFreePromotionEnabled: true,
 }
 
 export const adminPageSize = 20

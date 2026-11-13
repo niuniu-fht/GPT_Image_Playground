@@ -1,9 +1,7 @@
-import { zipSync } from 'fflate'
+import { Zip, ZipDeflate } from 'fflate'
 import { getImageRecord } from '../../../lib/db'
 import { getImageExtensionFromMimeType } from '../../../lib/imageMime'
 import type { StoredImage, TaskRecord } from '../../../types'
-
-type ZipFileEntry = Uint8Array | [Uint8Array, { mtime: Date }]
 
 export interface GalleryImageExportResult {
   exportedImageCount: number
@@ -78,14 +76,35 @@ export function countTaskOutputImages(tasks: TaskRecord[]): number {
   return tasks.reduce((sum, task) => sum + task.outputImages.length, 0)
 }
 
-export async function exportGalleryImagesZip(tasks: TaskRecord[]): Promise<GalleryImageExportResult> {
+export async function exportGalleryImagesZip(
+  tasks: TaskRecord[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<GalleryImageExportResult> {
   const exportedAt = Date.now()
   const exportId = `img-${exportedAt.toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-  const zipFiles: Record<string, ZipFileEntry> = {}
+  const totalImages = countTaskOutputImages(tasks)
   const usedFileNames = new Set<string>()
   let exportedImageCount = 0
   let failedImageCount = 0
   let skippedTaskCount = 0
+
+  // 流式打包（fflate Zip）：逐张喂入，内存峰值 ≈ 单张图片；
+  // level 0（仅存储不压缩）——图片本身已是压缩格式，STORE 模式快得多且不阻塞主线程
+  const outputChunks: Uint8Array[] = []
+  let zipError: Error | null = null
+  const zip = new Zip((error, data) => {
+    if (error) {
+      zipError = error
+      return
+    }
+    outputChunks.push(data)
+  })
+
+  const addZipEntry = (filePath: string, bytes: Uint8Array) => {
+    const stream = new ZipDeflate(filePath, { level: 0 })
+    zip.add(stream)
+    stream.push(bytes, true)
+  }
 
   for (let taskIndex = 0; taskIndex < tasks.length; taskIndex += 1) {
     const task = tasks[taskIndex]
@@ -107,11 +126,10 @@ export async function exportGalleryImagesZip(tasks: TaskRecord[]): Promise<Galle
         const mimeType = resolveRecordMimeType(record, blob)
         const extension = getImageExtensionFromMimeType(mimeType)
         const filePath = buildFlatImageFileName(exportId, exportedImageCount, extension, usedFileNames)
-        zipFiles[filePath] = [
-          await blobToBytes(blob),
-          { mtime: new Date(record.createdAt ?? task.createdAt ?? exportedAt) },
-        ]
+        const bytes = await blobToBytes(blob)
+        addZipEntry(filePath, bytes)
         exportedImageCount += 1
+        onProgress?.(exportedImageCount, totalImages)
       } catch (error) {
         console.warn('[gallery-export] image export failed', {
           taskId: task.id,
@@ -120,6 +138,7 @@ export async function exportGalleryImagesZip(tasks: TaskRecord[]): Promise<Galle
           error: buildFailureMessage(error),
         })
         failedImageCount += 1
+        onProgress?.(exportedImageCount + failedImageCount, totalImages)
       }
     }
   }
@@ -133,8 +152,12 @@ export async function exportGalleryImagesZip(tasks: TaskRecord[]): Promise<Galle
     }
   }
 
-  const zipped = zipSync(zipFiles, { level: 6 })
-  const blob = new Blob([zipped.buffer as ArrayBuffer], { type: 'application/zip' })
+  zip.end()
+  if (zipError) {
+    throw zipError
+  }
+
+  const blob = new Blob(outputChunks as BlobPart[], { type: 'application/zip' })
   downloadZip(blob, `gallery-images-${new Date(exportedAt).toISOString().slice(0, 10)}-${exportedAt}.zip`)
 
   return {

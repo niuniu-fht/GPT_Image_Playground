@@ -50,6 +50,25 @@ export function ModelDisplayFields({ draft, setDraft, onError }: ModelDisplayFie
           required
         />
       </label>
+      <label className="block text-xs font-semibold text-gray-500">
+        分组
+        <input
+          value={draft.group ?? ''}
+          onChange={(event) => setDraft((prev) => ({ ...prev, group: event.target.value }))}
+          list="model-group-suggestions"
+          placeholder="例如：GPT / Gemini / Grok / Seedream"
+          className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+        />
+        <datalist id="model-group-suggestions">
+          <option value="GPT" />
+          <option value="Gemini" />
+          <option value="Grok" />
+          <option value="Seedream" />
+        </datalist>
+        <span className="mt-1.5 block text-[11px] font-normal text-gray-400">
+          相同分组的模型会在前台选择器中归到同一分区展示（带分组 logo）。
+        </span>
+      </label>
     </div>
   )
 }

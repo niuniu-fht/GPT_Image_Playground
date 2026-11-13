@@ -26,6 +26,10 @@ interface ReferenceImagesSectionProps {
   onRequestClearAllImages: () => void
   onReopenMaskedEdit: () => void
   onClearMaskedEdit: () => void
+  aiReverse?: {
+    enabled: boolean
+    onReverse: (image: InputImage, index: number) => void
+  }
 }
 
 export default function ReferenceImagesSection({
@@ -50,6 +54,7 @@ export default function ReferenceImagesSection({
   onRequestClearAllImages,
   onReopenMaskedEdit,
   onClearMaskedEdit,
+  aiReverse,
 }: ReferenceImagesSectionProps) {
   return (
     <div className="flex flex-col gap-2">
@@ -80,6 +85,7 @@ export default function ReferenceImagesSection({
             onRemoveInputImage={onRemoveInputImage}
             onMoveInputImage={onMoveInputImage}
             onRequestClearAllImages={onRequestClearAllImages}
+            aiReverse={aiReverse}
           />
         </div>
       ) : (

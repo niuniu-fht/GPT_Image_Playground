@@ -1,5 +1,6 @@
 import { getAllTasks, putTask } from '../lib/db'
 import { PlatformApiError, platformApi } from '../lib/platformApi'
+import { resumeBatchQueueIfAny, cleanupLegacyBatchPlaceholders } from './batchQueue'
 import type { TaskRecord } from '../types'
 import {
   ERROR_LOG_POLL_INTERVAL_MS,
@@ -189,7 +190,11 @@ async function initializeStore() {
 
   void platformApi
     .listModels()
-    .then(({ models }) => useStore.getState().setModels(models))
+    .then(({ models }) => {
+      useStore.getState().setModels(models)
+      // 模型就绪后恢复未跑完的批量队列（页面刷新/关闭后的断点续跑）
+      resumeBatchQueueIfAny('models')
+    })
     .catch(() => {
       useStore.getState().setModels([])
       useStore.getState().showToast('模型列表加载失败，请确认后端服务已启动', 'error')
@@ -203,8 +208,14 @@ async function initializeStore() {
   const tasks = await cleanupExpiredErrorDebugLogs(await getAllTasks())
   useStore.getState().setTasks(tasks)
   repairCategoryStateFromTasks(tasks)
+  resumeBatchQueueIfAny('tasks')
   ensureErrorLogJanitorStarted()
   startGeneratedImagePersistenceRetryWorker()
+  // 申请持久化存储：避免浏览器在磁盘紧张时静默清空本地画廊（尽力而为）
+  void navigator.storage?.persist?.().catch(() => undefined)
+  void cleanupLegacyBatchPlaceholders().catch((error: unknown) => {
+    console.error('[batch-queue] legacy placeholder cleanup failed', error)
+  })
 
   window.setTimeout(() => {
     void cleanupOrphanImages(tasks).finally(() => {

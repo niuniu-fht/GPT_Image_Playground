@@ -602,7 +602,10 @@ export default function AdminConsole() {
         setSelectedAnnouncementIds((prev) => prev.filter((id) => result.items.some((item) => item.id === id)))
         if (selectedAnnouncementId && !result.items.some((item) => item.id === selectedAnnouncementId)) setSelectedAnnouncementId(null)
       }
-      if (nextTab === 'settings') setSettingsDraft((await platformApi.getAdminSettings()).settings)
+      if (nextTab === 'settings') {
+        setSettingsDraft((await platformApi.getAdminSettings()).settings)
+        platformApi.listAdminUpstreams({ pageSize: 100 }).then((result) => setUpstreams(result.items)).catch(() => undefined)
+      }
       if (nextTab === 'audit') {
         const result = await platformApi.listAdminAuditLogs({
           q: auditQuery,
@@ -3157,6 +3160,82 @@ export default function AdminConsole() {
                 className="min-h-[320px] w-full resize-y rounded-xl border border-gray-200 bg-white px-3 py-2 font-mono text-xs leading-5 text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
               />
             </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
+              <div className="mb-4">
+                <div className="text-base font-semibold text-gray-950 dark:text-gray-50">AI 对话（提示词助手）</div>
+                <div className="mt-1 text-sm text-gray-500">独立的文本对话页：优化提示词、上传图片反推提示词、翻译提示词。走所选上游的 OpenAI 兼容 chat 接口，流式输出，暂不扣积分。</div>
+              </div>
+              <label className="flex items-center justify-between rounded-2xl border border-gray-200 px-4 py-3 dark:border-white/[0.08]">
+                <span>
+                  <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">启用 AI 对话</span>
+                  <span className="mt-0.5 block text-xs text-gray-400">总开关：开启后顶部导航出现「AI 对话」入口</span>
+                </span>
+                <input type="checkbox" checked={settingsDraft.chatEnabled} onChange={(event) => setSettingsDraft((prev) => ({ ...prev, chatEnabled: event.target.checked }))} />
+              </label>
+              <label className="mt-3 flex items-center justify-between rounded-2xl border border-gray-200 px-4 py-3 dark:border-white/[0.08]">
+                <span>
+                  <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">限时免费</span>
+                  <span className="mt-0.5 block text-xs text-gray-400">开启 = 前台「AI 优化 / 反推」显示限免角标且不扣积分；关闭 = 按上方单价扣积分并弹确认</span>
+                </span>
+                <input type="checkbox" checked={settingsDraft.chatFreePromotionEnabled} onChange={(event) => setSettingsDraft((prev) => ({ ...prev, chatFreePromotionEnabled: event.target.checked }))} />
+              </label>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="block text-xs font-semibold text-gray-500">
+                  上游服务
+                  <select
+                    value={settingsDraft.chatProviderId}
+                    onChange={(event) => setSettingsDraft((prev) => ({ ...prev, chatProviderId: event.target.value }))}
+                    className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+                  >
+                    <option value="">自动选择（优先级最高且可用的上游）</option>
+                    {upstreams.map((upstream) => (
+                      <option key={upstream.id} value={upstream.id}>{upstream.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-xs font-semibold text-gray-500">
+                  对话模型（chat 模型名）
+                  <input
+                    value={settingsDraft.chatModel}
+                    onChange={(event) => setSettingsDraft((prev) => ({ ...prev, chatModel: event.target.value }))}
+                    placeholder="例如 gpt-4o-mini / gemini-2.5-flash"
+                    className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none placeholder:text-gray-300 focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-600"
+                  />
+                </label>
+                <label className="block text-xs font-semibold text-gray-500">
+                  每分钟对话上限（每用户，0 = 不限）
+                  <input
+                    type="number"
+                    min={0}
+                    max={600}
+                    value={settingsDraft.chatMaxRequestsPerMinute}
+                    onChange={(event) => setSettingsDraft((prev) => ({ ...prev, chatMaxRequestsPerMinute: Number(event.target.value) }))}
+                    className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+                  />
+                </label>
+                <label className="block text-xs font-semibold text-gray-500">
+                  每次消耗积分（0 = 免费）
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={settingsDraft.chatCostCredits}
+                    onChange={(event) => setSettingsDraft((prev) => ({ ...prev, chatCostCredits: Number(event.target.value) }))}
+                    className="mt-1.5 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+                  />
+                </label>
+              </div>
+              <label className="mt-3 block text-xs font-semibold text-gray-500">
+                系统提示词（留空使用默认）
+                <textarea
+                  value={settingsDraft.chatSystemPrompt}
+                  onChange={(event) => setSettingsDraft((prev) => ({ ...prev, chatSystemPrompt: event.target.value }))}
+                  rows={5}
+                  className="mt-1.5 w-full resize-y rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-normal leading-5 text-gray-900 outline-none focus:border-blue-400 dark:border-white/[0.08] dark:bg-gray-950 dark:text-gray-100"
+                />
+              </label>
+            </div>
           </div>
 
           <aside className="h-fit rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/[0.08] dark:bg-white/[0.03]">
@@ -3172,6 +3251,9 @@ export default function AdminConsole() {
               <div className="flex items-center justify-between"><span className="text-gray-500">R2 加速存储</span><StatusBadge tone={settingsDraft.r2UploadEnabled ? 'blue' : 'gray'}>{settingsDraft.r2UploadEnabled ? '启用' : '关闭'}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">R2 上传窗口</span><span className="font-semibold text-gray-900 dark:text-gray-100">{settingsDraft.r2UploadWindowEnabled ? `${settingsDraft.r2UploadWindowStart}~${settingsDraft.r2UploadWindowEnd}` : '不限'}</span></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">r2hub Key</span><StatusBadge tone={settingsDraft.r2HubApiKeyConfigured ? 'green' : 'gray'}>{settingsDraft.r2HubApiKeyConfigured ? '已配置' : '未配置'}</StatusBadge></div>
+              <div className="flex items-center justify-between"><span className="text-gray-500">AI 对话</span><StatusBadge tone={settingsDraft.chatEnabled ? 'blue' : 'gray'}>{settingsDraft.chatEnabled ? '启用' : '关闭'}</StatusBadge></div>
+              <div className="flex items-center justify-between"><span className="text-gray-500">对话模型</span><span className="max-w-[160px] truncate font-semibold text-gray-900 dark:text-gray-100">{settingsDraft.chatModel || '未配置'}</span></div>
+              <div className="flex items-center justify-between"><span className="text-gray-500">AI 限免</span><StatusBadge tone={settingsDraft.chatFreePromotionEnabled ? 'blue' : 'gray'}>{settingsDraft.chatFreePromotionEnabled ? '限免中' : `收费 ${settingsDraft.chatCostCredits} 积分`}</StatusBadge></div>
               <div className="flex items-center justify-between"><span className="text-gray-500">首页轮播</span><StatusBadge tone={settingsDraft.landingHeroSlidesJson.trim() ? 'blue' : 'amber'}>{settingsDraft.landingHeroSlidesJson.trim() ? '已配置' : '待配置'}</StatusBadge></div>
             </div>
             <button className="mt-5 h-10 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-gray-950">保存设置</button>

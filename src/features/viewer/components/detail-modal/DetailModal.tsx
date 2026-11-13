@@ -223,7 +223,7 @@ export default function DetailModal() {
       localErrorLog: task.errorDebug ?? null,
       note: task.errorDebug
         ? null
-        : '本地完整错误日志不存在，可能是旧任务，或该日志已超过 15 天被自动清理。',
+        : '本地完整错误日志不存在，可能是旧任务，或该日志已超过保留期被自动清理。',
     }
 
     try {

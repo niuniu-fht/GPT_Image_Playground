@@ -3,6 +3,7 @@ import CategoryTrack from './CategoryTrack'
 import SearchFilters from './SearchFilters'
 import ViewToggleBar from './ViewToggleBar'
 import { useSearchBarState } from './useSearchBarState'
+import GalleryDeleteAllButton from '../../../gallery/components/GalleryDeleteAllButton'
 import GalleryExportButton from '../../../gallery/components/GalleryExportButton'
 
 export default function SearchBar() {
@@ -81,6 +82,8 @@ export default function SearchBar() {
                 <span>{state.failedActiveCount}</span>
               </button>
             )}
+
+            <GalleryDeleteAllButton />
 
             <GalleryExportButton />
 

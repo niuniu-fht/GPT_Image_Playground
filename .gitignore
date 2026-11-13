@@ -14,3 +14,13 @@ workers/**/.dev.vars
 workers/**/.dev.vars.*
 workers/**/.wrangler/
 workers/square-api/wrangler.jsonc
+
+# 本地私有与临时文件（不提交）
+deploy-config-private/
+deploy-config-production/
+deploy-config-reference.zip
+exports/
+gptcookie.txt
+k12-reg/
+server/tmp/
+server/tsconfig.tsbuildinfo

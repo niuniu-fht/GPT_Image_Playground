@@ -5,7 +5,7 @@ import { resolveAppViewFromPath, resolveAppViewPath, resolveAppViewTitle } from 
 import { Header } from './app/components'
 import FutureFeaturePage from './app/components/FutureFeaturePage'
 import { AdminConsole, AnnouncementModal, AuthModal } from './features/account'
-import { ImageContextMenu, TaskGrid } from './features/gallery'
+import { GalleryCleanupBanner, ImageContextMenu, TaskGrid } from './features/gallery'
 import { InputBar, PromptLibraryDrawer, SearchBar } from './features/input'
 import { LandingPage } from './features/landing'
 import { SettingsModal } from './features/settings'
@@ -179,6 +179,7 @@ export default function App() {
             ) : (
               <>
                 <SearchBar />
+                <GalleryCleanupBanner />
                 <TaskGrid />
               </>
             )}

@@ -52,7 +52,11 @@ export function ModelIconPicker({ value, onChange, onError }: ModelIconPickerPro
                 : 'border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-white/[0.08] dark:text-gray-300 dark:hover:bg-white/[0.06]',
             )}
           >
-            <span className="text-lg">{preset.mark}</span>
+            {preset.brand ? (
+              renderModelIcon(preset.value, 'h-6 w-6')
+            ) : (
+              <span className="text-lg">{preset.mark}</span>
+            )}
             <span>{preset.label}</span>
           </button>
         ))}

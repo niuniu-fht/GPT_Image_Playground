@@ -1767,6 +1767,13 @@ const settingsSchema = z.object({
   r2UploadWindowEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, '时间段格式应为 HH:MM').optional(),
   r2HubUrl: z.string().url().optional().or(z.literal('')),
   r2HubApiKey: z.string().max(4000).optional(),
+  chatEnabled: z.boolean().optional(),
+  chatProviderId: z.string().max(80).optional(),
+  chatModel: z.string().max(120).optional(),
+  chatSystemPrompt: z.string().max(8000).optional(),
+  chatMaxRequestsPerMinute: z.number().int().min(0).max(600).optional(),
+  chatCostCredits: z.number().int().min(0).max(100).optional(),
+  chatFreePromotionEnabled: z.boolean().optional(),
 })
 
 const sub2apiRedeemTestSchema = z.object({

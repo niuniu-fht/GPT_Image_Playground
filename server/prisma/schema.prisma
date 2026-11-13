@@ -148,6 +148,7 @@ model ModelConfig {
   xhighQualityUpstreamProviderId String?
   maxQualityUpstreamProviderId String?
   unsupportedAspectRatios String[] @default([])
+  group                   String   @default("")
   apiProtocol   ApiProtocol      @default(images)
   enabled       Boolean          @default(true)
   isNew         Boolean          @default(false)

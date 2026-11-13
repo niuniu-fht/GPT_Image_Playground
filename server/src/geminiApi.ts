@@ -12,6 +12,19 @@ const SIZE_MULTIPLE = 16
 const MAX_EDGE = 3840
 const MAX_PIXELS = 8_294_400
 
+/** 记住哪些模型的上游不识别 imageConfig（需用旧版 responseFormat），进程内生效。 */
+const preferredLegacyResponseFormatModels = new Set<string>()
+
+// 上游内容审核拦截（NSFW 等）返回的 400：换 responseFormat 旧格式重试同样过不了审，
+// 且备用格式会把 imageConfig 挪出 generationConfig —— 网关读不到就按 1K 档调度低档账号、
+// 上游按默认 1:1 1K 出图（4K 16:9 被静默降级）。审核拦截应直接报错，不做备用格式重试。
+const CONTENT_BLOCK_PATTERN = /内容审核|审核未通过|prohibited|IMAGE_SAFETY|safety|blocked|content.?policy|违规|敏感/i
+
+function shouldRetryAlternateImageFormat(status: number, upstreamMessage: string): boolean {
+  if (status !== 400 && status !== 422) return false
+  return !CONTENT_BLOCK_PATTERN.test(upstreamMessage)
+}
+
 export interface GeminiInputImage {
   data: Buffer
   mimeType: string
@@ -248,14 +261,18 @@ export async function callGeminiGenerateContent(input: GeminiGenerateInput): Pro
     imageConfig,
   }
   let finalPayload: unknown = {}
-  for (const [index, body] of bodies.entries()) {
+  // 部分上游不识别 imageConfig（返回 400/422）。首次撞到即记忆该模型的格式偏好，
+  // 后续请求直接使用正确格式，不再每次先撞一次错误格式。
+  const prefersLegacyFormat = preferredLegacyResponseFormatModels.has(input.model)
+  const bodyOrder = prefersLegacyFormat ? [1, 0] : [0, 1]
+  for (const [attemptIndex, bodyIndex] of bodyOrder.entries()) {
     const response = await fetch(buildGeminiGenerateContentEndpoint(input.baseUrl, input.model), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': input.apiKey,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(bodies[bodyIndex]),
       signal: input.signal,
     })
     const payload = await response.json().catch(() => ({})) as unknown
@@ -263,9 +280,17 @@ export async function callGeminiGenerateContent(input: GeminiGenerateInput): Pro
     if (response.ok) {
       return { images: extractGeminiImages(payload), payload, request }
     }
-    const shouldRetryAlternateFormat = index === 0 && (response.status === 400 || response.status === 422)
+    const shouldRetryAlternateFormat = attemptIndex === 0
+      && shouldRetryAlternateImageFormat(response.status, readGeminiError(payload, response.status))
     if (!shouldRetryAlternateFormat) {
       throw new HttpError(response.status, 'gemini_upstream_error', readGeminiError(payload, response.status))
+    }
+    if (bodyIndex === 0 && !prefersLegacyFormat) {
+      preferredLegacyResponseFormatModels.add(input.model)
+      console.info('[gemini] upstream rejected imageConfig; remembering legacy responseFormat preference', {
+        model: input.model,
+        status: response.status,
+      })
     }
   }
   throw new HttpError(502, 'gemini_upstream_error', readGeminiError(finalPayload, 502))

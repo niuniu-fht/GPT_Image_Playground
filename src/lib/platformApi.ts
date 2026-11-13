@@ -183,6 +183,10 @@ export const platformApi = {
     return request('/api/auth/logout', { method: 'POST' })
   },
 
+  getChatStatus() {
+    return request<{ enabled: boolean; costCredits: number; freePromotion: boolean }>('/api/chat/status')
+  },
+
   fetchRemoteImage(input: { url: string }) {
     return requestBlob('/api/remote-images/fetch', {
       method: 'POST',

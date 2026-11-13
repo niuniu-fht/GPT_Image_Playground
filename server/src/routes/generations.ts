@@ -2,7 +2,7 @@ import { Router } from 'express'
 import type { ApiProtocol, GenerationTask, Prisma } from '@prisma/client'
 import crypto from 'node:crypto'
 import { z } from 'zod'
-import { requireUser, resLocals } from '../auth.js'
+import { requireUser, resLocals, type RequestUser } from '../auth.js'
 import { env } from '../env.js'
 import {
   getGenerationTimeoutMessage,
@@ -515,7 +515,7 @@ async function normalizeImageResponse(
   return images
 }
 
-async function checkModerationRules(prompt: string) {
+export async function checkModerationRules(prompt: string) {
   const rules = await prisma.moderationRule.findMany({
     where: { enabled: true },
     orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
@@ -562,7 +562,7 @@ function shouldRequestExplicitBase64(model: string): boolean {
   return !/^gpt-image(?:$|[-_:/.])/i.test(model.trim())
 }
 
-function resolveEffectiveQuality(model: GenerationModel, quality: string, size: string): string {
+export function resolveEffectiveQuality(model: GenerationModel, quality: string, size: string): string {
   const tier = resolveResolutionTier(size)
   if (!isGptImage2Model(model)) {
     if (isQualityTierEnabled(model, 'medium', tier)) return 'medium'
@@ -1215,8 +1215,6 @@ router.get('/:taskId', requireUser, async (req, res, next) => {
 
 router.post('/', requireUser, async (req, res, next) => {
   const user = resLocals(req).user!
-  let releaseTaskSlot: (() => void) | null = null
-
   try {
     const input = generationSchema.parse(req.body)
     const existingTask = await prisma.generationTask.findUnique({
@@ -1232,57 +1230,178 @@ router.post('/', requireUser, async (req, res, next) => {
       return
     }
 
-    const settings = await getPlatformSettings()
-    if (!settings.generationEnabled) {
-      throw new HttpError(503, 'generation_closed', settings.maintenanceMessage || '当前生成服务维护中，请稍后再试')
+    const result = await createGenerationTaskInternal({
+      user,
+      modelConfigId: input.modelConfigId,
+      prompt: input.prompt,
+      params: {
+        size: input.params.size,
+        quality: input.params.quality,
+        output_format: input.params.output_format,
+        output_compression: input.params.output_compression ?? null,
+        moderation: input.params.moderation,
+        n: input.params.n,
+      },
+      clientRequestId: input.clientRequestId,
+    })
+
+    if (!result.started) {
+      sendOk(res, await buildGenerationTaskResponse(result.task))
+      return
     }
-    const model = await prisma.modelConfig.findFirst({
-      where: { id: input.modelConfigId, enabled: true },
-      include: {
-        upstreamProvider: true,
-        lowQualityUpstreamProvider: true,
-        highQualityUpstreamProvider: true,
-        xhighQualityUpstreamProvider: true,
-        maxQualityUpstreamProvider: true,
+
+    const latestUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { id: true, email: true, role: true, creditBalance: true },
+    })
+
+    sendOk(res, {
+      taskId: result.task.id,
+      status: result.task.status,
+      images: [],
+      model: {
+        id: result.model.id,
+        displayName: result.model.displayName,
+        costCredits: result.costCredits,
+      },
+      user: latestUser ? publicUser(latestUser) : null,
+      responseMeta: {
+        pending: true,
+        generationTimeoutSeconds: result.generationTimeoutSeconds,
+        appliedImageParams: {
+          size: result.generationInput.params.size,
+          quality: result.generationInput.params.quality,
+          output_format: result.generationInput.params.output_format,
+        },
       },
     })
-    if (!model) throw new HttpError(404, 'model_not_found', '模型不可用或不存在')
-    if (model.apiProtocol !== 'images' && model.apiProtocol !== 'gemini') {
-      throw new HttpError(400, 'unsupported_protocol', '当前平台生成任务支持 OpenAI Images 与 Gemini 原生协议')
-    }
-    if (!isModelAspectRatioEnabled(model, input.params.size)) {
-      const ratio = resolveKnownAspectRatio(input.params.size)
-      throw new HttpError(400, 'model_aspect_ratio_disabled', `当前模型未开放 ${ratio} 宽高比`)
-    }
-    const effectiveQuality = resolveEffectiveQuality(model, input.params.quality, input.params.size)
-    const maxInputImages = resolveMaxInputImages(model, effectiveQuality, resolveResolutionTier(input.params.size))
-    if (input.inputImages.length > maxInputImages) {
-      const qualityLabel = effectiveQuality === 'low'
-        ? '低'
-        : effectiveQuality === 'medium'
-          ? '中'
-          : effectiveQuality === 'high'
-            ? '高'
-            : effectiveQuality === 'xhigh'
-              ? '极高'
-              : '最高'
-      throw new HttpError(
-        400,
-        'too_many_input_images',
-        `当前「${qualityLabel} · ${resolveResolutionTier(input.params.size)}」最多支持 ${maxInputImages} 张参考图，本次提交了 ${input.inputImages.length} 张，请移除多余参考图或更换质量/分辨率`,
-      )
-    }
-    await checkModerationRules(input.prompt)
+  } catch (error) {
+    next(error)
+  }
+})
 
-    releaseTaskSlot = reserveGenerationTaskSlot()
-    if (!releaseTaskSlot) {
-      throw new HttpError(429, 'generation_busy', '生成服务繁忙，请稍后重试')
-    }
+export interface CreateGenerationTaskInternalInput {
+  user: RequestUser
+  modelConfigId: string
+  prompt: string
+  params: {
+    size: string
+    quality: string
+    output_format?: string
+    output_compression?: number | null
+    moderation?: string
+    n: number
+  }
+  clientRequestId: string
+  batchId?: string
+}
 
+export interface CreateGenerationTaskInternalResult {
+  taskId: string
+  task: GenerationTask
+  model: GenerationModel
+  costCredits: number
+  generationTimeoutSeconds: number
+  generationInput: PreparedGenerationInput
+  /** false 表示同 clientRequestId 的任务已存在（幂等命中），不会重复扣费 */
+  started: boolean
+}
+
+/**
+ * 服务端内部直接创建并执行一张生成任务（供批量等模块复用，不走 HTTP）。
+ * 抛出 HttpError：429 生成繁忙（调用方可稍后重试）、402 积分不足、400 参数/审核问题等。
+ */
+export async function createGenerationTaskInternal(
+  input: CreateGenerationTaskInternalInput,
+): Promise<CreateGenerationTaskInternalResult> {
+  const parsed = generationSchema.parse({
+    clientRequestId: input.clientRequestId,
+    modelConfigId: input.modelConfigId,
+    prompt: input.prompt,
+    params: {
+      size: input.params.size,
+      quality: input.params.quality,
+      output_format: input.params.output_format ?? 'png',
+      output_compression: input.params.output_compression ?? null,
+      moderation: input.params.moderation ?? 'auto',
+      n: input.params.n,
+    },
+    inputImages: [],
+    editMask: null,
+  })
+
+  const existingTask = await prisma.generationTask.findUnique({
+    where: {
+      userId_clientRequestId: {
+        userId: input.user.id,
+        clientRequestId: parsed.clientRequestId,
+      },
+    },
+  })
+  if (existingTask) {
+    return {
+      taskId: existingTask.id,
+      task: existingTask,
+      model: (await prisma.modelConfig.findFirst({
+        where: { id: existingTask.modelConfigId },
+        include: {
+          upstreamProvider: true,
+          lowQualityUpstreamProvider: true,
+          highQualityUpstreamProvider: true,
+          xhighQualityUpstreamProvider: true,
+          maxQualityUpstreamProvider: true,
+        },
+      })) as GenerationModel,
+      costCredits: existingTask.costCredits,
+      generationTimeoutSeconds: readStoredGenerationTimeoutSeconds(existingTask.params),
+      generationInput: null as unknown as PreparedGenerationInput,
+      started: false,
+    }
+  }
+
+  const settings = await getPlatformSettings()
+  if (!settings.generationEnabled) {
+    throw new HttpError(503, 'generation_closed', settings.maintenanceMessage || '当前生成服务维护中，请稍后再试')
+  }
+  const model = await prisma.modelConfig.findFirst({
+    where: { id: parsed.modelConfigId, enabled: true },
+    include: {
+      upstreamProvider: true,
+      lowQualityUpstreamProvider: true,
+      highQualityUpstreamProvider: true,
+      xhighQualityUpstreamProvider: true,
+      maxQualityUpstreamProvider: true,
+    },
+  })
+  if (!model) throw new HttpError(404, 'model_not_found', '模型不可用或不存在')
+  if (model.apiProtocol !== 'images' && model.apiProtocol !== 'gemini') {
+    throw new HttpError(400, 'unsupported_protocol', '当前平台生成任务支持 OpenAI Images 与 Gemini 原生协议')
+  }
+  if (!isModelAspectRatioEnabled(model, parsed.params.size)) {
+    const ratio = resolveKnownAspectRatio(parsed.params.size)
+    throw new HttpError(400, 'model_aspect_ratio_disabled', `当前模型未开放 ${ratio} 宽高比`)
+  }
+  const effectiveQuality = resolveEffectiveQuality(model, parsed.params.quality, parsed.params.size)
+  const maxInputImages = resolveMaxInputImages(model, effectiveQuality, resolveResolutionTier(parsed.params.size))
+  if (parsed.inputImages.length > maxInputImages) {
+    throw new HttpError(
+      400,
+      'too_many_input_images',
+      `当前档位最多支持 ${maxInputImages} 张参考图，本次提交了 ${parsed.inputImages.length} 张`,
+    )
+  }
+  await checkModerationRules(parsed.prompt)
+
+  let releaseTaskSlot: (() => void) | null = reserveGenerationTaskSlot()
+  if (!releaseTaskSlot) {
+    throw new HttpError(429, 'generation_busy', '生成服务繁忙，请稍后重试')
+  }
+
+  try {
     const generationInput = prepareGenerationInput({
-      ...input,
+      ...parsed,
       params: {
-        ...input.params,
+        ...parsed.params,
         quality: effectiveQuality,
       },
     })
@@ -1297,7 +1416,7 @@ router.post('/', requireUser, async (req, res, next) => {
     try {
       task = await prisma.$transaction(async (tx) => {
         const latestUser = await tx.user.findUnique({
-          where: { id: user.id },
+          where: { id: input.user.id },
           select: { creditBalance: true },
         })
         if (!latestUser) throw new HttpError(401, 'unauthorized', '登录状态已失效')
@@ -1307,13 +1426,13 @@ router.post('/', requireUser, async (req, res, next) => {
 
         const nextBalance = latestUser.creditBalance - costCredits
         await tx.user.update({
-          where: { id: user.id },
+          where: { id: input.user.id },
           data: { creditBalance: nextBalance },
         })
         const createdTask = await tx.generationTask.create({
           data: {
-            userId: user.id,
-            clientRequestId: input.clientRequestId,
+            userId: input.user.id,
+            clientRequestId: parsed.clientRequestId,
             modelConfigId: model.id,
             prompt: generationInput.prompt,
             params: toPrismaJsonValue({
@@ -1322,11 +1441,12 @@ router.post('/', requireUser, async (req, res, next) => {
             }),
             status: 'running',
             costCredits,
+            ...(input.batchId ? { batchId: input.batchId } : {}),
           },
         })
         await tx.creditLedger.create({
           data: {
-            userId: user.id,
+            userId: input.user.id,
             delta: -costCredits,
             reason: `生成消耗：${model.displayName}`,
             taskId: createdTask.id,
@@ -1339,8 +1459,8 @@ router.post('/', requireUser, async (req, res, next) => {
       const concurrentTask = await prisma.generationTask.findUnique({
         where: {
           userId_clientRequestId: {
-            userId: user.id,
-            clientRequestId: input.clientRequestId,
+            userId: input.user.id,
+            clientRequestId: parsed.clientRequestId,
           },
         },
       })
@@ -1354,42 +1474,23 @@ router.post('/', requireUser, async (req, res, next) => {
     if (!shouldStartGeneration) {
       releaseTaskSlot()
       releaseTaskSlot = null
-      sendOk(res, await buildGenerationTaskResponse(task))
-      return
-    }
-
-    const latestUser = await prisma.user.findUnique({
-      where: { id: user.id },
-      select: { id: true, email: true, role: true, creditBalance: true },
-    })
-
-    sendOk(res, {
-      taskId: task.id,
-      status: task.status,
-      images: [],
-      model: {
-        id: model.id,
-        displayName: model.displayName,
+      return {
+        taskId: task.id,
+        task,
+        model,
         costCredits,
-      },
-      user: latestUser ? publicUser(latestUser) : null,
-      responseMeta: {
-        pending: true,
         generationTimeoutSeconds: settings.generationTimeoutSeconds,
-        appliedImageParams: {
-          size: generationInput.params.size,
-          quality: generationInput.params.quality,
-          output_format: generationInput.params.output_format,
-        },
-      },
-    })
+        generationInput,
+        started: false,
+      }
+    }
 
     const taskSlotRelease = releaseTaskSlot
     releaseTaskSlot = null
     setImmediate(() => {
       void runGenerationTask({
         taskId: task.id,
-        userId: user.id,
+        userId: input.user.id,
         generationDeadlineAt: task.createdAt.getTime() + settings.generationTimeoutSeconds * 1000,
         generationInput,
         generationTimeoutSeconds: settings.generationTimeoutSeconds,
@@ -1398,10 +1499,20 @@ router.post('/', requireUser, async (req, res, next) => {
         releaseTaskSlot: taskSlotRelease,
       })
     })
+
+    return {
+      taskId: task.id,
+      task,
+      model,
+      costCredits,
+      generationTimeoutSeconds: settings.generationTimeoutSeconds,
+      generationInput,
+      started: true,
+    }
   } catch (error) {
     releaseTaskSlot?.()
-    next(error)
+    throw error
   }
-})
+}
 
 export default router

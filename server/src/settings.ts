@@ -18,6 +18,13 @@ export interface PlatformSettings {
   r2UploadWindowEnd: string
   r2HubUrl: string
   r2HubApiKey: string
+  chatEnabled: boolean
+  chatProviderId: string
+  chatModel: string
+  chatSystemPrompt: string
+  chatMaxRequestsPerMinute: number
+  chatCostCredits: number
+  chatFreePromotionEnabled: boolean
 }
 
 export interface AdminPlatformSettingsView extends Omit<PlatformSettings, 'sub2apiRedeemToken' | 'r2HubApiKey'> {
@@ -63,6 +70,16 @@ export const defaultLandingHeroSlides = [
   },
 ] satisfies Array<{ id: string; title: string; category: string; imageUrl: string; accent: string }>
 
+export const defaultChatSystemPrompt = [
+  '你是造境 Proxima 的 AI 提示词助手，专注于 AI 绘画提示词的创作与优化。',
+  '你的能力：',
+  '1. 把用户粗糙的描述扩写成高质量生图提示词（补充主体细节、风格、光线、构图、画质词）。',
+  '2. 根据用户上传的图片反推提示词（描述主体、风格、光线、色彩、构图、画质关键词）。',
+  '3. 中英互译提示词，保留专业术语。',
+  '回答默认使用中文。当用户指令要求只输出提示词本身时，严格遵照该指令执行，不要附加解释。',
+  '保持简洁实用。',
+].join('\n')
+
 export const defaultPlatformSettings: PlatformSettings = {
   registerEnabled: true,
   generationEnabled: true,
@@ -80,6 +97,13 @@ export const defaultPlatformSettings: PlatformSettings = {
   r2UploadWindowEnd: '07:00',
   r2HubUrl: env.r2HubUrl,
   r2HubApiKey: env.r2HubApiKey,
+  chatEnabled: false,
+  chatProviderId: '',
+  chatModel: '',
+  chatSystemPrompt: defaultChatSystemPrompt,
+  chatMaxRequestsPerMinute: 20,
+  chatCostCredits: 1,
+  chatFreePromotionEnabled: true,
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean) {
@@ -159,6 +183,16 @@ export async function getPlatformSettings(): Promise<PlatformSettings> {
     r2UploadWindowEnd: normalizeTimeString(map.get('r2UploadWindowEnd') ?? '', defaultPlatformSettings.r2UploadWindowEnd),
     r2HubUrl: map.get('r2HubUrl') ?? defaultPlatformSettings.r2HubUrl,
     r2HubApiKey: map.get('r2HubApiKey') ?? defaultPlatformSettings.r2HubApiKey,
+    chatEnabled: parseBoolean(map.get('chatEnabled'), defaultPlatformSettings.chatEnabled),
+    chatProviderId: map.get('chatProviderId') ?? defaultPlatformSettings.chatProviderId,
+    chatModel: map.get('chatModel') ?? defaultPlatformSettings.chatModel,
+    chatSystemPrompt: map.get('chatSystemPrompt') ?? defaultPlatformSettings.chatSystemPrompt,
+    chatMaxRequestsPerMinute: Math.max(
+      0,
+      Math.round(parseNumber(map.get('chatMaxRequestsPerMinute'), defaultPlatformSettings.chatMaxRequestsPerMinute)),
+    ),
+    chatCostCredits: Math.max(0, Math.round(parseNumber(map.get('chatCostCredits'), defaultPlatformSettings.chatCostCredits))),
+    chatFreePromotionEnabled: parseBoolean(map.get('chatFreePromotionEnabled'), defaultPlatformSettings.chatFreePromotionEnabled),
   }
 }
 
@@ -189,6 +223,17 @@ export async function upsertPlatformSettings(input: Partial<PlatformSettings>) {
   if (typeof input.r2UploadWindowEnd === 'string') entries.push(['r2UploadWindowEnd', normalizeTimeString(input.r2UploadWindowEnd, defaultPlatformSettings.r2UploadWindowEnd)])
   if (typeof input.r2HubUrl === 'string') entries.push(['r2HubUrl', input.r2HubUrl.trim()])
   if (typeof input.r2HubApiKey === 'string') entries.push(['r2HubApiKey', input.r2HubApiKey])
+  if (typeof input.chatEnabled === 'boolean') entries.push(['chatEnabled', String(input.chatEnabled)])
+  if (typeof input.chatProviderId === 'string') entries.push(['chatProviderId', input.chatProviderId.trim()])
+  if (typeof input.chatModel === 'string') entries.push(['chatModel', input.chatModel.trim()])
+  if (typeof input.chatSystemPrompt === 'string') entries.push(['chatSystemPrompt', input.chatSystemPrompt])
+  if (typeof input.chatMaxRequestsPerMinute === 'number') {
+    entries.push(['chatMaxRequestsPerMinute', String(Math.max(0, Math.round(input.chatMaxRequestsPerMinute)))])
+  }
+  if (typeof input.chatCostCredits === 'number') {
+    entries.push(['chatCostCredits', String(Math.max(0, Math.round(input.chatCostCredits)))])
+  }
+  if (typeof input.chatFreePromotionEnabled === 'boolean') entries.push(['chatFreePromotionEnabled', String(input.chatFreePromotionEnabled)])
 
   await prisma.$transaction(
     entries.map(([key, value]) =>
@@ -220,6 +265,13 @@ export async function seedMissingPlatformSettings(input: PlatformSettings) {
     ['r2UploadWindowEnd', normalizeTimeString(input.r2UploadWindowEnd, defaultPlatformSettings.r2UploadWindowEnd)],
     ['r2HubUrl', input.r2HubUrl],
     ['r2HubApiKey', input.r2HubApiKey],
+    ['chatEnabled', String(input.chatEnabled)],
+    ['chatProviderId', input.chatProviderId],
+    ['chatModel', input.chatModel],
+    ['chatSystemPrompt', input.chatSystemPrompt],
+    ['chatMaxRequestsPerMinute', String(input.chatMaxRequestsPerMinute)],
+    ['chatCostCredits', String(input.chatCostCredits)],
+    ['chatFreePromotionEnabled', String(input.chatFreePromotionEnabled)],
   ]
   const existingRows = await prisma.platformSetting.findMany({
     where: { key: { in: entries.map(([key]) => key) } },

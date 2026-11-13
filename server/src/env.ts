@@ -8,7 +8,7 @@ function readNumber(name: string, fallback: number): number {
 }
 
 function readConcurrency(name: string, fallback: number): number {
-  return Math.max(1, Math.min(100, Math.floor(readNumber(name, fallback))))
+  return Math.max(1, Math.min(1000, Math.floor(readNumber(name, fallback))))
 }
 
 function readPositiveInteger(name: string, fallback: number): number {
@@ -35,8 +35,8 @@ export const env = {
     .map((item) => item.trim())
     .filter(Boolean),
   registerBonusCredits: readNumber('REGISTER_BONUS_CREDITS', 100),
-  generationTaskConcurrency: readConcurrency('GENERATION_TASK_CONCURRENCY', 2),
-  generationUpstreamConcurrency: readConcurrency('GENERATION_UPSTREAM_CONCURRENCY', 4),
+  generationTaskConcurrency: readConcurrency('GENERATION_TASK_CONCURRENCY', 500),
+  generationUpstreamConcurrency: readConcurrency('GENERATION_UPSTREAM_CONCURRENCY', 50),
   generatedImageDir: process.env.GENERATED_IMAGE_DIR || './data/generated',
   generatedImageRetentionSeconds: readPositiveInteger('GENERATED_IMAGE_RETENTION_SECONDS', 6 * 60 * 60),
   generatedImageDeliveryGraceSeconds: readPositiveInteger('GENERATED_IMAGE_DELIVERY_GRACE_SECONDS', 15 * 60),

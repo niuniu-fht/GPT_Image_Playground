@@ -19,6 +19,7 @@ import generationsRouter from './routes/generations.js'
 import modelsRouter from './routes/models.js'
 import publicRouter from './routes/public.js'
 import remoteImagesRouter from './routes/remoteImages.js'
+import chatRouter from './routes/chat.js'
 import squareRouter from './routes/square.js'
 import supportRouter from './routes/support.js'
 
@@ -80,6 +81,7 @@ app.use('/api/credits', creditsRouter)
 app.use('/api/support', supportRouter)
 app.use('/api/generations', generationsRouter)
 app.use('/api/remote-images', remoteImagesRouter)
+app.use('/api/chat', chatRouter)
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (error instanceof ZodError) {
@@ -87,6 +89,14 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
     return
   }
   sendError(res, error)
+})
+
+// 生成服务器可用性优先：兜底记录异步异常，避免单个漏网 Promise 击穿进程
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandled promise rejection', reason)
+})
+process.on('uncaughtException', (error) => {
+  console.error('[server] uncaught exception', error)
 })
 
 app.listen(env.port, () => {

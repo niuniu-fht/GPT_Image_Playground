@@ -28,6 +28,20 @@ export type TaskView = 'gallery' | 'trash'
 export type GalleryDisplayMode = 'standard' | 'image'
 export type AppThemeMode = 'system' | 'light' | 'dark'
 export type AppView = 'home' | 'local' | 'square' | 'models' | 'assets'
+
+export interface ChatImageAttachment {
+  id: string
+  /** data URL，随消息发送给上游做视觉理解（反推提示词） */
+  dataUrl: string
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  /** 用户消息的纯文本；assistant 为流式累积文本 */
+  text: string
+  /** 用户消息携带的图片 */
+  images: ChatImageAttachment[]
+}
 export type SquareShareKind = 'image' | 'task' | 'prompt'
 export type SquareShareStatus = 'published' | 'pending_review' | 'hidden' | 'deleted' | 'rejected'
 
@@ -195,6 +209,8 @@ export interface ModelConfig {
   xhighQualityUpstreamProviderId?: string | null
   maxQualityUpstreamProviderId?: string | null
   unsupportedAspectRatios: string[]
+  /** 模型分组（选择器分区展示）：如 GPT / Gemini / Grok / Seedream */
+  group?: string
   apiProtocol: ApiProtocol
   enabled: boolean
   isNew: boolean
@@ -710,8 +726,7 @@ export interface AdminSquareShare {
   coverAsset?: SquareShareAssetSummary | null
 }
 
-export interface AdminPlatformSettings {
-  registerEnabled: boolean
+export interface AdminPlatformSettings {  registerEnabled: boolean
   generationEnabled: boolean
   generationTimeoutSeconds: number
   registerBonusCredits: number
@@ -729,6 +744,13 @@ export interface AdminPlatformSettings {
   r2HubUrl: string
   r2HubApiKeyConfigured: boolean
   r2HubApiKey?: string
+  chatEnabled: boolean
+  chatProviderId: string
+  chatModel: string
+  chatSystemPrompt: string
+  chatMaxRequestsPerMinute: number
+  chatCostCredits: number
+  chatFreePromotionEnabled: boolean
 }
 
 export interface CategoryConfig {
