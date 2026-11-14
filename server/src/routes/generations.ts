@@ -1243,6 +1243,8 @@ router.post('/', requireUser, async (req, res, next) => {
         n: input.params.n,
       },
       clientRequestId: input.clientRequestId,
+      inputImages: input.inputImages,
+      editMask: input.editMask,
     })
 
     if (!result.started) {
@@ -1294,6 +1296,12 @@ export interface CreateGenerationTaskInternalInput {
   }
   clientRequestId: string
   batchId?: string
+  inputImages?: Array<{ id: string; dataUrl: string }>
+  editMask?: {
+    dataUrl: string
+    sourceImageId?: string | null
+    selection?: unknown
+  } | null
 }
 
 export interface CreateGenerationTaskInternalResult {
@@ -1326,8 +1334,8 @@ export async function createGenerationTaskInternal(
       moderation: input.params.moderation ?? 'auto',
       n: input.params.n,
     },
-    inputImages: [],
-    editMask: null,
+    inputImages: input.inputImages ?? [],
+    editMask: input.editMask ?? null,
   })
 
   const existingTask = await prisma.generationTask.findUnique({
